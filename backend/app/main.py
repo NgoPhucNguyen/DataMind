@@ -32,10 +32,6 @@ app.add_middleware(
 async def health():
     return {"status": "ok", "message": "DataMind API is running"}
 
-@app.get("/docs")
-async def docs():
-    return {"message": "API Documentation available at /docs"}
-
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
