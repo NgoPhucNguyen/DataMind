@@ -4,6 +4,8 @@ from contextlib import asynccontextmanager
 import os
 from dotenv import load_dotenv
 
+from app.routers import auth as auth_router
+
 load_dotenv(".env.local")
 
 @asynccontextmanager
@@ -27,6 +29,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(auth_router.router, prefix="/api/v1")
+
 
 @app.get("/health")
 async def health():
