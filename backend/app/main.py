@@ -21,14 +21,17 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-CORS_ORIGINS = [
-    "http://localhost:3000",
-    "http://localhost:5173"
-]
+raw_frontend_urls = os.getenv(
+    "FRONTEND_URLS", 
+    "http://localhost:3000,http://localhost:5173"
+)
+
+# 🛠️ Parse the comma-separated string into a python list
+FRONTEND_URLS = [url.strip() for url in raw_frontend_urls.split(",")]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=CORS_ORIGINS,
+    allow_origins=FRONTEND_URLS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
