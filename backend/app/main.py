@@ -9,7 +9,6 @@ from app.routers import auth as auth_router
 from app.routers import credits as credits_router
 from app.routers import packages as packages_router
 
-load_dotenv(".env.local")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
