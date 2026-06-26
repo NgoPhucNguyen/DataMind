@@ -5,6 +5,8 @@ import Register from "./pages/Register";
 import Home from "./pages/Home";
 import Pricing from "./pages/Pricing";
 import Wallet from "./pages/Wallet";
+import Profiler from "./pages/Profiler";
+
 
 function App() {
   return (
@@ -13,7 +15,7 @@ function App() {
 
         <Route
           path="/"
-          element={<Navigate to="/login" />}
+          element={<Navigate to="/home" />}
         />
 
         <Route
@@ -39,6 +41,11 @@ function App() {
         <Route
           path="/wallet"
           element={<Wallet />}
+        />
+
+        <Route
+          path="/profiler"
+          element={<Profiler />}
         />
 
       </Routes>
