@@ -6,24 +6,34 @@ const api = axios.create({
     headers: {
         "Content-Type": "application/json",
     },
-    withCredentials: true, 
+    withCredentials: true,
 });
 
-// 2. Thêm "Bảo vệ gác cổng" trước khi gửi Request đi
+// 2. Request interceptor — đính kèm Bearer token
 api.interceptors.request.use(
     (config) => {
-        // Lục ví (localStorage) xem có thẻ (token) không
         const token = localStorage.getItem("token");
-        
-        // Nếu có thẻ, kẹp thẻ vào phần Headers của chuyến xe
         if (token) {
             config.headers.Authorization = `Bearer ${token}`;
         }
         return config;
     },
+    (error) => Promise.reject(error)
+);
+
+// 3. Response interceptor — xử lý 401 tự động logout
+api.interceptors.response.use(
+    (response) => response,
     (error) => {
+        if (error.response?.status === 401) {
+            localStorage.removeItem("token");
+            // Chuyển hướng về login, tránh loop nếu đang ở trang login
+            if (!window.location.pathname.startsWith("/login")) {
+                window.location.href = "/login";
+            }
+        }
         return Promise.reject(error);
     }
 );
 
-export default api;
+export default api;
