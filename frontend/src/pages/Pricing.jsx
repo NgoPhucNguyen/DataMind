@@ -81,27 +81,7 @@ export default function Pricing() {
                 </div>
             )}
 
-            {/* Header */}
-            <header className="border-b border-white/10 px-6 py-4 flex justify-between items-center">
-                <button
-                    onClick={() => navigate("/home")}
-                    className="flex items-center gap-2 text-white/60 hover:text-white text-sm transition-colors"
-                >
-                    ← Về trang chủ
-                </button>
-                <span className="text-lg font-bold tracking-tight text-white">
-                    DataMind<span className="text-violet-400">.</span>
-                </span>
-                <button
-                    onClick={() => navigate("/wallet")}
-                    className="flex items-center gap-2 bg-white/10 hover:bg-white/15 border border-white/10 rounded-lg px-4 py-2 text-sm transition-all"
-                >
-                    <span className="text-violet-400">💳</span>
-                    <span className="font-mono">
-                        {wallet ? formatCredits(wallet.balance) : "---"} credits
-                    </span>
-                </button>
-            </header>
+           
 
             <main className="max-w-5xl mx-auto px-6 py-16">
                 {/* Hero */}

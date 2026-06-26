@@ -37,18 +37,7 @@ export default function Login() {
 
   return (
     <div className="min-h-screen bg-[#0B0F1A] text-white flex flex-col">
-      {/* Navbar minimal */}
-      <header className="px-6 py-4 flex justify-between items-center border-b border-white/10">
-        <Link to="/" className="text-lg font-bold tracking-tight">
-          DataMind<span className="text-violet-400">.</span>
-        </Link>
-        <Link
-          to="/register"
-          className="text-sm text-white/50 hover:text-white transition-colors"
-        >
-          Chưa có tài khoản? <span className="text-violet-400 font-medium">Đăng ký</span>
-        </Link>
-      </header>
+     
 
       {/* Form */}
       <div className="flex-1 flex items-center justify-center px-4 py-12">
