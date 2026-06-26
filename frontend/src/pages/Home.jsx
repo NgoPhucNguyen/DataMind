@@ -10,18 +10,7 @@ export default function Home() {
 
     return (
         <div className="min-h-screen bg-[#0B0F1A] text-white flex flex-col">
-            {/* Header */}
-            <header className="border-b border-white/10 px-6 py-4 flex justify-between items-center">
-                <span className="text-lg font-bold tracking-tight">
-                    DataMind<span className="text-violet-400">.</span>
-                </span>
-                <button
-                    onClick={handleLogout}
-                    className="text-sm text-white/50 hover:text-white transition-colors"
-                >
-                    Đăng xuất
-                </button>
-            </header>
+           
 
             {/* Main */}
             <div className="flex-1 flex flex-col items-center justify-center gap-6 px-6">
