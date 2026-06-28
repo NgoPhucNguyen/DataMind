@@ -208,8 +208,7 @@ function ModeSelector({ onSelect }) {
     </Card>
   );
 }
-
-function DiffReportView({ diff, filename, onConfirm, onBack, confirming }) {
+function DiffReportView({ diff, validationState, filename, onConfirm, onBack, confirming }) {
   const rows = [
     { label: "Dòng trùng bị xóa", value: diff.duplicate_rows_removed, warn: diff.duplicate_rows_removed > 0 },
     { label: "Dòng còn lại", value: `${diff.original_rows} → ${diff.clean_rows}` },
@@ -298,6 +297,26 @@ function DiffReportView({ diff, filename, onConfirm, onBack, confirming }) {
           <p className="text-sm text-muted">Không có thay đổi nào được thực hiện.</p>
         )}
       </Card>
+
+      {/* Warnings Banner */}
+      {validationState?.warnings?.length > 0 && (
+        <div className="bg-[#FBF3DB] border border-[#f0dda0] rounded-xl p-4">
+          <div className="flex items-start gap-3">
+            <span className="text-xl shrink-0">⚠️</span>
+            <div>
+              <p className="font-semibold text-[#956400] text-sm mb-1">Cảnh báo về chất lượng dữ liệu</p>
+              <ul className="space-y-1">
+                {validationState.warnings.map(w => (
+                  <li key={w.code} className="text-xs text-[#956400]/80">
+                    <span className="font-medium">• {w.message}</span>
+                    {w.impact && <span className="block ml-2 opacity-80 mt-0.5">↳ Ảnh hưởng: {w.impact}</span>}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Action buttons */}
       <div className="flex items-center justify-between gap-3">
@@ -447,6 +466,7 @@ export default function Cleaner() {
   const [issues, setIssues] = useState(null);
   const [selectedMode, setSelectedMode] = useState(null);
   const [diffReport, setDiffReport] = useState(null);
+  const [validationState, setValidationState] = useState(null);
   const [confirmedResult, setConfirmedResult] = useState(null);
   const [loadingMsg, setLoadingMsg] = useState("Đang quét vấn đề dữ liệu...");
   const [error, setError] = useState(null);
@@ -519,6 +539,20 @@ export default function Cleaner() {
       setStep("cleaning");
       const res = await autoClean(fileHash, overrides);
       setDiffReport(res.data.diff_report);
+      // Nếu có lỗi cứng, server đã quăng 422, hoặc trả về validation=False (tùy cài đặt)
+      // Nhưng theo backend mới, nó trả validation về đây
+      if (res.data.validation && !res.data.validation.can_proceed) {
+        const err = res.data.validation.hard_blocks[0]?.message || "Lỗi dữ liệu nghiêm trọng.";
+        setError(err);
+        showToast(err, "error");
+        setStep("error");
+        return;
+      }
+      
+      // Update session with validation capabilities/warnings early or wait for confirm
+      // Tốt nhất là lưu vào state tạm để hiện ở DiffReport
+      setValidationState(res.data.validation);
+      
       setStep("reviewing_diff");
     } catch (err) {
       const msg = err?.response?.data?.detail || "Có lỗi khi làm sạch dữ liệu.";
@@ -684,6 +718,7 @@ export default function Cleaner() {
             {step === "reviewing_diff" && diffReport && (
               <DiffReportView
                 diff={diffReport}
+                validationState={validationState}
                 filename={fileName}
                 onConfirm={handleConfirmClean}
                 onBack={() => setStep("choosing_mode")}
@@ -696,7 +731,11 @@ export default function Cleaner() {
                 result={confirmedResult}
                 onGoHome={() => navigate("/home")}
                 onGoVisualize={() => {
-                  updateFileSession({ sessionId: confirmedResult.session_id });
+                  updateFileSession({ 
+                    sessionId: confirmedResult.session_id,
+                    capabilities: confirmedResult.validation?.capabilities || null,
+                    warnings: confirmedResult.validation?.warnings || []
+                  });
                   navigate("/ua_visualize");
                 }}
               />

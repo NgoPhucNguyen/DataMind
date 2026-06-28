@@ -11,6 +11,8 @@ export function FileSessionProvider({ children }) {
     sessionId: null,
     statisticalSummary: null,
     confirmedCharts: null,
+    capabilities: null,
+    warnings: [],
   });
 
   const updateFileSession = (updates) => {
@@ -26,6 +28,8 @@ export function FileSessionProvider({ children }) {
       sessionId: null,
       statisticalSummary: null,
       confirmedCharts: null,
+      capabilities: null,
+      warnings: [],
     });
   };
 

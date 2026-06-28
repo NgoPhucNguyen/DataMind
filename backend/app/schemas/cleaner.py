@@ -5,8 +5,8 @@ Pydantic models cho Module 2 — Data Cleaner.
 
 Flow:
   1. POST /files/detect-issues  → IssueReport
-  2. POST /files/auto-clean     → AutoCleanResponse (DiffReport)
-  3. POST /files/confirm-clean  → CleanDatasetResponse
+  2. POST /files/auto-clean     → AutoCleanResponse (DiffReport + ValidationResult)
+  3. POST /files/confirm-clean  → CleanDatasetResponse (+ ValidationResult)
 """
 
 from pydantic import BaseModel
@@ -102,11 +102,39 @@ class DiffReport(BaseModel):
     encoding_fixed: dict[str, int]            # {"name": 8}
 
 
+# ─── ValidationResult (kết quả validate 2 tầng) ──────────────────────────
+
+class HardBlock(BaseModel):
+    """Lỗi nghiêm trọng — không cho đi tiếp."""
+    code: str
+    message: str
+
+
+class ValidationWarning(BaseModel):
+    """Cảnh báo — cho đi tiếp nhưng hiện thông báo."""
+    code: str
+    message: str
+    impact: str | None = None
+
+
+class ValidationResult(BaseModel):
+    """
+    Kết quả validate 2 tầng:
+      - can_proceed=False + hard_blocks → chặn hoàn toàn
+      - can_proceed=True  + warnings    → cho đi tiếp, hiện cảnh báo
+      - capabilities: chart types khả dụng cho Module 3
+    """
+    can_proceed: bool
+    hard_blocks: list[HardBlock] = []
+    warnings: list[ValidationWarning] = []
+    capabilities: dict[str, bool] = {}
+
+
 class AutoCleanResponse(BaseModel):
     """Response đầy đủ sau khi auto-clean (chưa confirm)."""
     file_hash: str
     diff_report: DiffReport
-    # preview_url: str | None = None  # Tương lai: Supabase signed URL để preview
+    validation: ValidationResult | None = None
 
 
 # ─── summary_for_module3 ──────────────────────────────────────────────────
@@ -137,3 +165,4 @@ class CleanDatasetResponse(BaseModel):
     summary_for_module3: SummaryForModule3
     clean_mode: str                # "auto" | "manual"
     confirmed_at: str              # ISO datetime string
+    validation: ValidationResult | None = None

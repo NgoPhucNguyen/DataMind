@@ -24,23 +24,34 @@ _FILE_BYTES_TTL = 3600     # 1 giờ — đủ cho session làm sạch
 
 def _get_client():
     """
-    Khởi tạo Upstash Redis client từ REDIS_URL.
-    Upstash dùng HTTP REST, nên URL có dạng: https://...upstash.io
-    Redis local dùng: redis://localhost:6379
+    Khởi tạo Redis client từ REDIS_URL.
+
+    Hỗ trợ 3 dạng URL:
+      - https://...   → Upstash HTTP REST (upstash_redis)
+      - rediss://...  → Upstash TCP with SSL (redis-py, production trên Render)
+      - redis://...   → Local Redis TCP (redis-py, dev local)
     """
     redis_url = os.getenv("REDIS_URL", "")
     if not redis_url:
         return None
 
     try:
-        # Upstash Redis (HTTP REST) — dùng khi deploy
-        if redis_url.startswith("https://") or redis_url.startswith("rediss://"):
+        if redis_url.startswith("https://"):
+            # Upstash Redis (HTTP REST)
             from upstash_redis import Redis
             token = os.getenv("UPSTASH_REDIS_REST_TOKEN", "")
-            # Nếu URL dạng https://..., dùng upstash_redis
             return Redis(url=redis_url, token=token)
 
-        # Local Redis (TCP) — dùng khi dev local
+        if redis_url.startswith("rediss://"):
+            # Upstash TCP with SSL (production) — cần ssl_cert_reqs=None
+            import redis as redis_lib
+            return redis_lib.from_url(
+                redis_url,
+                decode_responses=True,
+                ssl_cert_reqs=None,
+            )
+
+        # Local Redis (TCP, không SSL)
         import redis as redis_lib
         return redis_lib.from_url(redis_url, decode_responses=True)
 

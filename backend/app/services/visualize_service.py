@@ -1,13 +1,20 @@
 import pandas as pd
 import numpy as np
+from app.services import cleaner_service
 
-def compute_statistics(df: pd.DataFrame) -> dict:
+def compute_statistics(df: pd.DataFrame, warnings: list = None) -> dict:
+    if warnings is None:
+        warnings = []
+        
+    report_header = cleaner_service.build_report_header(warnings, len(df))
+    
     summary = {
         "shape": [len(df), len(df.columns)],
         "computed_at": pd.Timestamp.utcnow().isoformat(),
         "columns": {},
         "correlation_matrix": {},
-        "top_correlations": []
+        "top_correlations": [],
+        "report_header": report_header,
     }
     
     numeric_cols = []

@@ -7,7 +7,8 @@ KHÔNG hardcode tên cột — toàn bộ là dynamic iteration.
 3 hàm chính:
   - detect_issues(df, overridden_types)  → dict (IssueReport-compatible)
   - auto_clean(df, overridden_types)     → (cleaned_df, dict DiffReport-compatible)
-  - validate_clean_dataset(df)           → (is_valid: bool, reason: str | None)
+  - validate_clean_dataset(df)           → dict (can_proceed, hard_blocks, warnings, capabilities)
+  - build_report_header(warnings, count) → dict (blocked, reason/disclaimer)
 """
 
 import logging
@@ -291,37 +292,94 @@ def auto_clean(
 
 # ─── validate_clean_dataset ─────────────────────────────────────────────────
 
-def validate_clean_dataset(df: pd.DataFrame) -> tuple[bool, str | None]:
+def validate_clean_dataset(df: pd.DataFrame) -> dict:
     """
-    Kiểm tra 5 điều kiện bắt buộc trước khi cho phép confirm và chuyển sang Module 3.
+    Kiểm tra dataset sau khi clean bằng hệ thống 2 tầng:
+      - hard_blocks: lỗi nghiêm trọng, không cho đi tiếp
+      - warnings: cảnh báo, cho đi tiếp nhưng thông báo cho user
 
-    Returns:
-        (True, None) nếu hợp lệ.
-        (False, "lý do") nếu vi phạm.
+    Trả về dict:
+      {
+        "can_proceed": bool,
+        "hard_blocks": [...],
+        "warnings": [...],
+        "capabilities": {...}
+      }
     """
-    # 1. Tối thiểu 10 dòng
-    if len(df) < 10:
-        return False, (
-            f"File này chỉ có {len(df)} dòng dữ liệu hợp lệ sau khi làm sạch (yêu cầu tối thiểu 10 dòng).\n"
-            "Nguyên nhân có thể do file có quá nhiều cột/dòng trống.\n"
-            "Vui lòng kiểm tra lại file hoặc upload file khác."
+    hard_blocks = []
+    warnings = []
+
+    # ── HARD BLOCK — chắc chắn crash nếu cho đi tiếp ──────────────────
+    if len(df) == 0:
+        hard_blocks.append({
+            "code": "EMPTY_DATASET",
+            "message": "Dataset không có dòng dữ liệu nào"
+        })
+
+    dupes = [c for c in df.columns if df.columns.tolist().count(c) > 1]
+    if dupes:
+        hard_blocks.append({
+            "code": "DUPLICATE_COLUMNS",
+            "message": f"Cột trùng tên: {', '.join(set(dupes))}"
+        })
+
+    # ── WARNING — cho đi tiếp nhưng cảnh báo ──────────────────────────
+    if 0 < len(df) < 10:
+        warnings.append({
+            "code": "LOW_ROW_COUNT",
+            "message": f"Dataset chỉ có {len(df)} dòng",
+            "impact": "Correlation và thống kê suy diễn không có ý nghĩa"
+        })
+
+    numeric_cols = df.select_dtypes(include='number').columns.tolist()
+    if len(numeric_cols) == 0:
+        warnings.append({
+            "code": "NO_NUMERIC_COLUMNS",
+            "message": "Không có cột số",
+            "impact": "Chỉ có thể vẽ Bar Chart và Pie Chart"
+        })
+
+    # ── CAPABILITIES — tính dựa trên dataset properties ────────────────
+    capabilities = {
+        "bar_chart": len(df) >= 1,
+        "pie_chart": len(df) >= 1,
+        "histogram": len(numeric_cols) >= 1 and len(df) >= 5,
+        "box_plot": len(numeric_cols) >= 1,
+        "correlation": len(numeric_cols) >= 2 and len(df) >= 10,
+        "scatter": len(numeric_cols) >= 2,
+        "line_chart": len(df) >= 2,
+    }
+
+    return {
+        "can_proceed": len(hard_blocks) == 0,
+        "hard_blocks": hard_blocks,
+        "warnings": warnings,
+        "capabilities": capabilities,
+    }
+
+
+# ─── build_report_header ────────────────────────────────────────────────────
+
+def build_report_header(warnings: list, row_count: int) -> dict:
+    """
+    Tạo header cho báo cáo/export.
+    Nếu dataset quá nhỏ → block; nếu có warning LOW_ROW_COUNT → disclaimer.
+    """
+    if row_count < 2:
+        return {"blocked": True, "reason": "Không đủ dữ liệu để tạo báo cáo"}
+
+    disclaimer = None
+    if any(
+        (isinstance(w, dict) and w.get("code") == "LOW_ROW_COUNT") or 
+        (hasattr(w, "code") and w.code == "LOW_ROW_COUNT") 
+        for w in warnings
+    ):
+        disclaimer = (
+            f"⚠ Báo cáo được tạo từ dataset chỉ có {row_count} dòng. "
+            "Kết quả mang tính tham khảo."
         )
 
-    # 2. Tối thiểu 1 cột numeric
-    numeric_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
-    if not numeric_cols:
-        return False, "Dataset không có cột số nào sau khi làm sạch. Module 3 cần ít nhất 1 cột numeric."
-
-    # 3. Không có cột 100% null
-    all_null_cols = [c for c in df.columns if df[c].isna().all()]
-    if all_null_cols:
-        return False, f"Các cột sau đây 100% null sau khi làm sạch: {', '.join(all_null_cols)}."
-
-    # 4. Không có cột trùng tên
-    if len(df.columns) != len(set(df.columns)):
-        return False, "Dataset có cột trùng tên."
-
-    return True, None
+    return {"blocked": False, "disclaimer": disclaimer}
 
 
 # ─── build_summary_for_module3 ──────────────────────────────────────────────

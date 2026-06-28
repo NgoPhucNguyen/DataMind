@@ -23,6 +23,7 @@ from app.schemas.cleaner import (
     IssueDetectRequest, IssueReport,
     AutoCleanRequest, AutoCleanResponse, DiffReport,
     ConfirmCleanRequest, CleanDatasetResponse, SummaryForModule3,
+    ValidationResult,
 )
 from app.services import profiler_service, llm_service, cleaner_service
 
@@ -202,8 +203,8 @@ def _load_df_from_cache(file_hash: str) -> tuple[pd.DataFrame, str, str]:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=(
-                "Không tìm thấy file trong bộ nhớ tạm. "
-                "Phiên làm việc đã hết hạn (>1 giờ), vui lòng upload lại file."
+                "Phiên làm việc đã hết hạn hoặc file không tìm thấy. "
+                "Vui lòng upload lại."
             ),
         )
     file_bytes = io.BytesIO(cached["bytes"])
@@ -273,13 +274,13 @@ async def auto_clean(
         overridden_types=body.overridden_types,
     )
 
-    # Kiểm tra gàng buộc trước khi cho phép xác nhận
-    is_valid, reason = cleaner_service.validate_clean_dataset(cleaned_df)
-    if not is_valid:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=reason,
-        )
+    # Kiểm tra gàng buộc sau khi clean
+    validation_dict = cleaner_service.validate_clean_dataset(cleaned_df)
+    validation_res = ValidationResult(**validation_dict)
+
+    # Nếu có lỗi cứng, có thể block luôn ở server nếu muốn (tuỳ business logic).
+    # Nhưng theo yêu cầu, frontend sẽ đọc can_proceed để hiển thị lỗi. 
+    # Ta vẫn nên trả về 200 kèm validation result để UI vẽ lỗi rõ ràng.
 
     # Cache kết quả DataFrame đã clean (1h) để confirm step dùng
     import io as _io
@@ -297,6 +298,7 @@ async def auto_clean(
     return AutoCleanResponse(
         file_hash=body.file_hash,
         diff_report=DiffReport(**diff_raw),
+        validation=validation_res,
     )
 
 
@@ -326,8 +328,12 @@ async def confirm_clean(
     )
 
     # Validate cuối
-    is_valid, reason = cleaner_service.validate_clean_dataset(cleaned_df)
-    if not is_valid:
+    validation_dict = cleaner_service.validate_clean_dataset(cleaned_df)
+    validation_res = ValidationResult(**validation_dict)
+    
+    if not validation_res.can_proceed:
+        # Lấy thông báo lỗi đầu tiên để show, thực tế có list lỗi trong hard_blocks
+        reason = validation_res.hard_blocks[0].message if validation_res.hard_blocks else "Dữ liệu không hợp lệ."
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=reason,
@@ -364,6 +370,7 @@ async def confirm_clean(
         summary_for_module3=SummaryForModule3(**summary),
         clean_mode=body.clean_mode,
         confirmed_at=confirmed_at,
+        validation=validation_res,
     )
 
 #Need checking!

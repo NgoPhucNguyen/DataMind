@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 class ComputeRequest(BaseModel):
     session_id: str
+    warnings: list = []
 
 @router.post("/compute", summary="Tính toán các thống kê cho module trực quan hóa")
 async def compute(
@@ -34,7 +35,7 @@ async def compute(
         raise HTTPException(status_code=400, detail="Lỗi khi đọc dữ liệu để tính toán.")
         
     try:
-        summary = visualize_service.compute_statistics(df)
+        summary = visualize_service.compute_statistics(df, warnings=body.warnings)
     except Exception as e:
         logger.error(f"Error computing statistics: {e}")
         raise HTTPException(status_code=500, detail="Lỗi trong quá trình tính toán thống kê.")

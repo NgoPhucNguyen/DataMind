@@ -201,7 +201,10 @@ export default function Visualize() {
     const fetchStats = async () => {
       setLoading(true);
       try {
-        const res = await api.post("/visualize/compute", { session_id: fileSession.sessionId });
+        const res = await api.post("/visualize/compute", { 
+          session_id: fileSession.sessionId,
+          warnings: fileSession.warnings || []
+        });
         
         const summary = res.data;
         updateFileSession({ statisticalSummary: summary });
@@ -209,11 +212,19 @@ export default function Visualize() {
         const generated = generateCharts(summary);
         setCharts(generated);
         
-        // Mặc định chọn top 3 của phân phối + heatmap
+        // Mặc định chọn top 3 của phân phối + heatmap (nếu có khả năng)
         const initialSelected = new Set();
-        generated.distribution.slice(0, 3).forEach(c => initialSelected.add(c.id));
-        if (generated.correlation[0]) initialSelected.add(generated.correlation[0].id);
-        if (generated.time[0]) initialSelected.add(generated.time[0].id);
+        generated.distribution.slice(0, 3).forEach(c => {
+          if (!fileSession.capabilities || (c.type === "histogram" ? fileSession.capabilities.histogram : true)) {
+            initialSelected.add(c.id);
+          }
+        });
+        if (generated.correlation[0] && (!fileSession.capabilities || fileSession.capabilities.correlation)) {
+          initialSelected.add(generated.correlation[0].id);
+        }
+        if (generated.time[0] && (!fileSession.capabilities || fileSession.capabilities.line_chart)) {
+          initialSelected.add(generated.time[0].id);
+        }
         
         setSelectedChartIds(initialSelected);
 
@@ -315,21 +326,55 @@ export default function Visualize() {
           <p className="text-muted text-sm">Hệ thống đã tự động chọn và xếp hạng các biểu đồ thú vị nhất. Bạn có thể chọn biểu đồ để đưa vào báo cáo cuối cùng.</p>
         </div>
 
+        {/* Capability Summary (Feature 2) */}
+        {fileSession.capabilities && (
+          <div className="bg-white/5 border border-white/10 rounded-xl p-5 mb-6">
+            <h2 className="text-sm font-semibold mb-3 flex items-center justify-between">
+              <span>Đánh giá khả năng trực quan hóa</span>
+              {fileSession.warnings?.some(w => w.code === "LOW_ROW_COUNT") && (
+                <span className="text-xs font-normal text-amber-400 bg-amber-400/10 px-2 py-0.5 rounded flex items-center gap-1">
+                  <span>⚠️</span> Dữ liệu ít, kết quả mang tính tham khảo
+                </span>
+              )}
+            </h2>
+            <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
+              <span className={`flex items-center gap-1.5 ${fileSession.capabilities.histogram ? 'text-emerald-400' : 'text-rose-400/80'}`}>
+                {fileSession.capabilities.histogram ? '✅' : '❌'} Phân phối
+              </span>
+              <span className={`flex items-center gap-1.5 ${fileSession.capabilities.correlation ? 'text-emerald-400' : 'text-rose-400/80'}`}>
+                {fileSession.capabilities.correlation ? '✅' : '❌'} Tương quan
+              </span>
+              <span className={`flex items-center gap-1.5 ${fileSession.capabilities.line_chart ? 'text-emerald-400' : 'text-rose-400/80'}`}>
+                {fileSession.capabilities.line_chart ? '✅' : '❌'} Theo thời gian
+              </span>
+            </div>
+          </div>
+        )}
+
         {/* Tabs */}
         <div className="flex gap-2 border-b border-white/10 mb-6 pb-1 overflow-x-auto">
           {[
             { id: "distribution", label: `Phân phối (${charts.distribution.length})` },
             { id: "correlation", label: `Tương quan (${charts.correlation.length})` },
             { id: "time", label: `Theo thời gian (${charts.time.length})` },
-          ].map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`px-4 py-2 text-sm font-medium whitespace-nowrap transition-colors border-b-2 ${activeTab === tab.id ? "border-violet-500 text-violet-400" : "border-transparent text-white/50 hover:text-white"}`}
-            >
-              {tab.label}
-            </button>
-          ))}
+          ].map(tab => {
+            // Check capability to optionally style the tab
+            const isSupported = !fileSession.capabilities || (
+              (tab.id === "distribution" && fileSession.capabilities.histogram) ||
+              (tab.id === "correlation" && fileSession.capabilities.correlation) ||
+              (tab.id === "time" && fileSession.capabilities.line_chart)
+            );
+
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`px-4 py-2 text-sm font-medium whitespace-nowrap transition-colors border-b-2 ${activeTab === tab.id ? "border-violet-500 text-violet-400" : "border-transparent text-white/50 hover:text-white"} ${!isSupported && activeTab !== tab.id ? 'opacity-50' : ''}`}
+              >
+                {tab.label} {!isSupported && "⚠️"}
+              </button>
+            )
+          })}
         </div>
 
         {/* Chart Grid */}
@@ -339,7 +384,43 @@ export default function Visualize() {
           </div>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {activeCharts.map(renderChartCard)}
+            {activeCharts.map(chart => {
+              // Determine if chart is disabled by capabilities
+              let isDisabled = false;
+              let disableReason = "";
+
+              if (fileSession.capabilities) {
+                if (chart.type === "histogram" && !fileSession.capabilities.histogram) {
+                  isDisabled = true;
+                  disableReason = "Cần ít nhất 1 cột số và 5 dòng dữ liệu.";
+                } else if (chart.type === "heatmap" && !fileSession.capabilities.correlation) {
+                  isDisabled = true;
+                  disableReason = "Cần ít nhất 2 cột số và 10 dòng dữ liệu.";
+                } else if (chart.type === "line" && !fileSession.capabilities.line_chart) {
+                  isDisabled = true;
+                  disableReason = "Cần ít nhất 2 dòng dữ liệu.";
+                }
+              }
+
+              return (
+                <div key={chart.id} className="relative group">
+                  <div className={`transition-all ${isDisabled ? 'opacity-30 grayscale pointer-events-none' : ''}`}>
+                    {renderChartCard(chart)}
+                  </div>
+                  
+                  {/* Disabled Overlay & Tooltip */}
+                  {isDisabled && (
+                    <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#0B0F1A]/50 rounded-xl border border-white/10 backdrop-blur-[1px]">
+                      <div className="bg-[#1e1e2d] px-4 py-3 rounded-lg border border-white/10 text-center max-w-[80%] shadow-xl">
+                        <span className="text-xl block mb-1">🔒</span>
+                        <p className="text-sm font-medium text-white mb-1">Không khả dụng</p>
+                        <p className="text-xs text-white/60">{disableReason}</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
