@@ -8,11 +8,11 @@ import api from "./axiosClient";
  * @param {File} file - File object từ input hoặc drag-drop
  * @returns {Promise} ProfileResponse từ backend
  */
-export const profileFile = (file) => {
+export const profileFile = (file, forceRefresh = false) => {
   const formData = new FormData();
   formData.append("file", file);
 
-  return api.post("/files/profile", formData, {
+  return api.post(`/files/profile${forceRefresh ? '?force_refresh=true' : ''}`, formData, {
     headers: {
       // Override Content-Type để Axios tự set multipart boundary
       "Content-Type": "multipart/form-data",

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, BigInteger, String, DateTime, ForeignKey, Numeric, Enum
+from sqlalchemy import Column, BigInteger, String, DateTime, ForeignKey, Numeric, Enum, JSON
 from sqlalchemy.orm import declarative_base, relationship
 from datetime import datetime
 import enum
@@ -101,3 +101,22 @@ class CreditTransaction(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     user = relationship("User", back_populates="credit_transactions")
+
+
+class CleanSession(Base):
+    """
+    Lưu metadata mỗi lần user xác nhận chốt Clean Dataset.
+    Đây là kết quả cuối của Module 2, truyền metadata sang Module 3.
+    """
+    __tablename__ = "clean_sessions"
+
+    id = Column(String, primary_key=True)                               # UUID
+    user_id = Column(BigInteger, ForeignKey("users.id"), nullable=False, index=True)
+    file_hash = Column(String, nullable=False, index=True)              # MD5 của file gốc
+    original_filename = Column(String, nullable=False)
+    clean_file_url = Column(String, nullable=True)                      # Supabase Storage URL
+    clean_report = Column(JSON, nullable=True)                          # DiffReport dict
+    summary_for_module3 = Column(JSON, nullable=True)                   # Shape, dtypes, columns
+    clean_mode = Column(String, nullable=False, default="auto")         # "auto" | "manual"
+    confirmed_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow)

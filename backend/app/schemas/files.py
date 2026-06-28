@@ -13,6 +13,12 @@ class ColumnProfile(BaseModel):
     null_pct: float                 # Phần trăm giá trị rỗng (0.0 → 100.0)
     sample_values: list[Any]        # Tối đa 5 giá trị mẫu
     suggested_charts: list[str]     # ["bar", "pie"] hoặc [] nếu type=text
+    skip_chart: bool = False
+    skip_reason: str | None = None
+    low_confidence: bool = False
+    disguised_numeric: dict | None = None
+    type_warning: str | None = None
+    unnamed_warning: str | None = None
 
 
 class SemanticContext(BaseModel):

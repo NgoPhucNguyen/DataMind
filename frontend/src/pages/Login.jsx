@@ -24,6 +24,7 @@ export default function Login() {
     try {
       const response = await login(formData);
       localStorage.setItem("token", response.token.access_token);
+      localStorage.setItem("user", JSON.stringify(response.user));
       showToast("Đăng nhập thành công! Chào mừng trở lại.", "success");
       navigate(from, { replace: true });
     } catch (error) {

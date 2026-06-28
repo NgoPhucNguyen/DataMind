@@ -37,7 +37,7 @@ export default function Home() {
 
                 <div className="flex gap-3 mt-4">
                     <button
-                        onClick={() => navigate("/profiler")}
+                        onClick={() => navigate("/ua_profiler")}
                         className="bg-violet-500 hover:bg-violet-400 text-white px-6 py-3 rounded-xl font-semibold transition-all text-sm"
                     >
                         Bắt đầu phân tích dữ liệu

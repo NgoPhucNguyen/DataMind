@@ -9,6 +9,7 @@ from app.routers import auth as auth_router
 from app.routers import credits as credits_router
 from app.routers import packages as packages_router
 from app.routers import files as files_router
+from app.routers import visualize as visualize_router
 
 
 @asynccontextmanager
@@ -44,6 +45,7 @@ app.include_router(auth_router.router, prefix="/api/v1")
 app.include_router(credits_router.router, prefix="/api/v1")
 app.include_router(packages_router.router, prefix="/api/v1")
 app.include_router(files_router.router, prefix="/api/v1")
+app.include_router(visualize_router.router, prefix="/api/v1")
 
 
 @app.get("/health")

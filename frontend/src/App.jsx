@@ -7,6 +7,7 @@ import {
 } from "react-router-dom";
 import { useEffect } from "react";
 import { useToast } from "./contexts/ToastContext";
+import { FileSessionProvider } from "./contexts/FileSessionContext";
 
 import LandingPage from "./pages/LandingPage";
 import Login from "./pages/Login";
@@ -15,13 +16,18 @@ import Home from "./pages/Home";
 import Pricing from "./pages/Pricing";
 import Wallet from "./pages/Wallet";
 import Profiler from "./pages/Profiler";
+import Cleaner from "./pages/Cleaner";
+import Visualize from "./pages/Visualize";
 import HowItWorks from "./pages/HowItWorks";
 import Demo from "./pages/Demo";
 import Docs from "./pages/Docs";
+import Pipeline from "./pages/Pipeline";
 
 import Navbar from "./components/Navbar";
+import Sidebar from "./components/Sidebar";
 
-const HIDDEN_NAVBAR_PATHS = ["/wallet"];
+const PUBLIC_PATHS = ["/", "/login", "/register", "/how-it-works", "/demo", "/docs"];
+const HIDDEN_NAVBAR_PATHS = [];
 
 // ===================== Protected Route =====================
 function RequireAuth({ children }) {
@@ -57,88 +63,105 @@ function GuestOnly({ children }) {
 function Layout() {
   const location = useLocation();
 
-  const showNavbar = !HIDDEN_NAVBAR_PATHS.includes(location.pathname);
+  // Xác định xem đang ở Public hay Dashboard (Protected)
+  const isPublic = PUBLIC_PATHS.includes(location.pathname);
+
+  // Hiển thị Navbar toàn cục (nếu ở Public và không bị ẩn)
+  const showNavbar = isPublic && !HIDDEN_NAVBAR_PATHS.includes(location.pathname);
+
+  // Hiển thị Sidebar (chỉ khi ở Dashboard)
+  const showSidebar = !isPublic;
 
   return (
-    <div className="min-h-screen bg-[#0B0F1A] text-white flex flex-col">
-      {showNavbar && <Navbar />}
+    <div className={`min-h-screen bg-[#0B0F1A] text-white flex ${showSidebar ? "flex-row" : "flex-col"}`}>
+      {/* Sidebar cho Dashboard */}
+      {showSidebar && <Sidebar />}
 
-      <main className="flex-1">
-        <Routes>
-          {/* Public */}
-          <Route path="/" element={<LandingPage />} />
+      <div className={`flex-1 flex flex-col ${showSidebar ? "h-screen overflow-hidden" : ""}`}>
+        {/* Top Navbar cho Public pages */}
+        {showNavbar && <Navbar />}
 
-          <Route path="/login" element={<Login />} />
+        <main className={`flex-1 relative ${showSidebar ? "overflow-y-auto" : ""}`}>
+          <Routes>
+            {/* Public */}
+            <Route path="/" element={<LandingPage />} />
 
-<Route path="/register" element={<Register />} />
+            <Route path="/login" element={<GuestOnly><Login /></GuestOnly>} />
 
-          {/* Protected */}
-          <Route
-            path="/home"
-            element={
-              <RequireAuth>
-                <Home />
-              </RequireAuth>
-            }
-          />
+            <Route path="/register" element={<GuestOnly><Register /></GuestOnly>} />
 
-          <Route
-            path="/pricing"
-            element={
-              <RequireAuth>
-                <Pricing />
-              </RequireAuth>
-            }
-          />
+            {/* Protected */}
+            <Route
+              path="/home"
+              element={
+                <RequireAuth>
+                  <Home />
+                </RequireAuth>
+              }
+            />
 
-          <Route
-            path="/wallet"
-            element={
-              <RequireAuth>
-                <Wallet />
-              </RequireAuth>
-            }
-          />
+            <Route
+              path="/pricing"
+              element={
+                <RequireAuth>
+                  <Pricing />
+                </RequireAuth>
+              }
+            />
 
-          <Route
-            path="/profiler"
-            element={
-              <RequireAuth>
-                <Profiler />
-              </RequireAuth>
-            }
-          />
+            <Route
+              path="/wallet"
+              element={
+                <RequireAuth>
+                  <Wallet />
+                </RequireAuth>
+              }
+            />
 
-          <Route
-            path="/how-it-works"
-            element={
-              <RequireAuth>
-                <HowItWorks />
-              </RequireAuth>
-            }
-          />
+            <Route
+              path="/ua_profiler"
+              element={
+                <RequireAuth>
+                  <Profiler />
+                </RequireAuth>
+              }
+            />
 
-          <Route
-            path="/demo"
-            element={
-              <RequireAuth>
-                <Demo />
-              </RequireAuth>
-            }
-          />
+            <Route
+              path="/ua_cleaner"
+              element={
+                <RequireAuth>
+                  <Cleaner />
+                </RequireAuth>
+              }
+            />
 
-          <Route
-            path="/docs"
-            element={
-              <RequireAuth>
-                <Docs />
-              </RequireAuth>
-            }
-          />
+            <Route
+              path="/ua_visualize"
+              element={
+                <RequireAuth>
+                  <Visualize />
+                </RequireAuth>
+              }
+            />
 
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </main>
+            <Route path="/how-it-works" element={<HowItWorks />} />
+            <Route path="/demo" element={<Demo />} />
+            <Route path="/docs" element={<Docs />} />
+
+            <Route
+              path="/pipeline"
+              element={
+                <RequireAuth>
+                  <Pipeline />
+                </RequireAuth>
+              }
+            />
+
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </main>
+      </div>
     </div>
   );
 }
@@ -147,7 +170,9 @@ function Layout() {
 function App() {
   return (
     <BrowserRouter>
-      <Layout />
+      <FileSessionProvider>
+        <Layout />
+      </FileSessionProvider>
     </BrowserRouter>
   );
 }

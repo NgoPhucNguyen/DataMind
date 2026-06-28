@@ -7,7 +7,70 @@ KHÔNG hardcode tên cột — toàn bộ logic là dynamic iteration qua df.dty
 
 import pandas as pd
 import numpy as np
+import re
 from typing import Any
+
+NUMERIC_PATTERNS_STRIP = r'[\$,đ\s%VND]'
+NULL_SYNONYMS = {
+    'n/a', 'na', 'null', 'none', 'nil', '-',
+    '--', '?', 'missing', 'trống', 'không có'
+}
+
+def is_disguised_numeric(series: pd.Series, threshold: float = 0.6) -> dict:
+    non_null = series.dropna()
+    if len(non_null) == 0:
+        return {"is_disguised": False}
+
+    numeric_count = 0
+    null_synonym_count = 0
+    sample_convertible = []
+    sample_problematic = []
+
+    for val in non_null:
+        cleaned = str(val).strip()
+        lower = cleaned.lower()
+        if lower in NULL_SYNONYMS:
+            null_synonym_count += 1
+            continue
+        stripped = re.sub(NUMERIC_PATTERNS_STRIP, '', cleaned)
+        stripped = stripped.replace('(', '-').replace(')', '')
+        try:
+            float(stripped)
+            numeric_count += 1
+            if len(sample_convertible) < 3:
+                sample_convertible.append(f'"{val}" → {float(stripped)}')
+        except ValueError:
+            if len(sample_problematic) < 3:
+                sample_problematic.append(str(val))
+
+    total_meaningful = len(non_null) - null_synonym_count
+    if total_meaningful == 0:
+        return {"is_disguised": False}
+
+    ratio = numeric_count / total_meaningful
+    return {
+        "is_disguised": ratio >= threshold,
+        "convertible_ratio": round(ratio, 2),
+        "null_synonym_count": null_synonym_count,
+        "sample_convertible": sample_convertible,
+        "sample_problematic": sample_problematic,
+        "suggested_fix": "Chuyển sang kiểu số, giá trị không hợp lệ → NaN"
+    }
+
+def clean_to_numeric(series: pd.Series) -> pd.Series:
+    def convert_val(val):
+        if pd.isna(val):
+            return None
+        cleaned = str(val).strip()
+        if cleaned.lower() in NULL_SYNONYMS:
+            return None
+        stripped = re.sub(NUMERIC_PATTERNS_STRIP, '', cleaned)
+        stripped = stripped.replace('(', '-').replace(')', '')
+        try:
+            return float(stripped)
+        except ValueError:
+            return None
+    return series.apply(convert_val)
 
 
 # Ngưỡng phân loại categorical vs text
@@ -112,6 +175,33 @@ def profile_dataframe(df: pd.DataFrame) -> list[dict]:
         unique_count = int(series.nunique())
         sample_values = _safe_sample_values(series)
 
+        skip_chart = False
+        skip_reason = None
+        low_confidence = False
+        disguised_numeric = None
+        type_warning = None
+        unnamed_warning = None
+
+        # Cảnh báo cột được đổi tên từ "Unnamed"
+        col_name_str = str(col_name)
+        if col_name_str.startswith("Cột không tên"):
+            unnamed_warning = "Cột này chưa có tên — bạn có thể đặt tên trong phần 'Sửa kiểu dữ liệu'."
+        
+        if unique_count <= 1:
+            skip_chart = True
+            skip_reason = "Không đủ variance (unique_count ≤ 1)"
+            
+        if detected_type == "text" or null_pct > 60:
+            low_confidence = True
+
+        if detected_type in ("text", "categorical"):
+            disguised = is_disguised_numeric(series)
+            if disguised.get("is_disguised"):
+                detected_type = "numeric"
+                suggested_charts = ["bar", "line", "histogram"]
+                type_warning = "Cột này có thể là số — hệ thống phát hiện phần lớn giá trị có thể chuyển đổi"
+                disguised_numeric = disguised
+
         results.append({
             "name": str(col_name),
             "detected_type": detected_type,
@@ -120,6 +210,12 @@ def profile_dataframe(df: pd.DataFrame) -> list[dict]:
             "null_pct": null_pct,
             "sample_values": sample_values,
             "suggested_charts": suggested_charts,
+            "skip_chart": skip_chart,
+            "skip_reason": skip_reason,
+            "low_confidence": low_confidence,
+            "disguised_numeric": disguised_numeric,
+            "type_warning": type_warning,
+            "unnamed_warning": unnamed_warning,
         })
 
     return results

@@ -1,5 +1,6 @@
-import { useState, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useRef, useEffect } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
+import { useFileSession } from "../contexts/FileSessionContext";
 import { profileFile } from "../services/profilerService";
 import { useToast } from "../contexts/ToastContext";
 
@@ -82,19 +83,39 @@ function LoadingOverlay() {
 
 // ── Main Component ─────────────────────────────────────────
 export default function Profiler() {
+  const fileInputRef = useRef(null);
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { showToast } = useToast();
+  const { fileSession, updateFileSession, clearFileSession } = useFileSession();
+
   const [isDragging, setIsDragging] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [result, setResult] = useState(null);
-  const [overrides, setOverrides] = useState({});
+  const [lastFile, setLastFile] = useState(null);
+  
+  const result = fileSession.profileData;
+  const overrides = fileSession.overrides || {};
 
-  const fileInputRef = useRef(null);
-  const navigate = useNavigate();
-  const { showToast } = useToast();
+  const setResult = (data) => {
+    if (!data) {
+      clearFileSession();
+    } else {
+      updateFileSession({ profileData: data, fileHash: data.file_hash, fileName: data.filename });
+    }
+  };
+  
+  const setOverrides = (data) => {
+    if (typeof data === "function") {
+      updateFileSession({ overrides: data(fileSession.overrides || {}) });
+    } else {
+      updateFileSession({ overrides: data });
+    }
+  };
 
   // ── Handlers ──────────────────────────────────────────────
 
-  const handleFile = async (file) => {
+  const handleFile = async (file, forceRefresh = false) => {
     if (!file) return;
 
     const allowed = [".csv", ".xlsx", ".xls"];
@@ -110,11 +131,12 @@ export default function Profiler() {
     setResult(null);
     setOverrides({});
     setLoading(true);
+    setLastFile(file);
 
     try {
-      const res = await profileFile(file);
+      const res = await profileFile(file, forceRefresh);
       setResult(res.data);
-      showToast("Phân tích hoàn tất!", "success");
+      showToast(forceRefresh ? "Đã phân tích lại dữ liệu!" : "Phân tích hoàn tất!", "success");
     } catch (err) {
       const detail = err?.response?.data?.detail;
       let msg;
@@ -154,16 +176,25 @@ export default function Profiler() {
 
   const handleReset = () => {
     setResult(null);
-    setError(null);
     setOverrides({});
-    // Reset file input
-    if (fileInputRef.current) fileInputRef.current.value = "";
+    setError(null);
   };
 
   const getEffectiveType = (col) => overrides[col.name] || col.detected_type;
 
-  const handleExportDisabled = () => {
-    showToast("Tính năng đang được phát triển.", "info");
+  const handleDownloadReport = () => {
+    if (!result) return;
+    const reportData = JSON.stringify(result, null, 2);
+    const blob = new Blob([reportData], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `DataMind_Report_${result.filename || "file"}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast("Đã tải báo cáo (dạng JSON). Tính năng xuất PDF đang được phát triển.", "success");
   };
 
   // ── Render ────────────────────────────────────────────────
@@ -182,12 +213,11 @@ export default function Profiler() {
         {result && (
           <button
             id="profiler-export-btn"
-            onClick={handleExportDisabled}
-            title="Tính năng đang được phát triển"
-            className="text-xs text-muted border border-border rounded-lg px-3 py-1.5 hover:bg-[#F9F9F8] transition-colors flex items-center gap-1.5 cursor-not-allowed opacity-60"
-            aria-disabled="true"
+            onClick={handleDownloadReport}
+            title="Tải báo cáo chi tiết về máy"
+            className="text-xs text-ink border border-border rounded-lg px-3 py-1.5 hover:bg-[#F9F9F8] transition-colors flex items-center gap-1.5"
           >
-            ↓ Xuất CSV
+            📥 Tải báo cáo
           </button>
         )}
         {!result && <div className="w-[72px]" />}
@@ -251,30 +281,39 @@ export default function Profiler() {
         {result && (
           <div className="space-y-6">
 
-            {/* Meta info row */}
-            <div className="flex flex-wrap items-center gap-3 text-sm">
-              <span className="px-3 py-1 rounded-full border border-border bg-white text-muted">
-                <span className="text-ink font-medium">{result.filename}</span>
-              </span>
-              <span className="px-3 py-1 rounded-full border border-border bg-white text-muted">
-                {result.total_rows.toLocaleString()} dòng
-              </span>
-              <span className="px-3 py-1 rounded-full border border-border bg-white text-muted">
-                {result.total_columns} cột
-              </span>
-              {result.cached && (
-                <span className="px-3 py-1 rounded-full border border-[#EAF2EB] bg-sage text-forest text-xs font-medium">
-                  ⚡ Cache
+            {/* Expiration Note */}
+            <div className="flex items-center gap-2 bg-[#F9F9F8] border border-border px-4 py-2.5 rounded-lg text-sm text-muted">
+              <span>⏱️</span>
+              <p>Tệp <strong className="text-ink">{result.filename}</strong> đang được lưu tạm trên máy chủ. Dữ liệu sẽ tự động xóa sau <strong>1 giờ</strong> để bảo vệ bảo mật.</p>
+            </div>
+
+            {/* Summary bar */}
+            <div className="flex flex-wrap items-center gap-3 text-sm bg-[#F9F9F8] border border-border px-4 py-2.5 rounded-lg">
+                <span className="font-medium text-ink">
+                  Tìm thấy {result.total_columns} cột · {result.columns.filter(c => c.null_pct > 60 || c.unique_count === 1 || c.low_confidence).length} cột có vấn đề · {result.total_rows.toLocaleString()} dòng · Đề tài: {result.semantic_context.domain} ({Math.round(result.semantic_context.confidence * 100)}%)
                 </span>
-              )}
-              {/* Phân tích lại */}
-              <button
-                id="profiler-reanalyze-btn"
-                onClick={handleReset}
-                className="ml-auto text-xs text-muted hover:text-ink border border-border rounded-lg px-3 py-1.5 hover:bg-[#F9F9F8] transition-colors"
-              >
-                ↺ Phân tích file khác
-              </button>
+                {result.cached && (
+                  <div className="flex items-center gap-2 ml-2">
+                    <span className="px-2 py-0.5 rounded-full border border-[#EAF2EB] bg-sage text-forest text-[10px] font-medium">
+                      ⚡ Cache
+                    </span>
+                    <button
+                      onClick={() => handleFile(lastFile, true)}
+                      disabled={!lastFile}
+                      className="text-[10px] font-medium text-forest hover:text-ink underline transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      title="Phân tích lại và làm mới dữ liệu"
+                    >
+                      ↻ Phân tích lại
+                    </button>
+                  </div>
+                )}
+                <button
+                  id="profiler-reanalyze-btn"
+                  onClick={handleReset}
+                  className="ml-auto text-xs text-muted hover:text-ink border border-border rounded-lg px-3 py-1.5 bg-white hover:bg-[#F0F0F0] transition-colors"
+                >
+                  ↺ Phân tích file khác
+                </button>
             </div>
 
             {/* Semantic Context card */}
@@ -302,7 +341,7 @@ export default function Profiler() {
                   <tr className="bg-[#F9F9F8] border-b border-border text-muted text-[10px] uppercase tracking-wider">
                     <th className="text-left px-4 py-3 font-medium">Tên cột</th>
                     <th className="text-left px-4 py-3 font-medium">Kiểu phát hiện</th>
-                    <th className="text-left px-4 py-3 font-medium">Override</th>
+                    <th className="text-left px-4 py-3 font-medium" title="Hệ thống tự động nhận diện có thể sai — bạn có thể điều chỉnh lại tại đây.">Sửa kiểu dữ liệu</th>
                     <th className="text-right px-4 py-3 font-medium">Unique</th>
                     <th className="text-right px-4 py-3 font-medium">Null%</th>
                     <th className="text-left px-4 py-3 font-medium">Gợi ý biểu đồ</th>
@@ -319,8 +358,39 @@ export default function Profiler() {
                         className={`border-b border-border last:border-b-0 ${idx % 2 === 0 ? "bg-white" : "bg-[#FAFAFA]"}`}
                       >
                         {/* Tên cột */}
-                        <td className="px-4 py-3 font-mono text-xs text-ink max-w-[180px] truncate">
-                          {col.name}
+                        <td className="px-4 py-3 font-mono text-xs text-ink max-w-[250px]">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="truncate max-w-[150px]">{col.name}</span>
+                            {col.null_pct > 60 && <span title="Thiếu hơn 60% dữ liệu" className="text-[10px] cursor-help">🔴</span>}
+                            {col.unique_count === 1 && <span title="Chỉ có 1 giá trị duy nhất" className="text-[10px] cursor-help">🟡</span>}
+                            {col.low_confidence && !col.disguised_numeric?.is_disguised && <span title="Độ tin cậy thấp" className="text-[10px] cursor-help">🟠</span>}
+                            {col.disguised_numeric?.is_disguised && (
+                              <span
+                                title="Hệ thống phát hiện cột này chứa giá trị số dưới dạng text. Dùng 'Sửa kiểu dữ liệu' để chuyển đổi."
+                                className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-amber-100 text-amber-700 cursor-help whitespace-nowrap border border-amber-200"
+                              >
+                                ⚠ Có thể là số
+                              </span>
+                            )}
+                          </div>
+                          {col.disguised_numeric?.is_disguised && col.disguised_numeric.sample_convertible?.length > 0 && (
+                            <div className="mt-1.5 text-[9px] text-muted flex flex-wrap gap-x-1.5 gap-y-0.5 leading-tight">
+                              {col.disguised_numeric.sample_convertible.map((sample, i) => (
+                                <span key={i}>
+                                  {sample}{i < col.disguised_numeric.sample_convertible.length - 1 ? ' · ' : ''}
+                                </span>
+                              ))}
+                              {col.disguised_numeric.null_synonym_count > 0 && (
+                                <span>· N/A → NaN</span>
+                              )}
+                            </div>
+                          )}
+                          {col.unnamed_warning && (
+                            <div className="mt-1 text-[9px] text-blue-600 flex items-center gap-1">
+                              <span>ℹ️</span>
+                              <span>{col.unnamed_warning}</span>
+                            </div>
+                          )}
                         </td>
 
                         {/* Kiểu phát hiện gốc */}
@@ -392,11 +462,46 @@ export default function Profiler() {
               </table>
             </div>
 
-            {/* Footer note */}
-            <p className="text-xs text-muted">
-              * Override kiểu cột chỉ ảnh hưởng giao diện (state local). File hash:{" "}
-              <code className="font-mono bg-[#F9F9F8] px-1 rounded">{result.file_hash.slice(0, 8)}...</code>
-            </p>
+            {/* Footer: file hash + nút chuyển sang Cleaner */}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pt-2">
+              <p className="text-xs text-muted">
+                * Sửa kiểu dữ liệu cột chỉ ảnh hưởng giao diện (state local). File hash:{" "}
+                <code className="font-mono bg-[#F9F9F8] px-1 rounded">{result.file_hash.slice(0, 8)}...</code>
+              </p>
+
+              <div className="flex items-center gap-3">
+                {/* Nút Tải báo cáo */}
+                <button
+                  onClick={() => {
+                    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(result, null, 2));
+                    const downloadAnchorNode = document.createElement('a');
+                    downloadAnchorNode.setAttribute("href", dataStr);
+                    downloadAnchorNode.setAttribute("download", `${result.filename.split('.')[0]}_report.json`);
+                    document.body.appendChild(downloadAnchorNode);
+                    downloadAnchorNode.click();
+                    downloadAnchorNode.remove();
+                  }}
+                  className="text-sm text-ink border border-border rounded-lg px-4 py-2.5 hover:bg-[#F9F9F8] transition-colors"
+                >
+                  Tải báo cáo
+                </button>
+
+                {/* Nút chính: tiếp tục sang Cleaner */}
+                <button
+                  id="profiler-next-btn"
+                  onClick={() => navigate("/ua_cleaner")}
+                  className="
+                    shrink-0 flex items-center gap-2
+                    bg-[#1B4324] text-white text-sm font-medium
+                    px-5 py-2.5 rounded-lg
+                    hover:bg-[#163820] transition-colors
+                  "
+                >
+                  Tiến hành làm sạch
+                  <span aria-hidden>→</span>
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>

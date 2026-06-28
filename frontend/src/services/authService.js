@@ -11,3 +11,18 @@ export const login = async (data) => {
     const response = await axiosClient.post("/auth/login", data);
     return response.data;
 };
+
+export const logout = () => {
+    localStorage.removeItem("token");
+    localStorage.removeItem("user");
+};
+
+export const getUser = () => {
+    const userStr = localStorage.getItem("user");
+    if (!userStr) return null;
+    try {
+        return JSON.parse(userStr);
+    } catch {
+        return null;
+    }
+};

@@ -43,6 +43,8 @@ services:
   api:
     build: .
     container_name: datamind_api
+    env_file:
+      - .env.local
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/datamind_local
       REDIS_URL: redis://redis:6379
