@@ -16,6 +16,7 @@ import { useFileSession } from "../contexts/FileSessionContext";
 import { detectIssues, autoClean, confirmClean } from "../services/cleanerService";
 import { profileFile } from "../services/profilerService";
 import { useToast } from "../contexts/ToastContext";
+import { CheckCircle, AlertTriangle, Zap, PenTool, Compass, Brush, ArrowLeft, ArrowRight, ChevronRight } from "lucide-react";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -64,7 +65,7 @@ function IssuesSummary({ issues }) {
     return (
       <Card>
         <div className="flex items-center gap-3">
-          <span className="text-2xl">✓</span>
+          <CheckCircle className="w-8 h-8 text-forest" />
           <div>
             <p className="font-medium text-ink">Dữ liệu sạch!</p>
             <p className="text-sm text-muted mt-0.5">
@@ -159,7 +160,7 @@ function ModeSelector({ onSelect }) {
             hover:border-[#1B4324] hover:bg-sage/30 transition-all group
           "
         >
-          <div className="text-lg mb-2">⚡</div>
+          <Zap className="w-6 h-6 mb-2 text-forest" />
           <p className="font-medium text-ink text-sm">Làm sạch tự động</p>
           <p className="text-xs text-muted mt-1 leading-relaxed">
             Hệ thống tự xử lý theo quy tắc mặc định (bao gồm tự xóa cột rỗng). Nhanh nhất.
@@ -175,7 +176,7 @@ function ModeSelector({ onSelect }) {
             hover:border-[#1B4324] hover:bg-sage/30 transition-all group
           "
         >
-          <div className="text-lg mb-2">✏️</div>
+          <PenTool className="w-6 h-6 mb-2 text-ink" />
           <p className="font-medium text-ink text-sm">Chỉnh sửa thủ công</p>
           <p className="text-xs text-muted mt-1 leading-relaxed">
             Chỉnh sửa trực tiếp trên bảng dữ liệu. Toàn quyền kiểm soát.
@@ -194,7 +195,7 @@ function ModeSelector({ onSelect }) {
             opacity-50 cursor-not-allowed
           "
         >
-          <div className="text-lg mb-2">🧭</div>
+          <Compass className="w-6 h-6 mb-2 text-muted" />
           <p className="font-medium text-ink text-sm">Hướng dẫn xử lý</p>
           <p className="text-xs text-muted mt-1 leading-relaxed">
             Xử lý từng vấn đề một theo hướng dẫn. Linh hoạt nhất.
@@ -226,7 +227,7 @@ function DiffReportView({ diff, validationState, filename, onConfirm, onBack, co
         <SectionTitle>Báo cáo thay đổi (Diff Report)</SectionTitle>
 
         {/* Tóm tắt chính */}
-        <div className="grid grid-cols-3 gap-3 mb-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
           {rows.map((r) => (
             <div key={r.label} className="text-center py-3 rounded-lg bg-[#F9F9F8] border border-border">
               <p className={`text-lg font-semibold font-mono ${r.warn ? "text-[#9F2F2D]" : "text-ink"}`}>
@@ -302,7 +303,7 @@ function DiffReportView({ diff, validationState, filename, onConfirm, onBack, co
       {validationState?.warnings?.length > 0 && (
         <div className="bg-[#FBF3DB] border border-[#f0dda0] rounded-xl p-4">
           <div className="flex items-start gap-3">
-            <span className="text-xl shrink-0">⚠️</span>
+            <AlertTriangle className="w-6 h-6 shrink-0 text-amber-600 mt-0.5" />
             <div>
               <p className="font-semibold text-[#956400] text-sm mb-1">Cảnh báo về chất lượng dữ liệu</p>
               <ul className="space-y-1">
@@ -325,7 +326,7 @@ function DiffReportView({ diff, validationState, filename, onConfirm, onBack, co
           onClick={onBack}
           className="text-sm text-muted hover:text-ink border border-border rounded-lg px-4 py-2 hover:bg-[#F9F9F8] transition-colors"
         >
-          ← Chọn lại chế độ
+          <ArrowLeft className="w-4 h-4 inline-block mr-1" /> Chọn lại chế độ
         </button>
         <button
           id="cleaner-confirm-btn"
@@ -346,7 +347,7 @@ function DiffReportView({ diff, validationState, filename, onConfirm, onBack, co
               Đang lưu...
             </>
           ) : (
-            <>Xác nhận dùng bản này ✓</>
+            <>Xác nhận dùng bản này <CheckCircle className="w-4 h-4" /></>
           )}
         </button>
       </div>
@@ -361,7 +362,7 @@ function ConfirmedView({ result, onGoHome, onGoVisualize }) {
       {/* Success banner */}
       <div className="border border-[#c8e0cb] rounded-xl p-5 bg-sage">
         <div className="flex items-center gap-3">
-          <span className="text-2xl">✓</span>
+          <CheckCircle className="w-8 h-8 text-forest" />
           <div>
             <p className="font-medium text-forest">Clean Dataset đã được chốt!</p>
             <p className="text-sm text-forest/70 mt-0.5">
@@ -403,7 +404,7 @@ function ConfirmedView({ result, onGoHome, onGoVisualize }) {
           onClick={onGoHome}
           className="text-sm text-muted hover:text-ink border border-border rounded-lg px-4 py-2 hover:bg-[#F9F9F8] transition-colors"
         >
-          ← Về trang chủ
+          <ArrowLeft className="w-4 h-4 inline-block mr-1" /> Về trang chủ
         </button>
         <button
           id="cleaner-go-module3-btn"
@@ -413,7 +414,7 @@ function ConfirmedView({ result, onGoHome, onGoVisualize }) {
             px-6 py-2.5 rounded-lg border border-transparent transition-all shadow-md shadow-violet-500/20
           "
         >
-          Trực quan hóa dữ liệu →
+          Trực quan hóa dữ liệu <ArrowRight className="w-4 h-4 inline-block ml-1" />
         </button>
       </div>
     </div>
@@ -477,7 +478,7 @@ export default function Cleaner() {
     const allowed = [".csv", ".xlsx", ".xls"];
     const ext = file.name.toLowerCase().slice(file.name.lastIndexOf("."));
     if (!allowed.includes(ext)) {
-      showToast("Chỉ chấp nhận file .csv, .xlsx, .xls", "error");
+      showToast("Định dạng file không hợp lệ. Vui lòng tải lên file Excel (.xlsx, .xls) hoặc CSV.", "error");
       return;
     }
     setIsUploading(true);
@@ -487,9 +488,9 @@ export default function Cleaner() {
       setFileHash(res.data.file_hash);
       setFileName(file.name);
       setOverrides({});
-      showToast("Upload thành công! Đang quét lỗi...", "success");
+      showToast("Tải file lên thành công! Hệ thống đang tiến hành kiểm tra...", "success");
     } catch (err) {
-      showToast("Có lỗi xảy ra khi upload file.", "error");
+      showToast("Không thể tải file lên. Vui lòng kiểm tra lại kết nối mạng hoặc thử file khác.", "error");
       setError("Không thể upload file. Vui lòng thử lại.");
     } finally {
       setIsUploading(false);
@@ -521,7 +522,7 @@ export default function Cleaner() {
       setIssues(res.data);
       setStep("choosing_mode");
     } catch (err) {
-      const msg = err?.response?.data?.detail || "Không thể quét dữ liệu.";
+      const msg = err?.response?.data?.detail || "Không thể quét dữ liệu. Vui lòng thử lại sau.";
       setError(msg);
       showToast(msg, "error");
       setStep("error");
@@ -530,7 +531,7 @@ export default function Cleaner() {
 
   const handleModeSelect = async (mode) => {
     if (mode === "manual") {
-      showToast("Tính năng đang được phát triển.", "info");
+      showToast("Tính năng này sẽ sớm ra mắt. Vui lòng thử lại sau.", "info");
       return;
     }
     setSelectedMode(mode);
@@ -542,7 +543,7 @@ export default function Cleaner() {
       // Nếu có lỗi cứng, server đã quăng 422, hoặc trả về validation=False (tùy cài đặt)
       // Nhưng theo backend mới, nó trả validation về đây
       if (res.data.validation && !res.data.validation.can_proceed) {
-        const err = res.data.validation.hard_blocks[0]?.message || "Lỗi dữ liệu nghiêm trọng.";
+        const err = res.data.validation.hard_blocks[0]?.message || "Dữ liệu gặp sự cố nghiêm trọng không thể tự động khắc phục.";
         setError(err);
         showToast(err, "error");
         setStep("error");
@@ -555,7 +556,7 @@ export default function Cleaner() {
       
       setStep("reviewing_diff");
     } catch (err) {
-      const msg = err?.response?.data?.detail || "Có lỗi khi làm sạch dữ liệu.";
+      const msg = err?.response?.data?.detail || "Không thể tự động làm sạch dữ liệu. Vui lòng thử lại sau.";
       setError(msg);
       showToast(msg, "error");
       setStep("error");
@@ -568,9 +569,9 @@ export default function Cleaner() {
       const res = await confirmClean(fileHash, selectedMode || "auto", overrides);
       setConfirmedResult(res.data);
       setStep("confirmed");
-      showToast("Clean Dataset đã được chốt!", "success");
+      showToast("Đã hoàn tất làm sạch dữ liệu! Bạn có thể tiếp tục bước tiếp theo.", "success");
     } catch (err) {
-      const msg = err?.response?.data?.detail || "Không thể lưu Clean Dataset.";
+      const msg = err?.response?.data?.detail || "Không thể lưu dữ liệu đã làm sạch. Vui lòng thử lại.";
       setError(msg);
       showToast(msg, "error");
     } finally {
@@ -586,7 +587,7 @@ export default function Cleaner() {
           onClick={() => navigate(fileHash ? "/ua_profiler" : "/home")}
           className="text-sm text-muted hover:text-ink transition-colors flex items-center gap-1.5"
         >
-          ← {fileHash ? "Profiler" : "Trang chủ"}
+          <ArrowLeft className="w-4 h-4 inline-block mr-1" /> {fileHash ? "Profiler" : "Trang chủ"}
         </button>
         <span className="text-sm font-medium text-ink">
           {fileName ? `Đang làm sạch: ${fileName}` : "Công cụ Làm sạch Dữ liệu"}
@@ -607,13 +608,13 @@ export default function Cleaner() {
               `}>
                 {s.label}
               </span>
-              {i < arr.length - 1 && <span className="text-border">›</span>}
+              {i < arr.length - 1 && <ChevronRight className="w-3 h-3 text-border" />}
             </span>
           ))}
         </div>
       </header>
 
-      <div className="px-6 py-10 max-w-3xl mx-auto">
+      <div className="px-4 sm:px-6 py-8 sm:py-10 max-w-3xl mx-auto">
 
         {/* Upload Zone (Nếu chưa có fileHash) */}
         {!fileHash ? (
@@ -623,7 +624,7 @@ export default function Cleaner() {
 
             <div
               className={`
-                border-2 border-dashed rounded-lg p-10 text-center cursor-pointer transition-colors mx-auto bg-white
+                border-2 border-dashed rounded-lg p-6 sm:p-10 text-center cursor-pointer transition-colors mx-auto bg-white
                 ${isDragging ? "border-forest bg-sage" : "border-border hover:border-forest hover:bg-sage/40"}
                 ${isUploading ? "pointer-events-none opacity-60" : ""}
               `}
@@ -643,7 +644,7 @@ export default function Cleaner() {
                 <LoadingStep message="Đang upload và phân tích file..." />
               ) : (
                 <div className="text-muted text-sm">
-                  <div className="text-3xl mb-3">🧹</div>
+                  <Brush className="w-10 h-10 mx-auto mb-3 stroke-[1.5] text-forest" />
                   <span className="block mb-1 text-ink font-medium">Kéo thả file vào đây để làm sạch</span>
                   hoặc click để chọn file &mdash; CSV, XLSX, XLS (tối đa 10MB)
                 </div>
@@ -663,7 +664,7 @@ export default function Cleaner() {
             {/* Error inline */}
             {error && (
               <div className="mb-6 px-4 py-3 rounded-lg bg-[#FDEBEC] text-[#9F2F2D] text-sm border border-[#f5c6cb] flex items-start gap-2">
-                <span className="shrink-0">⚠</span>
+                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
                 <span>{error}</span>
               </div>
             )}
@@ -676,7 +677,7 @@ export default function Cleaner() {
             {/* ── Step: error ── */}
             {step === "error" && (
               <div className="text-center py-10 bg-white border border-[#f5c6cb] rounded-xl shadow-sm">
-                <div className="text-4xl mb-4">⚠️</div>
+                <AlertTriangle className="w-12 h-12 mx-auto mb-4 text-[#9F2F2D]" />
                 <h2 className="text-lg font-semibold text-[#9F2F2D] mb-2">Làm sạch dữ liệu thất bại</h2>
                 <p className="text-sm text-muted whitespace-pre-line mb-6 max-w-md mx-auto leading-relaxed">{error}</p>
                 <div className="flex items-center justify-center gap-3">

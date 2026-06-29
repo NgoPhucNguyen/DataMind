@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { profileFile } from "../services/profilerService";
 import { detectIssues, autoClean, confirmClean } from "../services/cleanerService";
 import { useToast } from "../contexts/ToastContext";
+import { Folder, BrainCircuit, Search, Sparkles, Download, AlertTriangle, Rocket, PartyPopper } from "lucide-react";
 
 export default function Pipeline() {
   const navigate = useNavigate();
@@ -18,27 +19,27 @@ export default function Pipeline() {
     {
       title: "1. Tải lên dữ liệu",
       description: "Hỗ trợ các định dạng phổ biến như CSV, Excel (XLSX, XLS). Dữ liệu của bạn được bảo mật tuyệt đối.",
-      icon: "📁"
+      icon: <Folder className="w-6 h-6 text-forest" />
     },
     {
       title: "2. Phân tích ngữ cảnh (AI)",
       description: "Hệ thống AI tự động đọc cấu trúc, nhận diện kiểu dữ liệu (số liệu, thời gian, danh mục, văn bản) và hiểu ý nghĩa từng cột.",
-      icon: "🧠"
+      icon: <BrainCircuit className="w-6 h-6 text-forest" />
     },
     {
       title: "3. Phát hiện lỗi",
       description: "Quét toàn bộ dữ liệu để tìm ra các vấn đề: ô trống, sai định dạng, dữ liệu trùng lặp, lỗi ký tự (encoding).",
-      icon: "🔍"
+      icon: <Search className="w-6 h-6 text-forest" />
     },
     {
       title: "4. Làm sạch tự động",
       description: "Tự động loại bỏ hoặc điền dữ liệu khuyết theo các quy tắc chuẩn. Cột quá thiếu dữ liệu (>90%) sẽ tự động được xóa.",
-      icon: "✨"
+      icon: <Sparkles className="w-6 h-6 text-forest" />
     },
     {
       title: "5. Tải file hoàn chỉnh",
       description: "Nhận lại file dữ liệu đã được làm sạch hoàn toàn, sẵn sàng để đưa vào bất kỳ hệ thống phân tích nào khác.",
-      icon: "📥"
+      icon: <Download className="w-6 h-6 text-forest" />
     }
   ];
 
@@ -47,7 +48,7 @@ export default function Pipeline() {
     const allowed = [".csv", ".xlsx", ".xls"];
     const ext = file.name.toLowerCase().slice(file.name.lastIndexOf("."));
     if (!allowed.includes(ext)) {
-      showToast("Chỉ chấp nhận file .csv, .xlsx, .xls", "error");
+      showToast("Định dạng file không được hỗ trợ. Vui lòng chọn file Excel (.xlsx, .xls) hoặc CSV.", "error");
       return;
     }
 
@@ -68,13 +69,13 @@ export default function Pipeline() {
       setLoadingStep("Đang đóng gói kết quả...");
       const confirmRes = await confirmClean(fileHash, "auto", {});
       
-      showToast("Xử lý hoàn tất!", "success");
+      showToast("Xử lý dữ liệu thành công!", "success");
       setResult(confirmRes.data);
       
     } catch (err) {
       const msg = err?.response?.data?.detail || "Có lỗi xảy ra trong quá trình xử lý.";
       setError(msg);
-      showToast("Có lỗi xảy ra trong quá trình xử lý.", "error");
+      showToast("Không thể tự động xử lý file. Vui lòng thử lại với cấu hình khác hoặc kiểm tra lại file của bạn.", "error");
     } finally {
       setLoading(false);
       setLoadingStep("");
@@ -93,11 +94,11 @@ export default function Pipeline() {
         <span className="text-lg font-bold text-ink">Quy trình tự động (Full Pipeline)</span>
       </header>
 
-      <div className="px-6 py-12 max-w-4xl mx-auto">
+      <div className="px-4 sm:px-6 py-8 sm:py-12 max-w-4xl mx-auto">
         {!result ? (
           <>
             <div className="text-center mb-12">
-              <h1 className="text-3xl font-serif mb-4">Làm sạch dữ liệu chưa bao giờ dễ dàng đến thế</h1>
+              <h1 className="text-2xl sm:text-3xl font-serif mb-4">Làm sạch dữ liệu chưa bao giờ dễ dàng đến thế</h1>
               <p className="text-muted text-lg max-w-2xl mx-auto">
                 Hệ thống tự động thực hiện toàn bộ quy trình từ phân tích, nhận diện lỗi đến làm sạch dữ liệu chỉ với một cú click chuột.
               </p>
@@ -125,7 +126,7 @@ export default function Pipeline() {
         {/* Error Message */}
         {error && (
           <div className="mb-8 p-4 bg-[#FDEBEC] border border-[#f5c6cb] rounded-xl text-[#9F2F2D] text-center">
-            <span className="block font-bold mb-1">⚠️ Quá trình tự động gặp sự cố:</span>
+            <span className="block font-bold mb-1 flex items-center justify-center"><AlertTriangle className="w-4 h-4 mr-1.5 shrink-0" /> Quá trình tự động gặp sự cố:</span>
             <span>{error}</span>
             <p className="mt-3 text-sm">
               Gợi ý: Hãy thử sử dụng <strong>Phân tích thủ công</strong> ở menu bên trái để xem chi tiết lỗi của file này và tự cấu hình cách xử lý.
@@ -158,14 +159,14 @@ export default function Pipeline() {
                 </svg>
                 {loadingStep}
               </span>
-            ) : "🚀 Bắt đầu quy trình tự động"}
+            ) : <span className="flex items-center gap-2"><Rocket className="w-5 h-5 shrink-0" /> Bắt đầu quy trình tự động</span>}
           </button>
           {!loading && <p className="text-xs text-muted mt-3">Hỗ trợ file CSV, XLSX tối đa 10MB</p>}
         </div>
           </>
         ) : (
           <div className="text-center bg-white border border-border p-8 rounded-2xl shadow-sm">
-            <div className="text-5xl mb-4">🎉</div>
+            <PartyPopper className="w-12 h-12 mx-auto mb-4 text-forest" />
             <h2 className="text-2xl font-bold text-ink mb-2">Quy trình hoàn tất!</h2>
             <p className="text-muted mb-8">Dữ liệu của bạn đã được làm sạch và sẵn sàng để sử dụng.</p>
             
@@ -176,7 +177,7 @@ export default function Pipeline() {
                 rel="noreferrer"
                 className="bg-forest hover:bg-[#1B4324] text-white px-6 py-3 rounded-xl font-semibold transition-all flex items-center gap-2"
               >
-                📥 Tải File Cleaned
+                <Download className="w-5 h-5 inline-block" /> Tải File Cleaned
               </a>
               <button
                 onClick={() => setResult(null)}

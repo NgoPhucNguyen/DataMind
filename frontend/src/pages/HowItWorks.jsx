@@ -23,42 +23,42 @@ export default function HowItWorks() {
     ];
 
     return (
-        <div className="min-h-screen bg-[#0B0F1A] text-white">
-            <div className="max-w-4xl mx-auto px-6 py-20">
+        <div className="min-h-screen bg-canvas text-ink font-sans">
+            <div className="max-w-4xl mx-auto px-4 sm:px-6 py-12 sm:py-20">
                 <div className="text-center mb-16">
-                    <h1 className="text-4xl font-bold tracking-tight mb-4">
-                        Cách <span className="text-violet-400">hoạt động</span>
+                    <h1 className="text-3xl sm:text-4xl font-serif tracking-tight mb-4 text-ink">
+                        Cách <span className="text-forest italic font-semibold">hoạt động</span>
                     </h1>
-                    <p className="text-white/40 max-w-xl mx-auto">
+                    <p className="text-muted max-w-xl mx-auto">
                         Chỉ 4 bước đơn giản để biến dữ liệu thô thành insights có giá trị.
                     </p>
                 </div>
 
                 <div className="relative">
                     {/* Vertical line */}
-                    <div className="absolute left-8 top-0 bottom-0 w-px bg-white/10 hidden md:block" />
+                    <div className="absolute left-8 top-0 bottom-0 w-px bg-border hidden md:block" />
 
                     <div className="flex flex-col gap-10">
                         {steps.map((step) => (
                             <div key={step.number} className="flex gap-6 items-start">
-                                <div className="flex-shrink-0 w-16 h-16 rounded-2xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center z-10">
-                                    <span className="text-violet-400 font-bold text-sm">{step.number}</span>
+                                <div className="flex-shrink-0 w-16 h-16 rounded-2xl bg-sage/40 border border-[#c8e0cb]/50 flex items-center justify-center z-10 shadow-sm">
+                                    <span className="text-forest font-bold text-sm">{step.number}</span>
                                 </div>
                                 <div className="pt-3">
-                                    <h3 className="text-lg font-semibold mb-2">{step.title}</h3>
-                                    <p className="text-white/40 leading-relaxed">{step.description}</p>
+                                    <h3 className="text-lg font-semibold text-ink mb-2">{step.title}</h3>
+                                    <p className="text-muted leading-relaxed text-sm">{step.description}</p>
                                 </div>
                             </div>
                         ))}
                     </div>
                 </div>
 
-                <div className="mt-20 p-8 rounded-2xl bg-white/5 border border-white/10 text-center">
-                    <h2 className="text-2xl font-bold mb-3">Sẵn sàng bắt đầu?</h2>
-                    <p className="text-white/40 mb-6">Dùng thử miễn phí, không cần thẻ tín dụng.</p>
+                <div className="mt-20 p-8 rounded-2xl bg-white border border-border text-center shadow-sm">
+                    <h2 className="text-2xl font-serif font-bold text-ink mb-3">Sẵn sàng bắt đầu?</h2>
+                    <p className="text-muted mb-6 text-sm">Dùng thử miễn phí, không cần thẻ tín dụng.</p>
                     <a href="/register">
-                        <button className="bg-violet-500 hover:bg-violet-400 text-white px-8 py-3 rounded-xl font-semibold transition-all text-sm">
-                            Tạo tài khoản miễn phí
+                        <button className="bg-[#111111] hover:bg-[#222222] text-white px-8 py-3 rounded-lg font-medium transition-all active:scale-[0.98] text-sm shadow-sm">
+                            Tạo tài khoản miễn phí →
                         </button>
                     </a>
                 </div>

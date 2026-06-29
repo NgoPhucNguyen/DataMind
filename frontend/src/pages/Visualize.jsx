@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useFileSession } from "../contexts/FileSessionContext";
 import { useToast } from "../contexts/ToastContext";
 import api from "../services/axiosClient";
+import { Check, X, AlertTriangle, ArrowRight, Lock } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer,
   LineChart, Line
@@ -10,7 +11,7 @@ import {
 
 // --- Components Biểu Đồ ---
 
-const DistributionChart = ({ data, color = "#8b5cf6" }) => {
+const DistributionChart = ({ data, color = "#1B4324" }) => {
   const chartData = data.map(d => ({
     name: `${d.bin_start.toFixed(1)} - ${d.bin_end.toFixed(1)}`,
     count: d.count
@@ -18,38 +19,38 @@ const DistributionChart = ({ data, color = "#8b5cf6" }) => {
   return (
     <ResponsiveContainer width="100%" height={250}>
       <BarChart data={chartData}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#ffffff1a" vertical={false} />
-        <XAxis dataKey="name" stroke="#ffffff66" fontSize={10} tickFormatter={(val) => val.split(" - ")[0]} />
-        <YAxis stroke="#ffffff66" fontSize={10} />
-        <Tooltip cursor={{ fill: "#ffffff1a" }} contentStyle={{ backgroundColor: "#1e1e2d", border: "none", borderRadius: 8, color: "#fff" }} />
+        <CartesianGrid strokeDasharray="3 3" stroke="#EAEAEA" vertical={false} />
+        <XAxis dataKey="name" stroke="#626C65" fontSize={10} tickFormatter={(val) => val.split(" - ")[0]} />
+        <YAxis stroke="#626C65" fontSize={10} />
+        <Tooltip cursor={{ fill: "rgba(0,0,0,0.02)" }} contentStyle={{ backgroundColor: "#ffffff", border: "1px solid #EAEAEA", borderRadius: 8, color: "#121A14" }} />
         <Bar dataKey="count" fill={color} radius={[4, 4, 0, 0]} />
       </BarChart>
     </ResponsiveContainer>
   );
 };
 
-const CategoricalChart = ({ data, color = "#10b981" }) => {
+const CategoricalChart = ({ data, color = "#1B4324" }) => {
   return (
     <ResponsiveContainer width="100%" height={250}>
       <BarChart data={data} layout="vertical">
-        <CartesianGrid strokeDasharray="3 3" stroke="#ffffff1a" horizontal={false} />
-        <XAxis type="number" stroke="#ffffff66" fontSize={10} />
-        <YAxis dataKey="value" type="category" width={80} stroke="#ffffff66" fontSize={10} />
-        <Tooltip cursor={{ fill: "#ffffff1a" }} contentStyle={{ backgroundColor: "#1e1e2d", border: "none", borderRadius: 8, color: "#fff" }} />
+        <CartesianGrid strokeDasharray="3 3" stroke="#EAEAEA" horizontal={false} />
+        <XAxis type="number" stroke="#626C65" fontSize={10} />
+        <YAxis dataKey="value" type="category" width={80} stroke="#626C65" fontSize={10} />
+        <Tooltip cursor={{ fill: "rgba(0,0,0,0.02)" }} contentStyle={{ backgroundColor: "#ffffff", border: "1px solid #EAEAEA", borderRadius: 8, color: "#121A14" }} />
         <Bar dataKey="count" fill={color} radius={[0, 4, 4, 0]} />
       </BarChart>
     </ResponsiveContainer>
   );
 };
 
-const TrendChart = ({ data, color = "#f59e0b" }) => {
+const TrendChart = ({ data, color = "#1B4324" }) => {
   return (
     <ResponsiveContainer width="100%" height={250}>
       <LineChart data={data}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#ffffff1a" vertical={false} />
-        <XAxis dataKey="period" stroke="#ffffff66" fontSize={10} />
-        <YAxis stroke="#ffffff66" fontSize={10} />
-        <Tooltip contentStyle={{ backgroundColor: "#1e1e2d", border: "none", borderRadius: 8, color: "#fff" }} />
+        <CartesianGrid strokeDasharray="3 3" stroke="#EAEAEA" vertical={false} />
+        <XAxis dataKey="period" stroke="#626C65" fontSize={10} />
+        <YAxis stroke="#626C65" fontSize={10} />
+        <Tooltip contentStyle={{ backgroundColor: "#ffffff", border: "1px solid #EAEAEA", borderRadius: 8, color: "#121A14" }} />
         <Line type="monotone" dataKey="count" stroke={color} strokeWidth={2} dot={{ r: 3, fill: color }} />
       </LineChart>
     </ResponsiveContainer>
@@ -62,12 +63,12 @@ const CorrelationHeatmap = ({ matrix, topCorr }) => {
   const cols = Object.keys(matrix);
   
   const getColor = (val) => {
-    if (val === 1) return "bg-violet-500/20 text-violet-300";
-    if (val > 0.5) return "bg-emerald-500/40 text-emerald-200";
-    if (val > 0) return "bg-emerald-500/10 text-emerald-300/70";
-    if (val < -0.5) return "bg-rose-500/40 text-rose-200";
-    if (val < 0) return "bg-rose-500/10 text-rose-300/70";
-    return "bg-white/5 text-white/40";
+    if (val === 1) return "bg-sage text-forest font-semibold border border-forest/10";
+    if (val > 0.5) return "bg-[#EAF2EB] text-[#1B4324] font-medium border border-[#c8e0cb]/50";
+    if (val > 0) return "bg-[#EAF2EB]/40 text-[#1B4324]/80";
+    if (val < -0.5) return "bg-[#FDEBEC] text-[#9F2F2D] font-medium border border-[#f5c6cb]/50";
+    if (val < 0) return "bg-[#FDEBEC]/40 text-[#9F2F2D]/80";
+    return "bg-[#F9F9F8] text-muted";
   };
 
   return (
@@ -76,18 +77,18 @@ const CorrelationHeatmap = ({ matrix, topCorr }) => {
         <table className="w-full text-xs text-center border-collapse">
           <thead>
             <tr>
-              <th className="p-2 border border-white/10 bg-white/5"></th>
-              {cols.map(c => <th key={c} className="p-2 border border-white/10 bg-white/5 truncate max-w-[80px]" title={c}>{c}</th>)}
+              <th className="p-2 border border-border bg-[#F9F9F8]"></th>
+              {cols.map(c => <th key={c} className="p-2 border border-border bg-[#F9F9F8] text-ink truncate max-w-[80px]" title={c}>{c}</th>)}
             </tr>
           </thead>
           <tbody>
             {cols.map(row => (
               <tr key={row}>
-                <th className="p-2 border border-white/10 bg-white/5 text-left truncate max-w-[80px]" title={row}>{row}</th>
+                <th className="p-2 border border-border bg-[#F9F9F8] text-left text-ink truncate max-w-[80px]" title={row}>{row}</th>
                 {cols.map(col => {
                   const val = matrix[row][col];
                   return (
-                    <td key={col} className={`p-2 border border-white/10 ${getColor(val)}`}>
+                    <td key={col} className={`p-2 border border-border ${getColor(val)}`}>
                       {val.toFixed(2)}
                     </td>
                   );
@@ -99,11 +100,11 @@ const CorrelationHeatmap = ({ matrix, topCorr }) => {
       </div>
       {topCorr && topCorr.length > 0 && (
         <div className="mt-4">
-          <p className="text-sm font-semibold mb-2">Tương quan mạnh nhất:</p>
+          <p className="text-sm font-semibold mb-2 text-ink">Tương quan mạnh nhất:</p>
           <div className="flex flex-wrap gap-2">
             {topCorr.slice(0, 5).map((tc, idx) => (
-              <span key={idx} className="text-xs px-2 py-1 rounded bg-white/5 border border-white/10">
-                {tc.col_a} ↔ {tc.col_b}: <span className={tc.r > 0 ? "text-emerald-400" : "text-rose-400"}>{tc.r}</span>
+              <span key={idx} className="text-xs px-2.5 py-1 rounded-full bg-[#F9F9F8] border border-border text-ink">
+                {tc.col_a} ↔ {tc.col_b}: <span className={tc.r > 0 ? "text-forest font-semibold" : "text-[#9F2F2D] font-semibold"}>{tc.r}</span>
               </span>
             ))}
           </div>
@@ -193,7 +194,7 @@ export default function Visualize() {
 
   useEffect(() => {
     if (!fileSession.sessionId) {
-      showToast("Không tìm thấy session. Vui lòng làm sạch dữ liệu trước.", "error");
+      showToast("Chưa có dữ liệu phân tích. Vui lòng thực hiện bước Làm sạch dữ liệu trước.", "error");
       navigate("/ua_cleaner");
       return;
     }
@@ -233,7 +234,7 @@ export default function Visualize() {
         else if (generated.distribution.length === 0 && generated.time.length > 0) setActiveTab("time");
 
       } catch (err) {
-        showToast(err.response?.data?.detail || "Lỗi khi tính toán dữ liệu", "error");
+        showToast(err.response?.data?.detail || "Không thể tải dữ liệu biểu đồ. Vui lòng thử lại sau.", "error");
       } finally {
         setLoading(false);
       }
@@ -284,15 +285,15 @@ export default function Visualize() {
     return (
       <div 
         key={chart.id} 
-        className={`bg-white/5 border rounded-xl p-5 relative transition-all ${isSelected ? "border-violet-500 shadow-[0_0_15px_rgba(139,92,246,0.2)]" : "border-white/10 hover:border-white/30"}`}
+        className={`bg-white border rounded-xl p-5 relative transition-all ${isSelected ? "border-forest shadow-[0_2px_8px_rgba(27,67,36,0.04)]" : "border-border hover:border-muted/40"}`}
       >
         <div className="flex justify-between items-start mb-4">
-          <h3 className="font-semibold text-sm">{chart.title}</h3>
+          <h3 className="font-serif font-semibold text-sm text-ink">{chart.title}</h3>
           <button 
             onClick={() => toggleChart(chart.id)}
-            className={`w-6 h-6 rounded flex items-center justify-center border transition-colors ${isSelected ? "bg-violet-500 border-violet-500 text-white" : "border-white/20 text-transparent hover:border-white/50"}`}
+            className={`w-6 h-6 rounded flex items-center justify-center border transition-colors ${isSelected ? "bg-forest border-forest text-white" : "border-border text-transparent hover:border-muted/50"}`}
           >
-            ✓
+            <Check className="w-4 h-4" />
           </button>
         </div>
         
@@ -306,8 +307,8 @@ export default function Visualize() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#0B0F1A] text-white flex flex-col items-center justify-center py-20 px-6">
-        <div className="w-12 h-12 rounded-full border-4 border-violet-500 border-t-transparent animate-spin mb-4"></div>
+      <div className="min-h-screen bg-canvas text-ink flex flex-col items-center justify-center py-20 px-6 font-sans">
+        <div className="w-12 h-12 rounded-full border-4 border-forest border-t-transparent animate-spin mb-4"></div>
         <h2 className="text-xl font-bold mb-2">Đang xử lý số liệu thống kê...</h2>
         <p className="text-muted text-sm text-center max-w-md">DataMind đang chạy hàng loạt thuật toán (Phân phối, Tương quan, Xu hướng) trên toàn bộ dataset của bạn. Tùy thuộc vào dung lượng file, việc này có thể mất vài giây.</p>
       </div>
@@ -317,42 +318,42 @@ export default function Visualize() {
   const activeCharts = charts[activeTab] || [];
 
   return (
-    <div className="min-h-screen bg-[#0B0F1A] text-white flex flex-col lg:flex-row">
+    <div className="min-h-screen bg-canvas text-ink flex flex-col lg:flex-row font-sans">
       
       {/* Main Content Area */}
-      <div className="flex-1 p-6 lg:p-10 overflow-y-auto">
+      <div className="flex-1 p-4 sm:p-6 lg:p-10 overflow-y-auto">
         <div className="mb-8">
-          <h1 className="font-serif text-3xl tracking-tight mb-2">Trực quan hóa Dữ liệu</h1>
+          <h1 className="font-serif text-2xl sm:text-3xl tracking-tight mb-2 text-ink">Trực quan hóa Dữ liệu</h1>
           <p className="text-muted text-sm">Hệ thống đã tự động chọn và xếp hạng các biểu đồ thú vị nhất. Bạn có thể chọn biểu đồ để đưa vào báo cáo cuối cùng.</p>
         </div>
 
         {/* Capability Summary (Feature 2) */}
         {fileSession.capabilities && (
-          <div className="bg-white/5 border border-white/10 rounded-xl p-5 mb-6">
-            <h2 className="text-sm font-semibold mb-3 flex items-center justify-between">
+          <div className="bg-sage/20 border border-border rounded-xl p-5 mb-6">
+            <h2 className="text-sm font-semibold mb-3 flex items-center justify-between text-ink">
               <span>Đánh giá khả năng trực quan hóa</span>
               {fileSession.warnings?.some(w => w.code === "LOW_ROW_COUNT") && (
-                <span className="text-xs font-normal text-amber-400 bg-amber-400/10 px-2 py-0.5 rounded flex items-center gap-1">
-                  <span>⚠️</span> Dữ liệu ít, kết quả mang tính tham khảo
+                <span className="text-xs font-normal text-[#956400] bg-[#FBF3DB] px-2 py-0.5 rounded border border-[#f0dda0] flex items-center gap-1">
+                  <AlertTriangle className="w-3 h-3 inline-block" /> Dữ liệu ít, kết quả mang tính tham khảo
                 </span>
               )}
             </h2>
             <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
-              <span className={`flex items-center gap-1.5 ${fileSession.capabilities.histogram ? 'text-emerald-400' : 'text-rose-400/80'}`}>
-                {fileSession.capabilities.histogram ? '✅' : '❌'} Phân phối
+              <span className={`flex items-center gap-1.5 ${fileSession.capabilities.histogram ? 'text-forest font-semibold' : 'text-[#9F2F2D]/80'}`}>
+                {fileSession.capabilities.histogram ? <Check className="w-4 h-4 shrink-0" /> : <X className="w-4 h-4 shrink-0" />} Phân phối
               </span>
-              <span className={`flex items-center gap-1.5 ${fileSession.capabilities.correlation ? 'text-emerald-400' : 'text-rose-400/80'}`}>
-                {fileSession.capabilities.correlation ? '✅' : '❌'} Tương quan
+              <span className={`flex items-center gap-1.5 ${fileSession.capabilities.correlation ? 'text-forest font-semibold' : 'text-[#9F2F2D]/80'}`}>
+                {fileSession.capabilities.correlation ? <Check className="w-4 h-4 shrink-0" /> : <X className="w-4 h-4 shrink-0" />} Tương quan
               </span>
-              <span className={`flex items-center gap-1.5 ${fileSession.capabilities.line_chart ? 'text-emerald-400' : 'text-rose-400/80'}`}>
-                {fileSession.capabilities.line_chart ? '✅' : '❌'} Theo thời gian
+              <span className={`flex items-center gap-1.5 ${fileSession.capabilities.line_chart ? 'text-forest font-semibold' : 'text-[#9F2F2D]/80'}`}>
+                {fileSession.capabilities.line_chart ? <Check className="w-4 h-4 shrink-0" /> : <X className="w-4 h-4 shrink-0" />} Theo thời gian
               </span>
             </div>
           </div>
         )}
 
         {/* Tabs */}
-        <div className="flex gap-2 border-b border-white/10 mb-6 pb-1 overflow-x-auto">
+        <div className="flex gap-2 border-b border-border mb-6 pb-1 overflow-x-auto">
           {[
             { id: "distribution", label: `Phân phối (${charts.distribution.length})` },
             { id: "correlation", label: `Tương quan (${charts.correlation.length})` },
@@ -369,9 +370,9 @@ export default function Visualize() {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`px-4 py-2 text-sm font-medium whitespace-nowrap transition-colors border-b-2 ${activeTab === tab.id ? "border-violet-500 text-violet-400" : "border-transparent text-white/50 hover:text-white"} ${!isSupported && activeTab !== tab.id ? 'opacity-50' : ''}`}
+                className={`px-4 py-2 text-sm font-medium whitespace-nowrap transition-colors border-b-2 ${activeTab === tab.id ? "border-forest text-forest font-semibold" : "border-transparent text-muted hover:text-ink"} ${!isSupported && activeTab !== tab.id ? 'opacity-50' : ''}`}
               >
-                {tab.label} {!isSupported && "⚠️"}
+                {tab.label} {!isSupported && <AlertTriangle className="w-3 h-3 inline-block ml-1" />}
               </button>
             )
           })}
@@ -379,7 +380,7 @@ export default function Visualize() {
 
         {/* Chart Grid */}
         {activeCharts.length === 0 ? (
-          <div className="text-center py-20 border-2 border-dashed border-white/10 rounded-xl">
+          <div className="text-center py-20 border-2 border-dashed border-border rounded-xl">
             <p className="text-muted">Không có biểu đồ nào phù hợp trong mục này.</p>
           </div>
         ) : (
@@ -404,17 +405,17 @@ export default function Visualize() {
 
               return (
                 <div key={chart.id} className="relative group">
-                  <div className={`transition-all ${isDisabled ? 'opacity-30 grayscale pointer-events-none' : ''}`}>
+                  <div className={`transition-all ${isDisabled ? 'opacity-20 grayscale pointer-events-none' : ''}`}>
                     {renderChartCard(chart)}
                   </div>
                   
                   {/* Disabled Overlay & Tooltip */}
                   {isDisabled && (
-                    <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#0B0F1A]/50 rounded-xl border border-white/10 backdrop-blur-[1px]">
-                      <div className="bg-[#1e1e2d] px-4 py-3 rounded-lg border border-white/10 text-center max-w-[80%] shadow-xl">
-                        <span className="text-xl block mb-1">🔒</span>
-                        <p className="text-sm font-medium text-white mb-1">Không khả dụng</p>
-                        <p className="text-xs text-white/60">{disableReason}</p>
+                    <div className="absolute inset-0 z-10 flex items-center justify-center bg-canvas/60 rounded-xl border border-border/10 backdrop-blur-[1px]">
+                      <div className="bg-white px-4 py-3 rounded-lg border border-border text-center max-w-[80%] shadow-md">
+                        <Lock className="w-6 h-6 mx-auto mb-2 text-ink/70" />
+                        <p className="text-sm font-semibold text-ink mb-1">Không khả dụng</p>
+                        <p className="text-xs text-muted">{disableReason}</p>
                       </div>
                     </div>
                   )}
@@ -426,37 +427,37 @@ export default function Visualize() {
       </div>
 
       {/* Sidebar (Selection Panel) */}
-      <div className="w-full lg:w-80 bg-[#12182B] border-l border-white/10 flex flex-col shrink-0 lg:h-screen lg:sticky lg:top-0">
-        <div className="p-6 border-b border-white/10">
-          <h2 className="font-bold text-lg mb-1">Biểu đồ đã chọn</h2>
+      <div className="w-full lg:w-80 bg-[#F9F9F8] border-l border-border flex flex-col shrink-0 lg:h-screen lg:sticky lg:top-0">
+        <div className="p-6 border-b border-border">
+          <h2 className="font-bold text-lg mb-1 text-ink">Biểu đồ đã chọn</h2>
           <p className="text-xs text-muted">Sẽ xuất hiện trong báo cáo AI</p>
         </div>
         
         <div className="flex-1 p-6 overflow-y-auto space-y-3">
           {selectedChartIds.size === 0 ? (
-            <p className="text-sm text-white/30 text-center py-10">Chưa có biểu đồ nào được chọn.</p>
+            <p className="text-sm text-muted/60 text-center py-10">Chưa có biểu đồ nào được chọn.</p>
           ) : (
             [...charts.distribution, ...charts.correlation, ...charts.time, ...charts.other]
               .filter(c => selectedChartIds.has(c.id))
               .map(c => (
-                <div key={`sel_${c.id}`} className="bg-white/5 border border-white/10 rounded-lg p-3 flex justify-between items-center text-sm">
-                  <span className="truncate pr-2">{c.title}</span>
-                  <button onClick={() => toggleChart(c.id)} className="text-white/40 hover:text-rose-400 shrink-0">✕</button>
+                <div key={`sel_${c.id}`} className="bg-white border border-border rounded-lg p-3 flex justify-between items-center text-sm text-ink shadow-sm">
+                  <span className="truncate pr-2 font-medium">{c.title}</span>
+                  <button onClick={() => toggleChart(c.id)} className="text-muted hover:text-red-500 shrink-0"><X className="w-4 h-4" /></button>
                 </div>
               ))
           )}
         </div>
 
-        <div className="p-6 border-t border-white/10 bg-[#12182B]">
+        <div className="p-6 border-t border-border bg-[#F9F9F8]">
           <div className="flex justify-between items-center mb-4 text-sm">
             <span className="text-muted">Tổng cộng</span>
-            <span className="font-bold text-violet-400">{selectedChartIds.size} biểu đồ</span>
+            <span className="font-semibold text-forest">{selectedChartIds.size} biểu đồ</span>
           </div>
           <button 
             onClick={handleConfirm}
-            className="w-full bg-violet-500 hover:bg-violet-400 text-white py-3 rounded-xl font-semibold transition-all shadow-lg shadow-violet-500/20"
+            className="w-full bg-[#111111] hover:bg-[#333333] text-white py-3 rounded-lg font-semibold transition-all active:scale-[0.98] shadow-sm"
           >
-            Chốt danh sách & Chuyển tiếp →
+            Chốt danh sách & Chuyển tiếp <ArrowRight className="w-4 h-4 inline-block ml-1" />
           </button>
         </div>
       </div>

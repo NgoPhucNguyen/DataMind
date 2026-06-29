@@ -23,11 +23,11 @@ export default function Register() {
     setLoading(true);
     try {
       await register(formData);
-      showToast("Đăng ký thành công! Vui lòng đăng nhập.", "success");
+      showToast("Đăng ký tài khoản thành công! Vui lòng đăng nhập để bắt đầu.", "success");
       navigate("/login");
     } catch (error) {
       const detail = error.response?.data?.detail;
-      let msg = "Đăng ký thất bại. Vui lòng thử lại.";
+      let msg = "Không thể tạo tài khoản. Vui lòng kiểm tra lại thông tin hoặc thử lại sau.";
       if (Array.isArray(detail)) {
         msg = detail[0].msg.replace("Value error, ", "");
       } else if (typeof detail === "string") {
@@ -40,25 +40,23 @@ export default function Register() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0B0F1A] text-white flex flex-col">
-    
-
+    <div className="min-h-screen bg-canvas text-ink flex flex-col font-sans">
       {/* Form */}
       <div className="flex-1 flex items-center justify-center px-4 py-12">
         <div className="w-full max-w-md">
           <div className="mb-8 text-center">
-            <h1 className="text-3xl font-bold tracking-tight mb-2">Tạo tài khoản</h1>
-            <p className="text-white/40 text-sm">Miễn phí trong giai đoạn Beta</p>
+            <h1 className="text-3xl font-serif font-bold tracking-tight mb-2 text-ink">Tạo tài khoản</h1>
+            <p className="text-muted text-sm">Miễn phí trong giai đoạn Beta</p>
           </div>
 
           <form
             id="register-form"
             onSubmit={handleSubmit}
-            className="bg-white/5 border border-white/10 rounded-2xl p-8 flex flex-col gap-4"
+            className="bg-white border border-border rounded-xl p-8 flex flex-col gap-4 shadow-sm"
           >
             {/* Full Name */}
             <div className="flex flex-col gap-1.5">
-              <label htmlFor="reg-fullname" className="text-xs text-white/50 font-medium uppercase tracking-wider">
+              <label htmlFor="reg-fullname" className="text-xs text-muted font-semibold uppercase tracking-wider">
                 Họ và tên
               </label>
               <input
@@ -70,13 +68,13 @@ export default function Register() {
                 autoComplete="name"
                 value={formData.full_name}
                 onChange={handleChange}
-                className="bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-sm text-white placeholder-white/20 outline-none focus:border-violet-500/60 focus:ring-1 focus:ring-violet-500/30 transition-all"
+                className="bg-canvas border border-border rounded-lg px-4 py-3 text-sm text-ink placeholder-muted/40 outline-none focus:border-forest/60 focus:ring-1 focus:ring-forest/30 transition-all"
               />
             </div>
 
             {/* Email */}
             <div className="flex flex-col gap-1.5">
-              <label htmlFor="reg-email" className="text-xs text-white/50 font-medium uppercase tracking-wider">
+              <label htmlFor="reg-email" className="text-xs text-muted font-semibold uppercase tracking-wider">
                 Email
               </label>
               <input
@@ -88,13 +86,13 @@ export default function Register() {
                 autoComplete="email"
                 value={formData.email}
                 onChange={handleChange}
-                className="bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-sm text-white placeholder-white/20 outline-none focus:border-violet-500/60 focus:ring-1 focus:ring-violet-500/30 transition-all"
+                className="bg-canvas border border-border rounded-lg px-4 py-3 text-sm text-ink placeholder-muted/40 outline-none focus:border-forest/60 focus:ring-1 focus:ring-forest/30 transition-all"
               />
             </div>
 
             {/* Password */}
             <div className="flex flex-col gap-1.5">
-              <label htmlFor="reg-password" className="text-xs text-white/50 font-medium uppercase tracking-wider">
+              <label htmlFor="reg-password" className="text-xs text-muted font-semibold uppercase tracking-wider">
                 Mật khẩu
               </label>
               <input
@@ -106,7 +104,7 @@ export default function Register() {
                 autoComplete="new-password"
                 value={formData.password}
                 onChange={handleChange}
-                className="bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-sm text-white placeholder-white/20 outline-none focus:border-violet-500/60 focus:ring-1 focus:ring-violet-500/30 transition-all"
+                className="bg-canvas border border-border rounded-lg px-4 py-3 text-sm text-ink placeholder-muted/40 outline-none focus:border-forest/60 focus:ring-1 focus:ring-forest/30 transition-all"
               />
             </div>
 
@@ -115,7 +113,7 @@ export default function Register() {
               id="register-submit-btn"
               type="submit"
               disabled={loading}
-              className="mt-2 bg-violet-500 hover:bg-violet-400 disabled:bg-violet-500/40 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-xl transition-all flex items-center justify-center gap-2"
+              className="mt-2 bg-[#111111] hover:bg-[#222222] disabled:bg-[#111111]/40 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2 shadow-sm"
             >
               {loading ? (
                 <>
@@ -127,14 +125,14 @@ export default function Register() {
               )}
             </button>
 
-            <p className="text-center text-white/20 text-[11px]">
+            <p className="text-center text-muted/80 text-[11px]">
               Bằng cách đăng ký, bạn đồng ý với Điều khoản sử dụng của DataMind.
             </p>
           </form>
 
-          <p className="text-center text-white/30 text-xs mt-6">
+          <p className="text-center text-muted text-xs mt-6">
             Đã có tài khoản?{" "}
-            <Link to="/login" className="text-violet-400 hover:text-violet-300 transition-colors">
+            <Link to="/login" className="text-forest hover:text-forest/80 font-medium transition-colors">
               Đăng nhập
             </Link>
           </p>

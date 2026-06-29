@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Lightbulb } from "lucide-react";
 
 const SAMPLE_DATA = [
     { month: "T1", value: 4200 },
@@ -39,13 +40,13 @@ export default function Demo() {
     };
 
     return (
-        <div className="min-h-screen bg-[#0B0F1A] text-white">
-            <div className="max-w-4xl mx-auto px-6 py-20">
+        <div className="min-h-screen bg-canvas text-ink font-sans">
+            <div className="max-w-4xl mx-auto px-4 sm:px-6 py-12 sm:py-20">
                 <div className="text-center mb-12">
-                    <h1 className="text-4xl font-bold tracking-tight mb-4">
-                        Thử <span className="text-violet-400">nghiệm</span> ngay
+                    <h1 className="text-3xl sm:text-4xl font-serif tracking-tight mb-4 text-ink">
+                        Thử <span className="text-forest italic font-semibold">nghiệm</span> ngay
                     </h1>
-                    <p className="text-white/40 max-w-xl mx-auto">
+                    <p className="text-muted max-w-xl mx-auto">
                         Xem DataMind phân tích dữ liệu mẫu trong thời gian thực.
                     </p>
                 </div>
@@ -54,24 +55,24 @@ export default function Demo() {
                 {!uploaded && (
                     <div
                         onClick={handleDemo}
-                        className="border-2 border-dashed border-white/15 hover:border-violet-500/50 rounded-2xl p-16 text-center cursor-pointer transition-all group"
+                        className="bg-white border-2 border-dashed border-border hover:border-forest/50 rounded-2xl p-16 text-center cursor-pointer transition-all group"
                     >
-                        <div className="w-16 h-16 rounded-2xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center mx-auto mb-4 group-hover:bg-violet-500/20 transition-all">
-                            <svg className="w-8 h-8 text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <div className="w-16 h-16 rounded-2xl bg-sage/40 border border-forest/10 flex items-center justify-center mx-auto mb-4 group-hover:bg-sage/60 transition-all">
+                            <svg className="w-8 h-8 text-forest" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                             </svg>
                         </div>
-                        <p className="font-semibold mb-1">Nhấn để chạy demo với dữ liệu mẫu</p>
-                        <p className="text-white/40 text-sm">Hoặc kéo thả file CSV / Excel của bạn vào đây</p>
+                        <p className="font-semibold text-ink mb-1">Nhấn để chạy demo với dữ liệu mẫu</p>
+                        <p className="text-muted text-sm">Hoặc kéo thả file CSV / Excel của bạn vào đây</p>
                     </div>
                 )}
 
                 {/* Analyzing */}
                 {analyzing && (
-                    <div className="rounded-2xl bg-white/5 border border-white/10 p-10 text-center">
-                        <div className="w-12 h-12 rounded-full border-2 border-violet-500 border-t-transparent animate-spin mx-auto mb-4" />
-                        <p className="font-semibold text-violet-400">Đang phân tích dữ liệu...</p>
-                        <p className="text-white/30 text-sm mt-1">AI đang xử lý 6 cột, 1.240 dòng</p>
+                    <div className="bg-white border border-border rounded-2xl p-10 text-center">
+                        <div className="w-12 h-12 rounded-full border-2 border-forest border-t-transparent animate-spin mx-auto mb-4" />
+                        <p className="font-semibold text-forest">Đang phân tích dữ liệu...</p>
+                        <p className="text-muted text-sm mt-1">AI đang xử lý 6 cột, 1.240 dòng</p>
                     </div>
                 )}
 
@@ -81,34 +82,34 @@ export default function Demo() {
                         {/* Stats */}
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                             {INSIGHTS.map((ins) => (
-                                <div key={ins.label} className="bg-white/5 border border-white/10 rounded-xl p-4">
-                                    <p className="text-white/40 text-xs mb-1">{ins.label}</p>
-                                    <p className="text-xl font-bold text-violet-400">{ins.value}</p>
+                                <div key={ins.label} className="bg-white border border-border rounded-xl p-4 shadow-sm">
+                                    <p className="text-muted text-xs mb-1">{ins.label}</p>
+                                    <p className="text-xl font-bold text-forest">{ins.value}</p>
                                 </div>
                             ))}
                         </div>
 
                         {/* Bar chart */}
-                        <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
-                            <p className="text-sm font-semibold mb-6 text-white/70">Doanh thu theo tháng (nghìn đồng)</p>
+                        <div className="bg-white border border-border rounded-2xl p-6 shadow-sm">
+                            <p className="text-sm font-semibold mb-6 text-ink/75">Doanh thu theo tháng (nghìn đồng)</p>
                             <div className="flex items-end gap-3 h-40">
                                 {SAMPLE_DATA.map((d) => (
                                     <div key={d.month} className="flex-1 flex flex-col items-center gap-2">
-                                        <span className="text-xs text-white/40">{(d.value / 1000).toFixed(1)}k</span>
+                                        <span className="text-xs text-muted">{(d.value / 1000).toFixed(1)}k</span>
                                         <div
-                                            className="w-full rounded-t-lg bg-violet-500/70 hover:bg-violet-400 transition-all"
+                                            className="w-full rounded-t-lg bg-forest/80 hover:bg-forest transition-all"
                                             style={{ height: `${(d.value / maxVal) * 100}%` }}
                                         />
-                                        <span className="text-xs text-white/40">{d.month}</span>
+                                        <span className="text-xs text-muted">{d.month}</span>
                                     </div>
                                 ))}
                             </div>
                         </div>
 
                         {/* Summary */}
-                        <div className="bg-violet-500/10 border border-violet-500/20 rounded-2xl p-6">
-                            <p className="text-sm font-semibold text-violet-300 mb-2">💡 Nhận xét từ AI</p>
-                            <p className="text-white/60 text-sm leading-relaxed">
+                        <div className="bg-sage/20 border border-[#c8e0cb]/50 rounded-2xl p-6">
+                            <p className="text-sm font-semibold text-forest mb-2 flex items-center"><Lightbulb className="w-4 h-4 mr-1.5" /> Nhận xét từ AI</p>
+                            <p className="text-ink/80 text-sm leading-relaxed">
                                 Dữ liệu cho thấy xu hướng tăng trưởng ổn định với mức tăng bình quân 12.4%/tháng.
                                 Tháng 6 đạt đỉnh cao nhất (6.300), dự báo tháng 7 tiếp tục tăng nhẹ lên khoảng 6.800.
                                 Không phát hiện bất thường đáng kể.
@@ -116,12 +117,12 @@ export default function Demo() {
                         </div>
 
                         <div className="flex gap-3">
-                            <button className="flex-1 bg-violet-500 hover:bg-violet-400 text-white py-3 rounded-xl font-semibold transition-all text-sm">
+                            <button className="flex-1 bg-[#111111] hover:bg-[#222222] text-white py-3 rounded-lg font-semibold transition-all text-sm shadow-sm">
                                 Xuất báo cáo PDF
                             </button>
                             <button
                                 onClick={reset}
-                                className="px-6 py-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-sm font-medium transition-all"
+                                className="px-6 py-3 rounded-lg bg-white hover:bg-[#F9F9F8] border border-border text-ink text-sm font-medium transition-all"
                             >
                                 Thử lại
                             </button>

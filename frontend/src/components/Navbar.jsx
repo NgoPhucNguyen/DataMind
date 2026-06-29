@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { getUser, logout } from "../services/authService";
+import { Wallet, Settings, LogOut, LayoutDashboard, Sparkles, ChevronDown, Menu, X } from "lucide-react";
 const NAV_LINKS = [
     { label: "Trang chủ", path: "/" },
     { label: "Giá cả", path: "/pricing" },
@@ -14,6 +15,7 @@ export default function Navbar() {
     const location = useLocation();
     const user = getUser();
     const [showMenu, setShowMenu] = useState(false);
+    const [showMobileMenu, setShowMobileMenu] = useState(false);
     const menuRef = useRef(null);
 
     // Close menu when clicking outside
@@ -28,32 +30,41 @@ export default function Navbar() {
     }, []);
 
     return (
-        <header className="border-b border-white/10 px-6 py-4 flex justify-between items-center bg-[#0B0F1A] sticky top-0 z-50">
-            {/* Logo */}
-            {/* Logo */}
-<div
-    className="flex items-center gap-2 cursor-pointer select-none"
-    onClick={() => navigate("/")}
->
-    <div className="w-8 h-8 rounded-lg bg-white flex items-center justify-center overflow-hidden shrink-0">
-        <img src="/logo_icon.png" alt="Logo" className="w-full h-full object-cover mix-blend-multiply" />
-    </div>
+        <header className="border-b border-border bg-canvas sticky top-0 z-50">
+            <div className="px-4 md:px-6 py-4 flex justify-between items-center">
+                <div className="flex items-center gap-3">
+                    {/* Mobile menu button */}
+                    <button 
+                        className="md:hidden text-ink hover:text-forest p-1 rounded-md" 
+                        onClick={() => setShowMobileMenu(!showMobileMenu)}
+                    >
+                        {showMobileMenu ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+                    </button>
 
-    <span className="text-lg font-bold tracking-tight">
-        DataMind<span className="text-violet-400">.</span>
-    </span>
-</div>
+                    {/* Logo */}
+                    <div
+                        className="flex items-center gap-2 cursor-pointer select-none"
+                        onClick={() => navigate("/")}
+                    >
+                        <div className="w-8 h-8 rounded-lg bg-white border border-border flex items-center justify-center overflow-hidden shrink-0">
+                            <img src="/logo_icon.png" alt="Logo" className="w-full h-full object-cover mix-blend-multiply" />
+                        </div>
+                        <span className="text-lg font-bold tracking-tight text-ink hidden sm:block">
+                            Data<span className="text-forest">Mind</span>
+                        </span>
+                    </div>
+                </div>
 
-            {/* Nav links */}
-            <nav className="flex items-center gap-1">
+                {/* Nav links */}
+                <nav className="hidden md:flex items-center gap-1">
                 {NAV_LINKS.map((link) => (
                     <button
                         key={link.path}
                         onClick={() => navigate(link.path)}
                         className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                             location.pathname === link.path
-                                ? "bg-violet-500/20 text-violet-400"
-                                : "text-white/50 hover:text-white hover:bg-white/5"
+                                ? "bg-sage text-forest"
+                                : "text-muted hover:text-ink hover:bg-sage/40"
                         }`}
                     >
                         {link.label}
@@ -62,59 +73,76 @@ export default function Navbar() {
             </nav>
 
             {/* Auth buttons / User Profile */}
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2 sm:gap-4">
                 {user ? (
                     <div className="flex items-center gap-4 relative" ref={menuRef}>
                         <button
                             onClick={() => navigate("/home")}
-                            className="text-sm bg-violet-500 hover:bg-violet-400 text-white px-4 py-2 rounded-lg font-semibold transition-all hidden sm:block"
+                            className="text-sm bg-ink hover:bg-ink/80 text-white px-4 py-2 rounded-lg font-semibold transition-all hidden sm:block"
                         >
                             Vào Dashboard
                         </button>
                         
                         <div 
-                            className="flex items-center gap-2 text-white/80 cursor-pointer hover:bg-white/5 px-2 py-1.5 rounded-lg transition-colors select-none"
+                            className="flex items-center gap-2 text-ink cursor-pointer hover:bg-sage/40 px-2 py-1.5 rounded-lg transition-colors select-none"
                             onClick={() => setShowMenu(!showMenu)}
                         >
-                            <div className="w-8 h-8 rounded-full bg-violet-500 flex items-center justify-center text-white font-bold text-sm">
+                            <div className="w-8 h-8 rounded-full bg-forest flex items-center justify-center text-white font-bold text-sm shrink-0">
                                 {user.full_name?.charAt(0) || user.email?.charAt(0) || "U"}
                             </div>
-                            <span className="text-sm font-medium hidden sm:block">{user.full_name || "User"}</span>
-                            <svg className={`w-4 h-4 transition-transform ${showMenu ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                            </svg>
+                            <span className="text-sm font-medium hidden lg:block text-ink max-w-[100px] truncate">{user.full_name || "User"}</span>
+                            <ChevronDown className={`w-4 h-4 text-muted transition-transform shrink-0 ${showMenu ? 'rotate-180' : ''}`} />
                         </div>
 
                         {/* Dropdown Menu */}
                         {showMenu && (
-                            <div className="absolute right-0 top-full mt-2 w-48 bg-[#161B2E] border border-white/10 rounded-xl shadow-xl overflow-hidden py-1 z-50 animate-in fade-in slide-in-from-top-2">
-                                <div className="px-4 py-2 border-b border-white/5 mb-1">
-                                    <p className="text-sm font-medium text-white truncate">{user.full_name || "User"}</p>
-                                    <p className="text-xs text-white/50 truncate">{user.email}</p>
+                            <div className="absolute right-0 top-full mt-2 w-56 bg-white border border-border rounded-xl shadow-xl overflow-hidden py-1 z-50 animate-in fade-in slide-in-from-top-2">
+                                <div className="px-4 py-2 border-b border-border mb-1">
+                                    <p className="text-sm font-semibold text-ink truncate">{user.full_name || "User"}</p>
+                                    <p className="text-xs text-muted truncate">{user.email}</p>
                                 </div>
-                                <button
-                                    onClick={() => { setShowMenu(false); navigate("/wallet"); }}
-                                    className="w-full text-left px-4 py-2 text-sm text-white/70 hover:bg-white/5 hover:text-white transition-colors flex items-center gap-2"
-                                >
-                                    <span>💰</span> Ví của tôi
-                                </button>
-                                <button
-                                    onClick={() => { setShowMenu(false); navigate("/settings"); }}
-                                    className="w-full text-left px-4 py-2 text-sm text-white/70 hover:bg-white/5 hover:text-white transition-colors flex items-center gap-2"
-                                >
-                                    <span>⚙️</span> Cài đặt
-                                </button>
-                                <div className="h-px bg-white/5 my-1"></div>
-                                <button
-                                    onClick={() => {
-                                        setShowMenu(false);
-                                        logout();
-                                        navigate("/");
-                                    }}
-                                    className="w-full text-left px-4 py-2 text-sm text-red-400 hover:bg-red-400/10 transition-colors flex items-center gap-2"
-                                >
-                                    <span>🚪</span> Đăng xuất
-                                </button>
+                                
+                                <div className="p-1">
+                                    <button
+                                        onClick={() => { setShowMenu(false); navigate("/home"); }}
+                                        className="w-full text-left px-3 py-2 text-sm text-ink hover:bg-sage/40 transition-colors flex items-center gap-2 font-medium rounded-md"
+                                    >
+                                        <LayoutDashboard className="w-4 h-4 text-muted" /> Bảng điều khiển
+                                    </button>
+                                    <button
+                                        onClick={() => { setShowMenu(false); navigate("/wallet"); }}
+                                        className="w-full text-left px-3 py-2 text-sm text-ink hover:bg-sage/40 transition-colors flex items-center gap-2 font-medium rounded-md"
+                                    >
+                                        <Wallet className="w-4 h-4 text-muted" /> Ví của tôi
+                                    </button>
+                                    <button
+                                        onClick={() => { setShowMenu(false); navigate("/pricing"); }}
+                                        className="w-full text-left px-3 py-2 text-sm text-ink hover:bg-sage/40 transition-colors flex items-center gap-2 font-medium rounded-md"
+                                    >
+                                        <Sparkles className="w-4 h-4 text-forest" /> Nâng cấp tài khoản
+                                    </button>
+                                </div>
+                                
+                                <div className="h-px bg-border my-1"></div>
+                                
+                                <div className="p-1">
+                                    <button
+                                        onClick={() => { setShowMenu(false); navigate("/settings"); }}
+                                        className="w-full text-left px-3 py-2 text-sm text-ink hover:bg-sage/40 transition-colors flex items-center gap-2 font-medium rounded-md"
+                                    >
+                                        <Settings className="w-4 h-4 text-muted" /> Cài đặt
+                                    </button>
+                                    <button
+                                        onClick={() => {
+                                            setShowMenu(false);
+                                            logout();
+                                            navigate("/");
+                                        }}
+                                        className="w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors flex items-center gap-2 font-medium rounded-md"
+                                    >
+                                        <LogOut className="w-4 h-4" /> Đăng xuất
+                                    </button>
+                                </div>
                             </div>
                         )}
                     </div>
@@ -122,19 +150,39 @@ export default function Navbar() {
                     <>
                         <button
                             onClick={() => navigate("/login")}
-                            className="text-sm text-white/50 hover:text-white transition-colors px-4 py-2 rounded-lg hover:bg-white/5 font-medium"
+                            className="text-sm text-ink hover:text-forest transition-colors px-4 py-2 rounded-lg hover:bg-sage/40 font-semibold"
                         >
                             Đăng nhập
                         </button>
                         <button
                             onClick={() => navigate("/register")}
-                            className="text-sm bg-violet-500 hover:bg-violet-400 text-white px-4 py-2 rounded-lg font-semibold transition-all"
+                            className="text-sm bg-ink hover:bg-ink/80 text-white px-4 py-2 rounded-lg font-semibold transition-all shadow-sm"
                         >
                             Đăng ký
                         </button>
                     </>
                 )}
+                </div>
             </div>
+
+            {/* Mobile Nav links */}
+            {showMobileMenu && (
+                <nav className="md:hidden border-t border-border bg-canvas px-4 py-3 flex flex-col gap-1 shadow-inner">
+                    {NAV_LINKS.map((link) => (
+                        <button
+                            key={link.path}
+                            onClick={() => { navigate(link.path); setShowMobileMenu(false); }}
+                            className={`px-4 py-3 rounded-lg text-sm font-medium text-left transition-colors ${
+                                location.pathname === link.path
+                                    ? "bg-sage text-forest"
+                                    : "text-muted hover:text-ink hover:bg-sage/40"
+                            }`}
+                        >
+                            {link.label}
+                        </button>
+                    ))}
+                </nav>
+            )}
         </header>
     );
 }

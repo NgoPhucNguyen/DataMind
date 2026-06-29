@@ -25,11 +25,11 @@ export default function Login() {
       const response = await login(formData);
       localStorage.setItem("token", response.token.access_token);
       localStorage.setItem("user", JSON.stringify(response.user));
-      showToast("Đăng nhập thành công! Chào mừng trở lại.", "success");
+      showToast("Đăng nhập thành công! Chào mừng bạn quay trở lại.", "success");
       navigate(from, { replace: true });
     } catch (error) {
       const msg =
-        error.response?.data?.detail || "Đăng nhập thất bại. Vui lòng thử lại.";
+        error.response?.data?.detail || "Không thể đăng nhập. Vui lòng kiểm tra lại địa chỉ email hoặc mật khẩu.";
       showToast(msg, "error");
     } finally {
       setLoading(false);
@@ -37,25 +37,23 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0B0F1A] text-white flex flex-col">
-     
-
+    <div className="min-h-screen bg-canvas text-ink flex flex-col font-sans">
       {/* Form */}
       <div className="flex-1 flex items-center justify-center px-4 py-12">
         <div className="w-full max-w-md">
           <div className="mb-8 text-center">
-            <h1 className="text-3xl font-bold tracking-tight mb-2">Chào mừng trở lại</h1>
-            <p className="text-white/40 text-sm">Đăng nhập để tiếp tục với DataMind</p>
+            <h1 className="text-3xl font-serif font-bold tracking-tight mb-2 text-ink">Chào mừng trở lại</h1>
+            <p className="text-muted text-sm">Đăng nhập để tiếp tục với DataMind</p>
           </div>
 
           <form
             id="login-form"
             onSubmit={handleSubmit}
-            className="bg-white/5 border border-white/10 rounded-2xl p-8 flex flex-col gap-4"
+            className="bg-white border border-border rounded-xl p-8 flex flex-col gap-4 shadow-sm"
           >
             {/* Email */}
             <div className="flex flex-col gap-1.5">
-              <label htmlFor="login-email" className="text-xs text-white/50 font-medium uppercase tracking-wider">
+              <label htmlFor="login-email" className="text-xs text-muted font-semibold uppercase tracking-wider">
                 Email
               </label>
               <input
@@ -67,13 +65,13 @@ export default function Login() {
                 autoComplete="email"
                 value={formData.email}
                 onChange={handleChange}
-                className="bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-sm text-white placeholder-white/20 outline-none focus:border-violet-500/60 focus:ring-1 focus:ring-violet-500/30 transition-all"
+                className="bg-canvas border border-border rounded-lg px-4 py-3 text-sm text-ink placeholder-muted/40 outline-none focus:border-forest/60 focus:ring-1 focus:ring-forest/30 transition-all"
               />
             </div>
 
             {/* Password */}
             <div className="flex flex-col gap-1.5">
-              <label htmlFor="login-password" className="text-xs text-white/50 font-medium uppercase tracking-wider">
+              <label htmlFor="login-password" className="text-xs text-muted font-semibold uppercase tracking-wider">
                 Mật khẩu
               </label>
               <input
@@ -85,7 +83,7 @@ export default function Login() {
                 autoComplete="current-password"
                 value={formData.password}
                 onChange={handleChange}
-                className="bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-sm text-white placeholder-white/20 outline-none focus:border-violet-500/60 focus:ring-1 focus:ring-violet-500/30 transition-all"
+                className="bg-canvas border border-border rounded-lg px-4 py-3 text-sm text-ink placeholder-muted/40 outline-none focus:border-forest/60 focus:ring-1 focus:ring-forest/30 transition-all"
               />
             </div>
 
@@ -94,7 +92,7 @@ export default function Login() {
               id="login-submit-btn"
               type="submit"
               disabled={loading}
-              className="mt-2 bg-violet-500 hover:bg-violet-400 disabled:bg-violet-500/40 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-xl transition-all flex items-center justify-center gap-2"
+              className="mt-2 bg-[#111111] hover:bg-[#222222] disabled:bg-[#111111]/40 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2 shadow-sm"
             >
               {loading ? (
                 <>
@@ -107,9 +105,9 @@ export default function Login() {
             </button>
           </form>
 
-          <p className="text-center text-white/30 text-xs mt-6">
+          <p className="text-center text-muted text-xs mt-6">
             Chưa có tài khoản?{" "}
-            <Link to="/register" className="text-violet-400 hover:text-violet-300 transition-colors">
+            <Link to="/register" className="text-forest hover:text-forest/80 font-medium transition-colors">
               Đăng ký miễn phí
             </Link>
           </p>

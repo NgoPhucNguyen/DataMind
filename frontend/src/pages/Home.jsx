@@ -9,38 +9,36 @@ export default function Home() {
     };
 
     return (
-        <div className="min-h-screen bg-[#0B0F1A] text-white flex flex-col">
-           
-
+        <div className="min-h-screen bg-canvas text-ink flex flex-col font-sans">
             {/* Main */}
             <div className="flex-1 flex flex-col items-center justify-center gap-6 px-6">
-                <h1 className="text-4xl font-bold tracking-tight text-center">
-                    Chào mừng đến với <span className="text-violet-400">DataMind</span>
+                <h1 className="text-3xl sm:text-4xl md:text-5xl font-serif tracking-tight text-center text-ink">
+                    Chào mừng đến với <span className="text-forest italic font-semibold">DataMind</span>
                 </h1>
-                <p className="text-white/40 text-center max-w-sm">
+                <p className="text-muted text-center max-w-sm leading-relaxed text-sm">
                     Nền tảng phân tích dữ liệu thông minh. Chọn gói phù hợp để bắt đầu.
                 </p>
-                <div className="flex gap-3 mt-4">
+                <div className="flex flex-col sm:flex-row gap-3 mt-4 w-full sm:w-auto px-4 sm:px-0">
                     <button
                         onClick={() => navigate("/pricing")}
-                        className="bg-violet-500 hover:bg-violet-400 text-white px-6 py-3 rounded-xl font-semibold transition-all text-sm"
+                        className="bg-forest hover:bg-[#15361c] text-white px-6 py-3 rounded-lg font-medium transition-all active:scale-[0.98] text-sm shadow-sm"
                     >
                         Xem gói dịch vụ
                     </button>
                     <button
                         onClick={() => navigate("/wallet")}
-                        className="bg-white/10 hover:bg-white/15 border border-white/10 text-white px-6 py-3 rounded-xl font-semibold transition-all text-sm"
+                        className="bg-white hover:bg-[#F9F9F8] border border-border text-ink px-6 py-3 rounded-lg font-medium transition-all active:scale-[0.98] text-sm"
                     >
                         Ví của tôi
                     </button>
                 </div>
 
-                <div className="flex gap-3 mt-4">
+                <div className="flex flex-col sm:flex-row gap-3 mt-2 w-full sm:w-auto px-4 sm:px-0">
                     <button
                         onClick={() => navigate("/ua_profiler")}
-                        className="bg-violet-500 hover:bg-violet-400 text-white px-6 py-3 rounded-xl font-semibold transition-all text-sm"
+                        className="bg-[#111111] hover:bg-[#222222] text-white px-8 py-3 rounded-lg font-medium transition-all active:scale-[0.98] text-sm shadow-sm"
                     >
-                        Bắt đầu phân tích dữ liệu
+                        Bắt đầu phân tích dữ liệu →
                     </button>
                 </div>
 

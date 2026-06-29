@@ -26,7 +26,7 @@ import Pipeline from "./pages/Pipeline";
 import Navbar from "./components/Navbar";
 import Sidebar from "./components/Sidebar";
 
-const PUBLIC_PATHS = ["/", "/login", "/register", "/how-it-works", "/demo", "/docs"];
+const PUBLIC_PATHS = ["/", "/login", "/register", "/how-it-works", "/demo", "/docs", "/pricing"];
 const HIDDEN_NAVBAR_PATHS = [];
 
 // ===================== Protected Route =====================
@@ -37,7 +37,7 @@ function RequireAuth({ children }) {
 
   useEffect(() => {
     if (!token) {
-      showToast("Bạn cần đăng nhập để sử dụng tính năng này.", "warning");
+      showToast("Vui lòng đăng nhập để tiếp tục sử dụng tính năng này.", "warning");
     }
   }, []);
 
@@ -73,13 +73,17 @@ function Layout() {
   const showSidebar = !isPublic;
 
   return (
-    <div className={`min-h-screen bg-[#0B0F1A] text-white flex ${showSidebar ? "flex-row" : "flex-col"}`}>
+    <div className={`min-h-screen bg-canvas text-ink flex ${showSidebar ? "md:flex-row max-md:flex-col" : "flex-col"}`}>
       {/* Sidebar cho Dashboard */}
       {showSidebar && <Sidebar />}
 
-      <div className={`flex-1 flex flex-col ${showSidebar ? "h-screen overflow-hidden" : ""}`}>
-        {/* Top Navbar cho Public pages */}
-        {showNavbar && <Navbar />}
+      <div className={`flex-1 flex flex-col ${showSidebar ? "h-screen overflow-hidden max-md:pb-16" : ""}`}>
+        {/* Top Navbar cho Public pages (hoặc mobile Dashboard) */}
+        {(showNavbar || showSidebar) && (
+          <div className={showSidebar ? "md:hidden" : ""}>
+            <Navbar />
+          </div>
+        )}
 
         <main className={`flex-1 relative ${showSidebar ? "overflow-y-auto" : ""}`}>
           <Routes>
@@ -100,14 +104,7 @@ function Layout() {
               }
             />
 
-            <Route
-              path="/pricing"
-              element={
-                <RequireAuth>
-                  <Pricing />
-                </RequireAuth>
-              }
-            />
+            <Route path="/pricing" element={<Pricing />} />
 
             <Route
               path="/wallet"
