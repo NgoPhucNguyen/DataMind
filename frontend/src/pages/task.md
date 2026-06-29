@@ -1,0 +1,7 @@
+- `[x]` Extract component `<ChartCard>`
+- `[x]` Add settings panel (Collapsible) to `<ChartCard>` (chart_type, column_x, color_preset)
+- `[x]` Add inline title editing (`user_title` and `auto_title`)
+- `[x]` Add AI insights section with `generateAIInsights` function
+- `[x]` Add new Recharts components: `PieChart`, `BoxPlot`
+- `[x]` Update `handleConfirm` logic in `Visualize.jsx`
+- `[x]` Test rendering and verify UI changes

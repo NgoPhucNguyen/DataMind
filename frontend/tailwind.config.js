@@ -12,9 +12,8 @@ export default {
         border: '#EAEAEA',
       },
       fontFamily: {
-        sans: ['"Be Vietnam Pro"', '"Plus Jakarta Sans"', 'sans-serif'],
-        serif: ['"Newsreader"', '"Lora"', 'serif'],
-        mono: ['"Geist Mono"', '"JetBrains Mono"', 'monospace'],
+        sans: ["'Be Vietnam Pro'", "Plus Jakarta Sans", "sans-serif"],
+        mono: ["'Geist Mono'", "SF Mono", "monospace"],
       },
       screens: {
         'max-sm': { max: '639px' },

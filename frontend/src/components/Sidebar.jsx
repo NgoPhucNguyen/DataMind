@@ -11,9 +11,9 @@ export default function Sidebar() {
 
   const menuItems = [
     { path: "/home", label: "Tổng quan", icon: <LayoutDashboard className="w-5 h-5" /> },
-    { path: "/ua_profiler", label: "Phân tích thủ công", icon: <FileSearch className="w-5 h-5" /> },
-    { path: "/ua_cleaner", label: "Làm sạch thủ công", icon: <Wand2 className="w-5 h-5" /> },
-    { path: "/ua_visualize", label: "Trực quan hóa", icon: <PieChart className="w-5 h-5" /> },
+    { path: "/profiler", label: "Phân tích thủ công", icon: <FileSearch className="w-5 h-5" /> },
+    { path: "/cleaner", label: "Làm sạch thủ công", icon: <Wand2 className="w-5 h-5" /> },
+    { path: "/visualize", label: "Trực quan hóa", icon: <PieChart className="w-5 h-5" /> },
     { path: "/pipeline", label: "Tự động hóa", icon: <Workflow className="w-5 h-5" /> },
   ];
 

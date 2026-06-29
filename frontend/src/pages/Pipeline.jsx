@@ -1,194 +1,171 @@
-import { useState, useRef } from "react";
-import { useNavigate } from "react-router-dom";
-import { profileFile } from "../services/profilerService";
-import { detectIssues, autoClean, confirmClean } from "../services/cleanerService";
-import { useToast } from "../contexts/ToastContext";
-import { Folder, BrainCircuit, Search, Sparkles, Download, AlertTriangle, Rocket, PartyPopper } from "lucide-react";
+import { useState, useEffect } from "react";
+import { useParams, useNavigate } from "react-router-dom";
+import { useFileSession } from "../contexts/FileSessionContext";
+import Profiler from "./Profiler";
+import Cleaner from "./Cleaner";
+import Visualize from "./Visualize";
+import Report from "./Report";
+import { Check, AlertTriangle } from "lucide-react";
+import PageHeader from "../components/PageHeader";
+import { TEXT, PAGE, BTN, CARD } from "../constants/ui";
+
+const STEPS = ["profiler", "cleaner", "visualize", "report"];
+const STEP_LABELS = {
+  profiler: "Phân tích",
+  cleaner: "Làm sạch",
+  visualize: "Trực quan",
+  report: "Báo cáo"
+};
 
 export default function Pipeline() {
+  const { step } = useParams();
   const navigate = useNavigate();
-  const { showToast } = useToast();
-  const fileInputRef = useRef(null);
-  
-  const [loading, setLoading] = useState(false);
-  const [loadingStep, setLoadingStep] = useState("");
-  const [result, setResult] = useState(null);
-  const [error, setError] = useState(null);
+  const { fileSession } = useFileSession();
 
-  const steps = [
-    {
-      title: "1. Tải lên dữ liệu",
-      description: "Hỗ trợ các định dạng phổ biến như CSV, Excel (XLSX, XLS). Dữ liệu của bạn được bảo mật tuyệt đối.",
-      icon: <Folder className="w-6 h-6 text-forest" />
-    },
-    {
-      title: "2. Phân tích ngữ cảnh (AI)",
-      description: "Hệ thống AI tự động đọc cấu trúc, nhận diện kiểu dữ liệu (số liệu, thời gian, danh mục, văn bản) và hiểu ý nghĩa từng cột.",
-      icon: <BrainCircuit className="w-6 h-6 text-forest" />
-    },
-    {
-      title: "3. Phát hiện lỗi",
-      description: "Quét toàn bộ dữ liệu để tìm ra các vấn đề: ô trống, sai định dạng, dữ liệu trùng lặp, lỗi ký tự (encoding).",
-      icon: <Search className="w-6 h-6 text-forest" />
-    },
-    {
-      title: "4. Làm sạch tự động",
-      description: "Tự động loại bỏ hoặc điền dữ liệu khuyết theo các quy tắc chuẩn. Cột quá thiếu dữ liệu (>90%) sẽ tự động được xóa.",
-      icon: <Sparkles className="w-6 h-6 text-forest" />
-    },
-    {
-      title: "5. Tải file hoàn chỉnh",
-      description: "Nhận lại file dữ liệu đã được làm sạch hoàn toàn, sẵn sàng để đưa vào bất kỳ hệ thống phân tích nào khác.",
-      icon: <Download className="w-6 h-6 text-forest" />
+  const [currentStep, setCurrentStep] = useState("profiler");
+  const [pipelineError, setPipelineError] = useState(null);
+
+  const [stepStatus, setStepStatus] = useState(() => {
+    return STEPS.reduce((acc, s) => ({ ...acc, [s]: "pending" }), {});
+  });
+
+  useEffect(() => {
+    if (step && STEPS.includes(step)) {
+      if (step !== "profiler" && !fileSession.fileHash) {
+        navigate("/pipeline/profiler", { replace: true });
+      } else {
+        setCurrentStep(step);
+        setStepStatus(prev => {
+          const newStatus = { ...prev };
+          const currentIndex = STEPS.indexOf(step);
+          STEPS.forEach((s, idx) => {
+            if (idx < currentIndex && newStatus[s] === "pending") {
+              newStatus[s] = "done";
+            }
+          });
+          return newStatus;
+        });
+      }
+    } else {
+      navigate("/pipeline/profiler", { replace: true });
     }
-  ];
+  }, [step, fileSession.fileHash, navigate]);
 
-  const handleFile = async (file) => {
-    if (!file) return;
-    const allowed = [".csv", ".xlsx", ".xls"];
-    const ext = file.name.toLowerCase().slice(file.name.lastIndexOf("."));
-    if (!allowed.includes(ext)) {
-      showToast("Định dạng file không được hỗ trợ. Vui lòng chọn file Excel (.xlsx, .xls) hoặc CSV.", "error");
-      return;
-    }
+  useEffect(() => {
+    const handleReset = () => {
+      setPipelineError(null);
+      setStepStatus(STEPS.reduce((acc, s) => ({ ...acc, [s]: "pending" }), {}));
+      navigate("/pipeline/profiler", { replace: true });
+    };
+    window.addEventListener("datamind:session-cleared", handleReset);
+    return () => window.removeEventListener("datamind:session-cleared", handleReset);
+  }, [navigate]);
 
-    setLoading(true);
-    setResult(null);
-    setError(null);
-    try {
-      setLoadingStep("Đang phân tích cấu trúc...");
-      const profileRes = await profileFile(file);
-      const fileHash = profileRes.data.file_hash;
-      
-      setLoadingStep("Đang phát hiện lỗi...");
-      await detectIssues(fileHash, {});
-      
-      setLoadingStep("Đang làm sạch tự động...");
-      await autoClean(fileHash, {});
-      
-      setLoadingStep("Đang đóng gói kết quả...");
-      const confirmRes = await confirmClean(fileHash, "auto", {});
-      
-      showToast("Xử lý dữ liệu thành công!", "success");
-      setResult(confirmRes.data);
-      
-    } catch (err) {
-      const msg = err?.response?.data?.detail || "Có lỗi xảy ra trong quá trình xử lý.";
-      setError(msg);
-      showToast("Không thể tự động xử lý file. Vui lòng thử lại với cấu hình khác hoặc kiểm tra lại file của bạn.", "error");
-    } finally {
-      setLoading(false);
-      setLoadingStep("");
+  const handleNext = (nextStep) => {
+    setPipelineError(null);
+    setStepStatus(prev => ({ ...prev, [currentStep]: "done" }));
+    navigate(`/pipeline/${nextStep}`);
+  };
+
+  const handleError = (msg) => {
+    setPipelineError(msg);
+  };
+
+  const handleSkipWarning = () => {
+    setStepStatus(prev => ({ ...prev, [currentStep]: "warning" }));
+    setPipelineError(null);
+    const currentIndex = STEPS.indexOf(currentStep);
+    if (currentIndex < STEPS.length - 1) {
+      navigate(`/pipeline/${STEPS[currentIndex + 1]}`);
     }
   };
 
-  const handleInputChange = (e) => {
-    const file = e.target.files?.[0];
-    if (file) handleFile(file);
-    e.target.value = "";
+  const STEP_COMPONENTS = {
+    profiler: <Profiler pipelineMode onComplete={() => handleNext("cleaner")} onError={handleError} />,
+    cleaner: <Cleaner pipelineMode onComplete={() => handleNext("visualize")} onError={handleError} />,
+    visualize: <Visualize pipelineMode onComplete={() => handleNext("report")} onError={handleError} />,
+    report: <Report pipelineMode onComplete={() => navigate("/home")} />
   };
 
   return (
-    <div className="min-h-screen bg-canvas text-ink font-sans">
-      <header className="border-b border-border px-6 py-4 flex justify-between items-center bg-white sticky top-0 z-10">
-        <span className="text-lg font-bold text-ink">Quy trình tự động (Full Pipeline)</span>
+    <div className="min-h-screen bg-[#FBFBFA] flex flex-col relative pb-10">
+      {/* Stepper Header */}
+      <header className="border-b border-border bg-white px-6 py-4 sticky top-0 z-20 flex justify-center overflow-x-auto">
+        <div className="flex items-center gap-2 sm:gap-4 text-sm font-medium whitespace-nowrap">
+          {STEPS.map((s, idx) => {
+            const isActive = currentStep === s;
+            const status = stepStatus[s];
+
+            let statusIcon = null;
+            if (status === "done") statusIcon = <Check className="w-4 h-4 text-forest" />;
+            if (status === "warning") statusIcon = <AlertTriangle className="w-4 h-4 text-[#d97706]" />;
+
+            return (
+              <div key={s} className="flex items-center gap-2 sm:gap-4">
+                <div
+                  onClick={() => {
+                    if (status === "done" || status === "warning" || isActive) {
+                      navigate(`/pipeline/${s}`);
+                    }
+                  }}
+                  className={`flex items-center gap-1.5 transition-colors ${status === "done" || status === "warning" || isActive ? "cursor-pointer" : "cursor-default"} ${isActive ? 'text-[#1B4324] border-b-2 border-[#1B4324] pb-0.5 font-semibold' : (status === 'done' ? 'text-forest font-medium hover:text-[#1B4324]' : (status === 'warning' ? 'text-[#d97706] font-medium hover:text-[#b45309]' : 'text-muted'))}`}
+                >
+                  <span className={`flex items-center justify-center w-5 h-5 rounded-full text-xs ${isActive ? 'bg-[#1B4324] text-white' : (status === 'done' ? 'bg-forest text-white' : 'bg-[#EAEAEA] text-muted')}`}>
+                    {idx + 1}
+                  </span>
+                  <span>{STEP_LABELS[s]}</span>
+                  {statusIcon}
+                </div>
+                {idx < STEPS.length - 1 && <div className="w-8 sm:w-12 h-[1px] bg-border"></div>}
+              </div>
+            );
+          })}
+        </div>
       </header>
 
-      <div className="px-4 sm:px-6 py-8 sm:py-12 max-w-4xl mx-auto">
-        {!result ? (
-          <>
-            <div className="text-center mb-12">
-              <h1 className="text-2xl sm:text-3xl font-serif mb-4">Làm sạch dữ liệu chưa bao giờ dễ dàng đến thế</h1>
-              <p className="text-muted text-lg max-w-2xl mx-auto">
-                Hệ thống tự động thực hiện toàn bộ quy trình từ phân tích, nhận diện lỗi đến làm sạch dữ liệu chỉ với một cú click chuột.
-              </p>
-            </div>
-
-        {/* Pipeline Visualization */}
-        <div className="relative mb-16">
-          <div className="absolute left-[28px] top-4 bottom-4 w-0.5 bg-border rounded-full hidden sm:block"></div>
-          
-          <div className="space-y-6">
-            {steps.map((step, idx) => (
-              <div key={idx} className="flex flex-col sm:flex-row gap-4 sm:gap-6 relative">
-                <div className="w-14 h-14 rounded-full bg-white border-2 border-[#1B4324] shadow-sm flex items-center justify-center text-2xl shrink-0 z-10 mx-auto sm:mx-0">
-                  {step.icon}
-                </div>
-                <div className="bg-white border border-border p-5 rounded-xl shadow-sm flex-1 text-center sm:text-left">
-                  <h3 className="font-semibold text-lg mb-1">{step.title}</h3>
-                  <p className="text-muted text-sm leading-relaxed">{step.description}</p>
-                </div>
-              </div>
-            ))}
+      {/* Error Panel (Inline, not overlay) */}
+      {pipelineError && (
+        <div className="bg-[#FDEBEC] border-b border-[#f5c6cb] px-6 py-3 flex flex-col sm:flex-row items-center justify-between shadow-sm z-10 gap-3">
+          <div className="flex items-center gap-2 text-[#9F2F2D] font-medium">
+            <AlertTriangle className="w-5 h-5 shrink-0" />
+            <span className="text-sm sm:text-base">{pipelineError}</span>
+          </div>
+          <div className="flex gap-3 shrink-0">
+            <button
+              onClick={() => setPipelineError(null)}
+              className="bg-white border border-[#f5c6cb] text-[#9F2F2D] px-4 py-1.5 rounded text-sm font-medium hover:bg-[#f8d7da] transition-all shadow-sm"
+            >
+              Sửa lại ở bước này
+            </button>
+            <button
+              onClick={handleSkipWarning}
+              className="bg-[#9F2F2D] text-white px-4 py-1.5 rounded text-sm font-medium hover:bg-[#7a2322] transition-all shadow-sm"
+            >
+              Bỏ qua, tiếp tục →
+            </button>
           </div>
         </div>
+      )}
 
-        {/* Error Message */}
-        {error && (
-          <div className="mb-8 p-4 bg-[#FDEBEC] border border-[#f5c6cb] rounded-xl text-[#9F2F2D] text-center">
-            <span className="block font-bold mb-1 flex items-center justify-center"><AlertTriangle className="w-4 h-4 mr-1.5 shrink-0" /> Quá trình tự động gặp sự cố:</span>
-            <span>{error}</span>
-            <p className="mt-3 text-sm">
-              Gợi ý: Hãy thử sử dụng <strong>Phân tích thủ công</strong> ở menu bên trái để xem chi tiết lỗi của file này và tự cấu hình cách xử lý.
-            </p>
-          </div>
-        )}
-
-        {/* Upload Button */}
-        <div className="text-center">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".csv,.xlsx,.xls"
-            className="hidden"
-            onChange={handleInputChange}
-          />
-          <button
-            disabled={loading}
-            onClick={() => fileInputRef.current?.click()}
-            className={`
-              px-8 py-4 rounded-xl font-bold text-lg text-white shadow-md transition-all mt-8
-              ${loading ? "bg-forest/70 cursor-not-allowed" : "bg-forest hover:bg-[#15361c] hover:-translate-y-1"}
-            `}
-          >
-            {loading ? (
-              <span className="flex items-center gap-2">
-                <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
-                </svg>
-                {loadingStep}
-              </span>
-            ) : <span className="flex items-center gap-2"><Rocket className="w-5 h-5 shrink-0" /> Bắt đầu quy trình tự động</span>}
-          </button>
-          {!loading && <p className="text-xs text-muted mt-3">Hỗ trợ file CSV, XLSX tối đa 10MB</p>}
-        </div>
-          </>
-        ) : (
-          <div className="text-center bg-white border border-border p-8 rounded-2xl shadow-sm">
-            <PartyPopper className="w-12 h-12 mx-auto mb-4 text-forest" />
-            <h2 className="text-2xl font-bold text-ink mb-2">Quy trình hoàn tất!</h2>
-            <p className="text-muted mb-8">Dữ liệu của bạn đã được làm sạch và sẵn sàng để sử dụng.</p>
-            
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-              <a
-                href={result.download_url}
-                target="_blank"
-                rel="noreferrer"
-                className="bg-forest hover:bg-[#1B4324] text-white px-6 py-3 rounded-xl font-semibold transition-all flex items-center gap-2"
-              >
-                <Download className="w-5 h-5 inline-block" /> Tải File Cleaned
-              </a>
-              <button
-                onClick={() => setResult(null)}
-                className="border border-border text-ink px-6 py-3 rounded-xl font-semibold hover:bg-sage/20 transition-all"
-              >
-                Làm sạch file khác
-              </button>
-            </div>
-          </div>
-        )}
+      {/* Content Area */}
+      <div className="flex-1 overflow-auto pipeline-content">
+        {STEP_COMPONENTS[currentStep]}
       </div>
+
+      {/* Debug Helper (DEV only) */}
+      {import.meta.env.DEV && (
+        <div style={{
+          position: "fixed", bottom: 0, left: 0, right: 0,
+          background: "#1a1a2e", color: "#00ff88", fontSize: 11,
+          padding: "4px 12px", fontFamily: "monospace", zIndex: 9999,
+          display: "flex", gap: "12px", overflowX: "auto"
+        }}>
+          <span className="whitespace-nowrap">step: {currentStep}</span> |
+          <span className="whitespace-nowrap">session: {fileSession.sessionId ? fileSession.sessionId.slice(0, 8) + '...' : 'null'}</span> |
+          <span className="whitespace-nowrap">status: {JSON.stringify(stepStatus)}</span> |
+          <span className="whitespace-nowrap">warnings: {fileSession.warnings?.length || 0}</span>
+        </div>
+      )}
     </div>
   );
 }

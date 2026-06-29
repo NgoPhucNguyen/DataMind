@@ -16,7 +16,9 @@ import { useFileSession } from "../contexts/FileSessionContext";
 import { detectIssues, autoClean, confirmClean } from "../services/cleanerService";
 import { profileFile } from "../services/profilerService";
 import { useToast } from "../contexts/ToastContext";
-import { CheckCircle, AlertTriangle, Zap, PenTool, Compass, Brush, ArrowLeft, ArrowRight, ChevronRight } from "lucide-react";
+import { CheckCircle, AlertTriangle, Zap, PenTool, Compass, Brush, ArrowLeft, ArrowRight, ChevronRight, Upload, Info, FolderUp } from "lucide-react";
+import PageHeader from "../components/PageHeader";
+import { TEXT, PAGE, BTN, BADGE, CARD } from "../constants/ui";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -25,13 +27,13 @@ const STEPS = ["detecting", "choosing_mode", "cleaning", "reviewing_diff", "conf
 function IssueCountBadge({ count, label, color }) {
   if (count === 0) return null;
   const colors = {
-    red: "bg-[#FDEBEC] text-[#9F2F2D] border border-[#f5c6cb]",
-    yellow: "bg-[#FBF3DB] text-[#956400] border border-[#f0dda0]",
-    orange: "bg-[#FFF0E6] text-[#A84300] border border-[#ffd0aa]",
-    blue: "bg-[#E1F3FE] text-[#1F6C9F] border border-[#b3d9f8]",
+    red: BADGE.error,
+    yellow: BADGE.warning,
+    orange: BADGE.warning,
+    blue: BADGE.info,
   };
   return (
-    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${colors[color]}`}>
+    <span className={`inline-flex items-center gap-1.5 ${colors[color]}`}>
       <span className="font-semibold">{count}</span> {label}
     </span>
   );
@@ -47,7 +49,7 @@ function SectionTitle({ children }) {
 
 function Card({ children, className = "" }) {
   return (
-    <div className={`border border-border rounded-xl p-5 bg-white ${className}`}>
+    <div className={`${CARD} ${className}`}>
       {children}
     </div>
   );
@@ -209,7 +211,70 @@ function ModeSelector({ onSelect }) {
     </Card>
   );
 }
-function DiffReportView({ diff, validationState, filename, onConfirm, onBack, confirming }) {
+function PreviewTable({ data }) {
+  const [page, setPage] = useState(1);
+  const rowsPerPage = 10;
+  if (!data || data.length === 0) return null;
+
+  const totalPages = Math.ceil(data.length / rowsPerPage);
+  const currentData = data.slice((page - 1) * rowsPerPage, page * rowsPerPage);
+  const columns = Object.keys(data[0] || {});
+
+  return (
+    <Card className="mt-4">
+      <SectionTitle>Bảng dữ liệu xem trước (Sau làm sạch)</SectionTitle>
+      <div className="overflow-x-auto border border-border rounded-lg mt-3 bg-white">
+        <table className="w-full text-left text-sm whitespace-nowrap">
+          <thead className="bg-[#F9F9F8] border-b border-border">
+            <tr>
+              <th className="px-4 py-2 font-semibold text-ink w-12 text-center">#</th>
+              {columns.map(col => (
+                <th key={col} className="px-4 py-2 font-semibold text-ink">{col}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {currentData.map((row, idx) => (
+              <tr key={idx} className="border-b border-border last:border-0 hover:bg-sage/10 transition-colors">
+                <td className="px-4 py-2 text-muted text-center border-r border-border/50 bg-[#F9F9F8]/50">
+                  {(page - 1) * rowsPerPage + idx + 1}
+                </td>
+                {columns.map(col => (
+                  <td key={col} className="px-4 py-2 text-muted truncate max-w-[200px]" title={row[col]}>
+                    {row[col] !== null && row[col] !== undefined ? String(row[col]) : <span className="text-gray-400 italic">null</span>}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between mt-4">
+          <span className="text-xs text-muted">Trang {page} / {totalPages} (Mẫu {data.length} dòng)</span>
+          <div className="flex gap-2">
+            <button 
+              onClick={() => setPage(p => Math.max(1, p - 1))} 
+              disabled={page === 1}
+              className="px-3 py-1 bg-white border border-border rounded text-sm disabled:opacity-50 hover:bg-sage/20 transition-all text-ink font-medium"
+            >
+              Trang trước
+            </button>
+            <button 
+              onClick={() => setPage(p => Math.min(totalPages, p + 1))} 
+              disabled={page === totalPages}
+              className="px-3 py-1 bg-white border border-border rounded text-sm disabled:opacity-50 hover:bg-sage/20 transition-all text-ink font-medium"
+            >
+              Trang sau
+            </button>
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function DiffReportView({ diff, validationState, filename, previewData, onConfirm, onBack, confirming }) {
   const rows = [
     { label: "Dòng trùng bị xóa", value: diff.duplicate_rows_removed, warn: diff.duplicate_rows_removed > 0 },
     { label: "Dòng còn lại", value: `${diff.original_rows} → ${diff.clean_rows}` },
@@ -319,12 +384,15 @@ function DiffReportView({ diff, validationState, filename, onConfirm, onBack, co
         </div>
       )}
 
+      {/* Preview Table */}
+      <PreviewTable data={previewData} />
+
       {/* Action buttons */}
       <div className="flex items-center justify-between gap-3">
         <button
           id="cleaner-back-to-mode-btn"
           onClick={onBack}
-          className="text-sm text-muted hover:text-ink border border-border rounded-lg px-4 py-2 hover:bg-[#F9F9F8] transition-colors"
+          className={`${BTN.secondary} flex items-center gap-2`}
         >
           <ArrowLeft className="w-4 h-4 inline-block mr-1" /> Chọn lại chế độ
         </button>
@@ -332,11 +400,7 @@ function DiffReportView({ diff, validationState, filename, onConfirm, onBack, co
           id="cleaner-confirm-btn"
           onClick={onConfirm}
           disabled={confirming}
-          className="
-            flex items-center gap-2 bg-[#1B4324] text-white text-sm font-medium
-            px-6 py-2.5 rounded-lg hover:bg-[#163820] transition-colors
-            disabled:opacity-60 disabled:cursor-not-allowed
-          "
+          className={`${BTN.primary} flex items-center gap-2`}
         >
           {confirming ? (
             <>
@@ -355,7 +419,7 @@ function DiffReportView({ diff, validationState, filename, onConfirm, onBack, co
   );
 }
 
-function ConfirmedView({ result, onGoHome, onGoVisualize }) {
+function ConfirmedView({ result, previewData, onGoHome, onGoVisualize }) {
   const summary = result.summary_for_module3;
   return (
     <div className="space-y-4">
@@ -397,22 +461,22 @@ function ConfirmedView({ result, onGoHome, onGoVisualize }) {
         </div>
       </Card>
 
+      {/* Preview Table */}
+      <PreviewTable data={previewData} />
+
       {/* Next steps */}
       <div className="flex items-center justify-between gap-3">
         <button
           id="cleaner-go-home-btn"
           onClick={onGoHome}
-          className="text-sm text-muted hover:text-ink border border-border rounded-lg px-4 py-2 hover:bg-[#F9F9F8] transition-colors"
+          className={`${BTN.secondary} flex items-center gap-2`}
         >
           <ArrowLeft className="w-4 h-4 inline-block mr-1" /> Về trang chủ
         </button>
         <button
           id="cleaner-go-module3-btn"
           onClick={onGoVisualize}
-          className="
-            flex items-center gap-2 bg-violet-500 hover:bg-violet-400 text-white text-sm font-medium
-            px-6 py-2.5 rounded-lg border border-transparent transition-all shadow-md shadow-violet-500/20
-          "
+          className={`${BTN.primary} flex items-center gap-2`}
         >
           Trực quan hóa dữ liệu <ArrowRight className="w-4 h-4 inline-block ml-1" />
         </button>
@@ -442,13 +506,13 @@ function LoadingStep({ message }) {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export default function Cleaner() {
+export default function Cleaner({ pipelineMode, onComplete, onError }) {
   const location = useLocation();
   const navigate = useNavigate();
   const { showToast } = useToast();
   const fileInputRef = useRef(null);
 
-  const { fileSession, updateFileSession } = useFileSession();
+  const { fileSession, updateFileSession, clearFileSession } = useFileSession();
 
   const fileHash = fileSession.fileHash;
   const fileName = fileSession.fileName;
@@ -469,6 +533,7 @@ export default function Cleaner() {
   const [diffReport, setDiffReport] = useState(null);
   const [validationState, setValidationState] = useState(null);
   const [confirmedResult, setConfirmedResult] = useState(null);
+  const [previewData, setPreviewData] = useState([]);
   const [loadingMsg, setLoadingMsg] = useState("Đang quét vấn đề dữ liệu...");
   const [error, setError] = useState(null);
   const [confirming, setConfirming] = useState(false);
@@ -538,8 +603,11 @@ export default function Cleaner() {
     try {
       setLoadingMsg("Đang tự động làm sạch dữ liệu...");
       setStep("cleaning");
-      const res = await autoClean(fileHash, overrides);
+      const finalOverrides = Object.fromEntries(Object.entries(overrides).filter(([_, v]) => v !== "auto"));
+      console.log("auto-clean payload:", JSON.stringify({ file_hash: fileHash, overridden_types: finalOverrides }));
+      const res = await autoClean(fileHash, finalOverrides);
       setDiffReport(res.data.diff_report);
+      setPreviewData(res.data.preview_data || []);
       // Nếu có lỗi cứng, server đã quăng 422, hoặc trả về validation=False (tùy cài đặt)
       // Nhưng theo backend mới, nó trả validation về đây
       if (res.data.validation && !res.data.validation.can_proceed) {
@@ -549,11 +617,11 @@ export default function Cleaner() {
         setStep("error");
         return;
       }
-      
+
       // Update session with validation capabilities/warnings early or wait for confirm
       // Tốt nhất là lưu vào state tạm để hiện ở DiffReport
       setValidationState(res.data.validation);
-      
+
       setStep("reviewing_diff");
     } catch (err) {
       const msg = err?.response?.data?.detail || "Không thể tự động làm sạch dữ liệu. Vui lòng thử lại sau.";
@@ -580,52 +648,52 @@ export default function Cleaner() {
   };
 
   return (
-    <div className="min-h-screen bg-canvas text-ink font-sans">
-      {/* Header */}
-      <header className="border-b border-border px-6 py-3 flex items-center justify-between bg-white sticky top-0 z-10">
-        <button
-          onClick={() => navigate(fileHash ? "/ua_profiler" : "/home")}
-          className="text-sm text-muted hover:text-ink transition-colors flex items-center gap-1.5"
-        >
-          <ArrowLeft className="w-4 h-4 inline-block mr-1" /> {fileHash ? "Profiler" : "Trang chủ"}
-        </button>
-        <span className="text-sm font-medium text-ink">
-          {fileName ? `Đang làm sạch: ${fileName}` : "Công cụ Làm sạch Dữ liệu"}
-        </span>
-
-        {/* Step indicator */}
-        <div className="hidden sm:flex items-center gap-1.5 text-xs text-muted">
-          {[
-            { key: "detecting", label: "Quét" },
-            { key: "choosing_mode", label: "Chọn chế độ" },
-            { key: "reviewing_diff", label: "Xem trước" },
-            { key: "confirmed", label: "Hoàn tất" },
-          ].map((s, i, arr) => (
-            <span key={s.key} className="flex items-center gap-1.5">
-              <span className={`
-                ${step === s.key ? "text-forest font-semibold" : ""}
-                ${STEPS.indexOf(step) > STEPS.indexOf(s.key) ? "text-ink" : ""}
-              `}>
-                {s.label}
-              </span>
-              {i < arr.length - 1 && <ChevronRight className="w-3 h-3 text-border" />}
-            </span>
-          ))}
-        </div>
-      </header>
-
-      <div className="px-4 sm:px-6 py-8 sm:py-10 max-w-3xl mx-auto">
+    <div className="min-h-screen bg-[#FBFBFA]">
+      <div className={PAGE.wrapper}>
+        <PageHeader
+          title="Làm sạch dữ liệu"
+          subtitle={fileName ? `Đang làm sạch: ${fileName}` : "Sửa lỗi dữ liệu tự động"}
+          actions={
+            !pipelineMode ? (
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => navigate(fileHash ? "/profiler" : "/home")}
+                  className={`${BTN.secondary} flex items-center gap-1.5`}
+                >
+                  <ArrowLeft className="w-4 h-4" /> Quay lại
+                </button>
+                {fileHash && (
+                  <button
+                    onClick={() => {
+                      clearFileSession();
+                      setStep("detecting");
+                    }}
+                    className={`${BTN.secondary} flex items-center gap-1.5`}
+                  >
+                    <FolderUp className="w-4 h-4" /> Tải file khác
+                  </button>
+                )}
+              </div>
+            ) : null
+          }
+        />
 
         {/* Upload Zone (Nếu chưa có fileHash) */}
         {!fileHash ? (
-          <div className="text-center py-12">
-            <h1 className="font-serif text-3xl tracking-tight mb-2">Làm sạch dữ liệu</h1>
-            <p className="text-muted text-sm mb-10">Tải file của bạn lên để bắt đầu quét và sửa lỗi dữ liệu tự động.</p>
+          <div className="max-w-3xl mx-auto py-8">
+            <h2 className="text-xl font-semibold text-ink mb-2">Bắt đầu làm sạch dữ liệu</h2>
+            <p className="text-sm text-muted mb-6">
+              Tải lên dữ liệu của bạn để hệ thống tự động quét và phân loại các vấn đề như dữ liệu bị thiếu, sai kiểu định dạng, hoặc các dòng trùng lặp.
+            </p>
 
             <div
+              id="upload-zone"
               className={`
-                border-2 border-dashed rounded-lg p-6 sm:p-10 text-center cursor-pointer transition-colors mx-auto bg-white
-                ${isDragging ? "border-forest bg-sage" : "border-border hover:border-forest hover:bg-sage/40"}
+                border-2 border-dashed rounded-xl p-8 sm:p-12 text-center cursor-pointer transition-colors
+                ${isDragging
+                  ? "border-[#1B4324] bg-[#EAF2EB]"
+                  : "border-border hover:border-[#1B4324] hover:bg-sage/40"
+                }
                 ${isUploading ? "pointer-events-none opacity-60" : ""}
               `}
               onClick={() => !isUploading && fileInputRef.current?.click()}
@@ -639,28 +707,29 @@ export default function Cleaner() {
                 accept=".csv,.xlsx,.xls"
                 className="hidden"
                 onChange={handleInputChange}
+                id="file-input"
               />
-              {isUploading ? (
-                <LoadingStep message="Đang upload và phân tích file..." />
-              ) : (
-                <div className="text-muted text-sm">
-                  <Brush className="w-10 h-10 mx-auto mb-3 stroke-[1.5] text-forest" />
-                  <span className="block mb-1 text-ink font-medium">Kéo thả file vào đây để làm sạch</span>
-                  hoặc click để chọn file &mdash; CSV, XLSX, XLS (tối đa 10MB)
-                </div>
-              )}
+              <div className="text-muted text-sm">
+                <Upload size={48} strokeWidth={1.5} className="mx-auto mb-4 text-[#1B4324]" />
+                <span className="block mb-1.5 text-ink font-medium text-lg">Kéo thả file dữ liệu vào đây</span>
+                hoặc click để duyệt file &mdash; hỗ trợ CSV, XLSX, XLS (tối đa 10MB)
+              </div>
+            </div>
+
+            <div className="mt-8 bg-white border border-border rounded-xl p-6 shadow-sm">
+              <h3 className="font-medium text-ink flex items-center gap-2 mb-4">
+                <Info className="w-5 h-5 text-[#1B4324]" />
+                Lưu ý quá trình làm sạch
+              </h3>
+              <ul className="text-sm text-muted space-y-3 list-disc pl-5">
+                <li><strong className="text-ink font-medium">Bảo toàn dữ liệu gốc:</strong> Quá trình làm sạch sẽ không bao giờ ghi đè lên file gốc của bạn. Dữ liệu đã làm sạch sẽ được lưu thành một phiên bản mới.</li>
+                <li><strong className="text-ink font-medium">Làm sạch tự động (Auto-clean):</strong> Hệ thống sử dụng các chiến lược thông minh để điền dữ liệu thiếu, xóa các dòng trùng lặp hoàn toàn, và chuẩn hóa kiểu dữ liệu.</li>
+                <li><strong className="text-ink font-medium">Kiểm soát hoàn toàn:</strong> Bạn luôn có thể xem lại "Diff Report" (Báo cáo thay đổi) chi tiết trước khi xác nhận lưu kết quả làm sạch.</li>
+              </ul>
             </div>
           </div>
         ) : (
           <>
-            {/* Page title */}
-            <div className="mb-8">
-              <h1 className="font-serif text-3xl tracking-tight mb-1">Làm sạch dữ liệu</h1>
-              <p className="text-muted text-sm">
-                <span className="font-medium text-ink">{fileName}</span>
-              </p>
-            </div>
-
             {/* Error inline */}
             {error && (
               <div className="mb-6 px-4 py-3 rounded-lg bg-[#FDEBEC] text-[#9F2F2D] text-sm border border-[#f5c6cb] flex items-start gap-2">
@@ -688,13 +757,13 @@ export default function Cleaner() {
                       setStep("detecting");
                       setError(null);
                     }}
-                    className="text-sm border border-border rounded-lg px-4 py-2 hover:bg-[#F9F9F8] transition-colors"
+                    className={BTN.secondary}
                   >
                     Upload file khác
                   </button>
                   <button
-                    onClick={() => navigate("/ua_profiler")}
-                    className="bg-[#1B4324] text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-[#163820] transition-colors shadow-sm"
+                    onClick={() => navigate("/profiler")}
+                    className={BTN.primary}
                   >
                     Xem lại dữ liệu gốc
                   </button>
@@ -721,6 +790,7 @@ export default function Cleaner() {
                 diff={diffReport}
                 validationState={validationState}
                 filename={fileName}
+                previewData={previewData}
                 onConfirm={handleConfirmClean}
                 onBack={() => setStep("choosing_mode")}
                 confirming={confirming}
@@ -730,20 +800,22 @@ export default function Cleaner() {
             {step === "confirmed" && confirmedResult && (
               <ConfirmedView
                 result={confirmedResult}
+                previewData={previewData}
                 onGoHome={() => navigate("/home")}
                 onGoVisualize={() => {
-                  updateFileSession({ 
+                  updateFileSession({
                     sessionId: confirmedResult.session_id,
                     capabilities: confirmedResult.validation?.capabilities || null,
                     warnings: confirmedResult.validation?.warnings || []
                   });
-                  navigate("/ua_visualize");
+                  if (pipelineMode && onComplete) onComplete();
+                  else navigate("/visualize");
                 }}
               />
             )}
           </>
         )}
       </div>
-    </div>
+    </div >
   );
 }

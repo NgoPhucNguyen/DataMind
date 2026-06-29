@@ -18,6 +18,7 @@ import Wallet from "./pages/Wallet";
 import Profiler from "./pages/Profiler";
 import Cleaner from "./pages/Cleaner";
 import Visualize from "./pages/Visualize";
+import Report from "./pages/Report";
 import HowItWorks from "./pages/HowItWorks";
 import Demo from "./pages/Demo";
 import Docs from "./pages/Docs";
@@ -116,7 +117,7 @@ function Layout() {
             />
 
             <Route
-              path="/ua_profiler"
+              path="/profiler"
               element={
                 <RequireAuth>
                   <Profiler />
@@ -125,7 +126,7 @@ function Layout() {
             />
 
             <Route
-              path="/ua_cleaner"
+              path="/cleaner"
               element={
                 <RequireAuth>
                   <Cleaner />
@@ -134,7 +135,7 @@ function Layout() {
             />
 
             <Route
-              path="/ua_visualize"
+              path="/visualize"
               element={
                 <RequireAuth>
                   <Visualize />
@@ -142,12 +143,35 @@ function Layout() {
               }
             />
 
+            <Route
+              path="/report"
+              element={
+                <RequireAuth>
+                  <Report />
+                </RequireAuth>
+              }
+            />
+
+            {/* Redirect shims for old URLs */}
+            <Route path="/ua_profiler" element={<Navigate to="/profiler" replace />} />
+            <Route path="/ua_cleaner" element={<Navigate to="/cleaner" replace />} />
+            <Route path="/ua_visualize" element={<Navigate to="/visualize" replace />} />
+
             <Route path="/how-it-works" element={<HowItWorks />} />
             <Route path="/demo" element={<Demo />} />
             <Route path="/docs" element={<Docs />} />
 
             <Route
               path="/pipeline"
+              element={
+                <RequireAuth>
+                  <Pipeline />
+                </RequireAuth>
+              }
+            />
+            {/* Pipeline sub-routes */}
+            <Route
+              path="/pipeline/:step"
               element={
                 <RequireAuth>
                   <Pipeline />
