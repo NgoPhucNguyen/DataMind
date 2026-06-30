@@ -141,8 +141,31 @@ def _classify_column(series: pd.Series) -> tuple[str, list[str]]:
             return "datetime", ["line"]
 
         unique_count = series.nunique()
+        valid_series = series.dropna()
+        valid_count = len(valid_series)
 
-        # Categorical nếu unique <= ngưỡng
+        if valid_count > 0:
+            valid_strings = valid_series.astype(str)
+            
+            # Kiểm tra delimiter (dấu phẩy)
+            comma_count = valid_strings.str.count(',')
+            has_many_commas = (comma_count > 0).sum() > valid_count * 0.2
+            
+            if has_many_commas:
+                all_tokens = valid_strings.str.split(',').explode().str.strip()
+                if all_tokens.nunique() <= 25:
+                    return "multiple_choice", ["bar", "pie"]
+
+            # Nếu có ít giá trị unique và CÓ SỰ LẶP LẠI (chắc chắn là danh mục)
+            if unique_count <= CATEGORICAL_UNIQUE_THRESHOLD and unique_count < valid_count:
+                return "categorical", ["pie", "bar"]
+
+            # Nếu là các giá trị unique hoặc số lượng unique lớn, kiểm tra độ dài
+            avg_len = valid_strings.str.len().mean()
+            if avg_len > 30:
+                return "text", []
+
+        # Fallback
         if unique_count <= CATEGORICAL_UNIQUE_THRESHOLD:
             return "categorical", ["pie", "bar"]
 

@@ -25,6 +25,7 @@ from app.schemas.cleaner import (
     ConfirmCleanRequest, CleanDatasetResponse, SummaryForModule3,
     ValidationResult,
 )
+from pydantic import BaseModel
 from app.services import profiler_service, llm_service, cleaner_service
 
 logger = logging.getLogger(__name__)
@@ -189,6 +190,27 @@ async def profile_file(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Endpoint: POST /files/session/context
+# ─────────────────────────────────────────────────────────────────────────────
+
+class SessionContextRequest(BaseModel):
+    session_id: str
+    description: str = ""
+    purpose: str = ""
+
+@router.post(
+    "/session/context",
+    summary="Lưu ngữ cảnh dataset",
+)
+async def save_session_context(
+    body: SessionContextRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    cache.set_user_context(body.session_id, body.description, body.purpose)
+    return {"status": "ok"}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Helper: tái tải DataFrame từ Redis cache
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -295,10 +317,18 @@ async def auto_clean(
         filename, diff_raw["original_rows"], diff_raw["clean_rows"],
         current_user["user_id"],
     )
+    import math
+    preview_df = cleaned_df.head(500).copy()
+    preview_df = preview_df.replace({float('nan'): None, pd.NaT: None})
+    for col in preview_df.columns:
+        if pd.api.types.is_datetime64_any_dtype(preview_df[col]):
+            preview_df[col] = preview_df[col].dt.strftime('%Y-%m-%d %H:%M:%S')
+
     return AutoCleanResponse(
         file_hash=body.file_hash,
         diff_report=DiffReport(**diff_raw),
         validation=validation_res,
+        preview_data=preview_df.to_dict(orient="records"),
     )
 
 

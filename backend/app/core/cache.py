@@ -152,3 +152,17 @@ def get_file_bytes(file_hash: str) -> dict | None:
     except Exception as e:
         logger.warning("Redis GET file bytes lỗi: %s", e)
         return None
+
+def set_user_context(session_id: str, description: str, purpose: str) -> None:
+    """
+    Lưu context của user (description, purpose) vào Redis.
+    TTL 1 giờ.
+    """
+    client = _get_client()
+    if client is None:
+        return
+    try:
+        payload = json.dumps({"description": description, "purpose": purpose})
+        client.set(f"user_context:{session_id}", payload, ex=3600)
+    except Exception as e:
+        logger.warning("Redis SET user context lỗi: %s", e)

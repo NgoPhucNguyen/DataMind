@@ -7,7 +7,7 @@ class ColumnProfile(BaseModel):
     Thông tin phân tích của một cột dữ liệu.
     """
     name: str
-    detected_type: Literal["numeric", "datetime", "categorical", "text"]
+    detected_type: Literal["numeric", "datetime", "categorical", "text", "multiple_choice"]
     unique_count: int
     null_count: int
     null_pct: float                 # Phần trăm giá trị rỗng (0.0 → 100.0)

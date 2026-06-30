@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 from app.services import cleaner_service
+from app.services import chart_insights
 
 def compute_statistics(df: pd.DataFrame, warnings: list = None) -> dict:
     if warnings is None:
@@ -33,12 +34,28 @@ def compute_statistics(df: pd.DataFrame, warnings: list = None) -> dict:
         elif pd.api.types.is_datetime64_any_dtype(series):
             dtype = "datetime"
             datetime_cols.append(col)
-        elif pd.api.types.is_object_dtype(series) or pd.api.types.is_categorical_dtype(series) or pd.api.types.is_bool_dtype(series):
-            if unique_count <= 20 or pd.api.types.is_bool_dtype(series):
-                dtype = "categorical"
-                categorical_cols.append(col)
-            else:
-                dtype = "text"
+        elif pd.api.types.is_object_dtype(series) or pd.api.types.is_categorical_dtype(series) or pd.api.types.is_string_dtype(series) or pd.api.types.is_bool_dtype(series):
+            # Cố gắng parse lại datetime vì đọc từ CSV có thể mất định dạng
+            is_datetime = False
+            if pd.api.types.is_object_dtype(series) or pd.api.types.is_string_dtype(series):
+                try:
+                    dt_series = pd.to_datetime(series, errors='coerce')
+                    # Nếu trên 50% là datetime hợp lệ
+                    if dt_series.notna().sum() > len(series) * 0.5:
+                        dtype = "datetime"
+                        df[col] = dt_series
+                        series = dt_series
+                        datetime_cols.append(col)
+                        is_datetime = True
+                except:
+                    pass
+
+            if not is_datetime:
+                if unique_count <= 20 or pd.api.types.is_bool_dtype(series):
+                    dtype = "categorical"
+                    categorical_cols.append(col)
+                else:
+                    dtype = "text"
         else:
             dtype = "text"
             
@@ -115,14 +132,42 @@ def compute_statistics(df: pd.DataFrame, warnings: list = None) -> dict:
                     for val, count in top_10.items()
                 ]
 
+            elif dtype == "multiple_choice" and len(valid_series) > 0:
+                all_tokens = valid_series.astype(str).str.split(',').explode().str.strip()
+                # Loại bỏ token rỗng
+                all_tokens = all_tokens[all_tokens != ""]
+                value_counts = all_tokens.value_counts()
+                top_15 = value_counts.head(15)
+                total_respondents = len(valid_series)
+                col_summary["mode"] = str(top_15.index[0]) if len(top_15) > 0 else ""
+                col_summary["top_values"] = [
+                    {"value": str(val), "count": int(count), "pct": round(count/total_respondents*100, 2)}
+                    for val, count in top_15.items()
+                ]
+
             elif dtype == "datetime" and len(valid_series) > 0:
                 col_summary["min_date"] = valid_series.min().isoformat()
                 col_summary["max_date"] = valid_series.max().isoformat()
-                col_summary["range_days"] = int((valid_series.max() - valid_series.min()).days)
+                time_range = valid_series.max() - valid_series.min()
+                col_summary["range_days"] = int(time_range.days)
                 
-                # Trend data (aggregate by month)
+                # Xác định khoảng chia (freq) dựa trên time_range
+                # Nếu < 2 ngày -> theo giờ (H)
+                # Nếu < 60 ngày -> theo ngày (D)
+                # Nếu < 730 ngày (2 năm) -> theo tháng (M)
+                # Lớn hơn -> theo năm (Y)
+                if time_range.total_seconds() <= 48 * 3600:
+                    freq = "h"  # 'h' for hour in newer pandas, 'H' was deprecated
+                elif time_range.days <= 60:
+                    freq = "D"
+                elif time_range.days <= 730:
+                    freq = "M"
+                else:
+                    freq = "Y"
+
+                # Trend data
                 try:
-                    trend = valid_series.dt.to_period("M").value_counts().sort_index()
+                    trend = valid_series.dt.to_period(freq).value_counts().sort_index()
                     col_summary["trend_data"] = [
                         {"period": str(period), "count": int(count)}
                         for period, count in trend.items()
@@ -130,6 +175,7 @@ def compute_statistics(df: pd.DataFrame, warnings: list = None) -> dict:
                 except Exception:
                     pass
 
+        col_summary["auto_insights"] = chart_insights.generate_insights(col_summary)
         summary["columns"][col] = col_summary
 
     # Correlation

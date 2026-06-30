@@ -118,6 +118,9 @@ def detect_issues(
         series = df[col_name]
         col_type = overridden_types.get(col_name, _infer_type(series))
 
+        if col_type == "text":
+            continue
+
         # ── 1. Missing values ──────────────────────────────
         null_count = int(series.isna().sum())
         if null_count > 0:
@@ -232,6 +235,9 @@ def auto_clean(
         series = cleaned[col_name]
         col_type = overridden_types.get(col_name, _infer_type(series))
 
+        if col_type == "text":
+            continue
+
         # 2a. Strip encoding lỗi (chỉ cột string)
         if pd.api.types.is_object_dtype(series.dtype):
             new_series = series.apply(_strip_bad_chars)
@@ -249,26 +255,26 @@ def auto_clean(
             types_converted[str(col_name)] = f"{original_dtype} → float64"
             series = cleaned[col_name]  # refresh
 
+        # 2b2. Convert wrong type → datetime
+        if pd.api.types.is_object_dtype(series.dtype) and col_type == "datetime":
+            original_dtype = str(series.dtype)
+            converted = pd.to_datetime(series, errors='coerce')
+            cleaned[col_name] = converted
+            types_converted[str(col_name)] = f"{original_dtype} → datetime64"
+            series = cleaned[col_name]  # refresh
+
         # 2c. Fill missing
         null_before = int(series.isna().sum())
-        if null_before == 0:
-            continue
-
-        if col_type == "numeric" and pd.api.types.is_numeric_dtype(cleaned[col_name].dtype):
-            fill_val = cleaned[col_name].median()
-            cleaned[col_name] = cleaned[col_name].fillna(fill_val)
-        elif col_type == "categorical":
-            mode_vals = series.mode()
-            fill_val = mode_vals.iloc[0] if len(mode_vals) > 0 else "Unknown"
-            cleaned[col_name] = cleaned[col_name].fillna(fill_val)
-        elif col_type == "datetime":
-            # Datetime: chỉ xóa dòng nếu rỗng < 10%. Nếu rỗng nhiều, giữ nguyên NaT để không mất dữ liệu.
-            null_pct = null_before / original_rows * 100
-            if null_pct < 10.0:
-                cleaned = cleaned.dropna(subset=[col_name])
-        else:
-            # text
-            cleaned[col_name] = cleaned[col_name].fillna("Unknown")
+        if null_before > 0:
+            if col_type == "numeric":
+                fill_val = series.median()
+                cleaned[col_name] = series.fillna(fill_val)
+            elif col_type in ["categorical", "multiple_choice"]:
+                cleaned[col_name] = series.fillna("Không xác định")
+            elif col_type == "datetime":
+                pass
+            else:
+                cleaned[col_name] = series.fillna("Không xác định")
 
         null_after = int(cleaned[col_name].isna().sum()) if col_name in cleaned.columns else 0
         filled_count = null_before - null_after

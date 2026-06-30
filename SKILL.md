@@ -73,7 +73,7 @@ Color is a scarce resource, utilized only for semantic meaning or subtle accents
   - When mocking up software, wrap it in a minimalist container with a white top bar containing three small, light gray circles (replicating macOS window controls).
 
 ## 6. Iconography & Imagery Directives
-- System Icons: Use "Phosphor Icons (Bold or Fill weights)" or "Radix UI Icons" for a technical, slightly thicker-stroke aesthetic. Standardize stroke width across all icons.
+- System Icons: Use **`lucide-react`** (already installed in DataMind). Standardize `strokeWidth={1.5}` across all icons for a consistent weight. Use `size={16}` for inline/button icons, `size={20}` for standalone actions, `size={24}` for section headers. Never mix stroke widths in the same view.
 - Illustrations: Monochromatic, rough continuous-line ink sketches on a white background, featuring a single offset geometric shape filled with a muted pastel color.
 - Photography: Use high-quality, desaturated images with a warm tone. Apply subtle overlays (`opacity: 0.04` warm grain) to blend photos into the monochrome palette. Never use oversaturated stock photos. Use reliable placeholders like `https://picsum.photos/seed/{context}/1200/800` when real assets are unavailable.
 - Hero & Section Backgrounds: Sections should not feel empty and flat. Use subtle full-width background imagery at very low opacity, soft radial light spots (`radial-gradient` with warm tones at `opacity: 0.03`), or minimal geometric line patterns to add depth without breaking the clean aesthetic.
@@ -95,3 +95,75 @@ When tasked with writing frontend code (HTML, React, Tailwind, Vue) or designing
 5. Add scroll-entry animations to all major content blocks.
 6. Ensure sections have visual depth through imagery, ambient gradients, or subtle textures — no empty flat backgrounds.
 7. Provide code that reflects this high-end, uncluttered, editorial aesthetic natively without requiring manual adjustments.
+
+## 9. DataMind Layout System (Project-Specific)
+These rules apply to every page in DataMind — Profiler, Cleaner, Visualize, Pipeline, Report. Consistency across all pages is mandatory.
+
+### Content Width
+```
+Sidebar (fixed):     240px
+Main content area:   calc(100vw - 240px)
+Content inner max:   max-w-5xl (1024px) centered with mx-auto
+Content padding:     px-8 py-8 (32px horizontal, 32px vertical)
+```
+Never let content stretch full-width on large screens — `max-w-5xl` is the ceiling.
+
+### Page Structure (every page must follow this)
+```
+┌─────────────────────────────────────────────┐
+│  Page Header                                │  pb-6 border-b border-[#EAEAEA]
+│  Title (text-2xl font-semibold #121A14)     │
+│  Subtitle (text-sm #626C65)                 │
+├─────────────────────────────────────────────┤
+│                                             │  pt-6
+│  Content area (max-w-5xl mx-auto)           │
+│                                             │
+│  Cards: border border-[#EAEAEA] rounded-xl  │
+│         p-6 bg-white                        │
+│                                             │
+└─────────────────────────────────────────────┘
+```
+
+### Typography Scale (Tailwind classes)
+```
+Page title:      text-2xl font-semibold tracking-tight text-[#121A14]
+Section title:   text-base font-semibold text-[#121A14]
+Body text:       text-sm text-[#121A14] leading-relaxed
+Secondary text:  text-sm text-[#626C65]
+Caption/meta:    text-xs text-[#626C65] tracking-wide
+Data values:     font-mono text-sm text-[#121A14]
+```
+
+### Button Contrast Rules (non-negotiable)
+Interactive elements must pass WCAG AA contrast — low contrast buttons are invisible to users.
+
+```
+Primary action:   bg-[#121A14] text-white hover:bg-[#1B4324]
+                  — use for: Confirm, Continue, Generate, Export
+
+Secondary action: border border-[#EAEAEA] bg-white text-[#121A14] hover:bg-[#EAF2EB]
+                  — use for: Cancel, Back, Skip, View Details
+
+Danger action:    bg-[#FDEBEC] text-[#9F2F2D] border border-[#9F2F2D]/20
+                  — use for: Delete, Reset
+
+Disabled state:   bg-[#EAEAEA] text-[#626C65] cursor-not-allowed opacity-60
+                  — never use primary color at reduced opacity as disabled
+```
+
+All buttons: `rounded-md px-4 py-2 text-sm font-medium transition-all duration-150`
+No pill buttons (`rounded-full`) for action buttons — only for status badges/tags.
+
+### Status Badges
+```
+Success/Clean:  bg-[#EAF2EB] text-[#1B4324]
+Warning:        bg-[#FBF3DB] text-[#956400]
+Error:          bg-[#FDEBEC] text-[#9F2F2D]
+Info:           bg-[#E1F3FE] text-[#1F6C9F]
+Neutral:        bg-[#F3F4F6] text-[#626C65]
+
+All badges: rounded-full px-2.5 py-0.5 text-xs font-medium tracking-wide uppercase
+```
+
+### Visualization Page Exception
+`/visualize` renders Recharts — charts cannot be constrained the same way as text content. Rule: chart containers use `w-full` but are wrapped inside the standard card component (`border border-[#EAEAEA] rounded-xl p-6 bg-white`). The card itself stays within `max-w-5xl`. Chart height: `h-64` for small, `h-80` for standard, `h-96` for large — never `h-auto` which causes layout collapse.

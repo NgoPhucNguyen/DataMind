@@ -135,6 +135,7 @@ class AutoCleanResponse(BaseModel):
     file_hash: str
     diff_report: DiffReport
     validation: ValidationResult | None = None
+    preview_data: list[dict] = []
 
 
 # ─── summary_for_module3 ──────────────────────────────────────────────────

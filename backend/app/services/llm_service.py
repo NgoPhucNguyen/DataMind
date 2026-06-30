@@ -117,3 +117,38 @@ async def get_semantic_context(columns: list[dict]) -> dict[str, Any]:
     except Exception as e:
         logger.error(f"Gemini thất bại sau 3 lần thử: {e}")
         return _FALLBACK_CONTEXT
+
+async def generate_report_intro(metadata: dict, charts: list) -> str:
+    """
+    Sử dụng Gemini để sinh đoạn intro 4-5 câu cho báo cáo phân tích.
+    """
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        return "Tập dữ liệu đã sẵn sàng để phân tích. Hệ thống hiện không thể tự động tổng hợp"
+
+    try:
+        from google import genai
+        client = genai.Client(api_key=api_key)
+        
+        schema_summary = ", ".join([f"{c.get('name')} ({c.get('detected_type')})" for c in metadata.get('schema', [])[:10]])
+        chart_summary = ", ".join([c.get('user_title', c.get('title', '')) for c in charts[:5]])
+
+        user_ctx_str = ""
+        user_ctx = metadata.get('user_context')
+        if user_ctx and (user_ctx.get('description') or user_ctx.get('purpose')):
+            user_ctx_str = f"- Ngữ cảnh từ người dùng: Mô tả: {user_ctx.get('description', '')}, Mục đích: {user_ctx.get('purpose', '')}\n"
+
+        prompt = f"""Bạn là chuyên gia phân tích dữ liệu. Dựa vào metadata của bộ dữ liệu sau:
+- Tên file: {metadata.get('file_name', 'Unknown')}
+- Số dòng: {metadata.get('row_count', 0)}, Số cột: {metadata.get('col_count', 0)}
+- Một số cột chính: {schema_summary}
+- Các biểu đồ đáng chú ý được chọn: {chart_summary}
+{user_ctx_str}
+Hãy viết CHÍNH XÁC 4-5 câu súc tích để giới thiệu bộ dữ liệu này và nêu bật 1-2 điểm đáng chú ý nhất dựa trên các biểu đồ đã chọn. Đặc biệt cần liên kết với 'Ngữ cảnh từ người dùng' (nếu có).
+KHÔNG giải thích dông dài, KHÔNG dùng markdown, KHÔNG liệt kê bullet points, chỉ viết một đoạn văn duy nhất."""
+
+        response = await _call_gemini_with_retry(client, prompt)
+        return response.text.strip()
+    except Exception as e:
+        logger.error(f"Lỗi khi sinh intro: {e}")
+        return "Tập dữ liệu đã được xử lý thành công. Dưới đây là các phân tích chi tiết dựa trên lựa chọn của bạn."
