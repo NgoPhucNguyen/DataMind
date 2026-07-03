@@ -28,7 +28,11 @@ class User(Base):
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     full_name = Column(String, nullable=False)
     email = Column(String, unique=True, nullable=False, index=True)
-    password = Column(String, nullable=False)  
+    password = Column(String, nullable=True)
+
+    google_id = Column(String, unique=True, nullable=True, index=True)
+    avatar_url = Column(String, nullable=True)
+
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -36,7 +40,6 @@ class User(Base):
     subscriptions = relationship("UserSubscription", back_populates="user")
     payments = relationship("Payment", back_populates="user")
     credit_transactions = relationship("CreditTransaction", back_populates="user")
-
 
 class CreditsWallet(Base):
     __tablename__ = "credits_wallet"

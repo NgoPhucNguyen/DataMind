@@ -12,6 +12,11 @@ export const login = async (data) => {
     return response.data;
 };
 
+export const loginWithGoogle = async (credential) => {
+    const response = await axiosClient.post("/auth/google", { credential });
+    return response.data;
+};
+
 export const logout = () => {
     localStorage.removeItem("token");
     localStorage.removeItem("user");

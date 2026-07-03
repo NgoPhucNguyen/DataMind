@@ -32,7 +32,8 @@ class RegisterRequest(BaseModel):
             raise ValueError("Mật khẩu phải có ít nhất 6 ký tự")
         return v
 
-
+class GoogleLoginRequest(BaseModel):
+    credential: str 
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
