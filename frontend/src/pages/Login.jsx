@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { login } from "../services/authService";
+import { login, loginWithGoogle } from "../services/authService";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { useToast } from "../contexts/ToastContext";
+import GoogleSignInButton from "../components/GoogleSignInButton";
 
 export default function Login() {
   const navigate = useNavigate();
@@ -13,9 +14,30 @@ export default function Login() {
 
   const [formData, setFormData] = useState({ email: "", password: "" });
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
+  };
+
+  const handleGoogleCredential = async (credential) => {
+    setGoogleLoading(true);
+    try {
+      const response = await loginWithGoogle(credential);
+      localStorage.setItem("token", response.token.access_token);
+      localStorage.setItem("user", JSON.stringify(response.user));
+      showToast("Đăng nhập thành công! Chào mừng bạn quay trở lại.", "success");
+      navigate(from, { replace: true });
+    } catch (error) {
+      const msg = error.response?.data?.detail || "Không thể đăng nhập bằng Google. Vui lòng thử lại.";
+      showToast(msg, "error");
+    } finally {
+      setGoogleLoading(false);
+    }
+  };
+
+  const handleGoogleError = () => {
+    showToast("Không thể đăng nhập bằng Google. Vui lòng thử lại.", "error");
   };
 
   const handleSubmit = async (e) => {
@@ -104,6 +126,23 @@ export default function Login() {
               )}
             </button>
           </form>
+
+          {/* Divider */}
+          <div className="flex items-center gap-3 mt-6">
+            <div className="h-px flex-1 bg-border" />
+            <span className="text-xs text-muted uppercase tracking-wider">Hoặc</span>
+            <div className="h-px flex-1 bg-border" />
+          </div>
+
+          {/* Google Sign-In */}
+          <div className="mt-6 relative">
+            <GoogleSignInButton onCredential={handleGoogleCredential} onError={handleGoogleError} />
+            {googleLoading && (
+              <div className="absolute inset-0 bg-white/70 flex items-center justify-center rounded-lg">
+                <span className="w-4 h-4 border-2 border-forest/30 border-t-forest rounded-full animate-spin" />
+              </div>
+            )}
+          </div>
 
           <p className="text-center text-muted text-xs mt-6">
             Chưa có tài khoản?{" "}

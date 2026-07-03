@@ -33,3 +33,20 @@ def decode_access_token(token: str) -> dict | None:
         return payload
     except JWTError:
         return None
+    
+def verify_google_id_token(credential: str) -> dict:
+    from google.oauth2 import id_token as google_id_token
+    from google.auth.transport import requests as google_requests
+
+    client_id = os.getenv("GOOGLE_CLIENT_ID")
+    if not client_id:
+        raise ValueError("GOOGLE_CLIENT_ID chưa được cấu hình trên server.")
+
+    idinfo = google_id_token.verify_oauth2_token(
+        credential, google_requests.Request(), client_id
+    )
+
+    if idinfo.get("aud") != client_id:
+        raise ValueError("Token không hợp lệ (sai audience).")
+
+    return idinfo

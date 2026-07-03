@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.security import hash_password, verify_password, create_access_token
+from app.core.security import hash_password, verify_password, create_access_token, verify_google_id_token
 from app.models import (
     User,
     CreditsWallet,
@@ -12,6 +12,7 @@ from app.models import (
 from app.schemas.auth import (
     RegisterRequest,
     LoginRequest,
+    GoogleLoginRequest, 
     RegisterResponse,
     LoginResponse,
     UserResponse,
@@ -105,3 +106,46 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
         user=_user_to_response(user),
         token=TokenResponse(access_token=access_token),
     )
+@router.post("/google", response_model=LoginResponse, status_code=status.HTTP_200_OK)
+def login_with_google(body: GoogleLoginRequest, db: Session = Depends(get_db)):
+    try:
+        idinfo = verify_google_id_token(body.credential)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
+                            detail="Không thể xác thực tài khoản Google. Vui lòng thử lại.")
+
+    google_id = idinfo["sub"]
+    email = idinfo.get("email", "").lower()
+    full_name = idinfo.get("name") or email.split("@")[0]
+    avatar_url = idinfo.get("picture")
+
+    if not email or not idinfo.get("email_verified", False):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
+                            detail="Email Google chưa được xác minh.")
+
+    user = db.query(User).filter(User.google_id == google_id).first()
+
+    if not user:
+        user = db.query(User).filter(User.email == email).first()
+        if user:
+            # Tài khoản email/password đã tồn tại → liên kết Google
+            user.google_id = google_id
+            user.avatar_url = user.avatar_url or avatar_url
+        else:
+            # Tạo user mới
+            user = User(full_name=full_name, email=email, password=None,
+                        google_id=google_id, avatar_url=avatar_url)
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+            db.add(CreditsWallet(user_id=user.id, balance=100000))
+            db.add(CreditTransaction(user_id=user.id, amount=100000,
+                                     type=TransactionType.CREDIT, description="Welcome bonus"))
+
+    db.commit()
+    db.refresh(user)
+
+    access_token = create_access_token(data={"sub": str(user.id), "email": user.email})
+    return LoginResponse(message="Đăng nhập bằng Google thành công!",
+                         user=_user_to_response(user),
+                         token=TokenResponse(access_token=access_token))
