@@ -19,7 +19,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 _DEFAULT_TTL = 86400       # 24 giờ
-_FILE_BYTES_TTL = 3600     # 1 giờ — đủ cho session làm sạch
+_FILE_BYTES_TTL = 3600 #test 5p     # 1 giờ — đủ cho session làm sạch
 
 
 def _get_client():
@@ -166,3 +166,33 @@ def set_user_context(session_id: str, description: str, purpose: str) -> None:
         client.set(f"user_context:{session_id}", payload, ex=3600)
     except Exception as e:
         logger.warning("Redis SET user context lỗi: %s", e)
+
+def set_session_metadata(session_id: str, metadata: dict[str, Any], ttl: int = _FILE_BYTES_TTL) -> None:
+    """
+    Lưu metadata của session vào Redis (ví dụ: schema, loại cột lấy từ Profiler).
+    TTL mặc định 1 giờ.
+    """
+    client = _get_client()
+    if client is None:
+        return
+    try:
+        payload = json.dumps(metadata)
+        client.set(f"session_metadata:{session_id}", payload, ex=ttl)
+        logger.debug("Cached session metadata: session_id=%s", session_id)
+    except Exception as e:
+        logger.warning("Redis SET session metadata lỗi: %s", e)
+
+def get_session_metadata(session_id: str) -> dict[str, Any] | None:
+    """
+    Lấy metadata của session từ Redis.
+    """
+    client = _get_client()
+    if client is None:
+        return None
+    try:
+        raw = client.get(f"session_metadata:{session_id}")
+        if raw is None:
+            return None
+        return json.loads(raw) if isinstance(raw, str) else json.loads(raw.decode())
+    except Exception as e:
+        logger.warning("Redis GET session metadata lỗi: %s", e)

@@ -29,6 +29,6 @@ export const CARD = "border border-[#EAEAEA] rounded-xl p-6 bg-white"
 
 // Page layout
 export const PAGE = {
-  wrapper: "px-8 py-8 max-w-5xl mx-auto",
+  wrapper: "w-full max-w-[1400px] mx-auto px-6 sm:px-8 py-8 transition-all duration-300",
   header: "pb-6 border-b border-[#EAEAEA] mb-6",
 }

@@ -1,0 +1,110 @@
+import { useState, useEffect } from "react";
+import { X, BookOpen, CheckCircle2, PlayCircle, BarChart2, ShieldAlert } from "lucide-react";
+
+const DOCS_DATA = {
+  profiler: {
+    title: "Hướng dẫn: Profiler (Đánh giá Dữ Liệu)",
+    description: "Công cụ tự động quét và phân tích cấu trúc bộ dữ liệu của bạn để nhận diện kiểu dữ liệu và bối cảnh (context).",
+    steps: [
+      { icon: PlayCircle, title: "Tải file lên", text: "Kéo thả hoặc chọn file CSV/Excel của bạn (tối đa 10MB)." },
+      { icon: BarChart2, title: "Xem tổng quan", text: "Hệ thống sẽ tự động nhận diện số cột, số dòng và kiểu dữ liệu (Numeric, Text, Categorical, Datetime)." },
+      { icon: ShieldAlert, title: "Lưu ngữ cảnh (tùy chọn)", text: "Bạn có thể điền thêm mô tả và mục đích của dataset để AI hiểu rõ hơn về dữ liệu của bạn." }
+    ]
+  },
+  cleaner: {
+    title: "Hướng dẫn: Cleaner (Làm sạch Dữ Liệu)",
+    description: "Tự động phát hiện và xử lý các lỗi dữ liệu phổ biến như giá trị trống, sai định dạng, dữ liệu trùng lặp.",
+    steps: [
+      { icon: ShieldAlert, title: "Quét lỗi tự động", text: "Hệ thống tự động phát hiện Missing values, Wrong types, Encoding errors và Duplicates." },
+      { icon: PlayCircle, title: "Xem trước (Auto-Clean)", text: "Click 'Tự động làm sạch' để xem trước các thay đổi. Dữ liệu chưa bị lưu đè." },
+      { icon: CheckCircle2, title: "Xác nhận làm sạch", text: "Nếu bạn đồng ý với kết quả, click 'Xác nhận & Chốt file' để lưu lại bản sạch." }
+    ]
+  },
+  visualize: {
+    title: "Hướng dẫn: Visualize (Trực quan hóa)",
+    description: "Tự động vẽ các biểu đồ phân tích sâu dựa trên bản dữ liệu đã làm sạch.",
+    steps: [
+      { icon: BarChart2, title: "Chọn biểu đồ", text: "Click vào các thanh bên trái để bật/tắt các biểu đồ Phân phối, Tương quan, Xu hướng." },
+      { icon: PlayCircle, title: "Khám phá Heatmap", text: "Nếu dataset có đủ 2 cột số trở lên, bạn có thể click vào các ô màu trên Heatmap để xem chi tiết biểu đồ phân tán (Scatter plot)." },
+      { icon: CheckCircle2, title: "Xuất báo cáo", text: "Sử dụng nút Xuất PDF ở góc trên bên phải để lưu báo cáo phân tích về máy." }
+    ]
+  }
+};
+
+export default function PageHelpDocs({ pageId }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const data = DOCS_DATA[pageId];
+
+  // Prevent scroll when modal is open
+  useEffect(() => {
+    if (isOpen) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "unset";
+    }
+    return () => {
+      document.body.style.overflow = "unset";
+    };
+  }, [isOpen]);
+
+  if (!data) return null;
+
+  return (
+    <>
+      <button 
+        onClick={() => setIsOpen(true)}
+        className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-forest bg-sage/20 hover:bg-sage/40 rounded-md transition-colors border border-forest/20 shadow-sm"
+      >
+        <BookOpen className="w-4 h-4" /> Hướng dẫn
+      </button>
+
+      {isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm transition-opacity">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between p-5 border-b border-border bg-sand/30">
+              <div className="flex items-center gap-2 text-forest">
+                <BookOpen className="w-5 h-5" />
+                <h3 className="font-semibold text-lg">{data.title}</h3>
+              </div>
+              <button 
+                onClick={() => setIsOpen(false)}
+                className="p-1.5 text-muted hover:text-ink hover:bg-gray-200/50 rounded-md transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="p-6">
+              <p className="text-ink/80 text-sm mb-6 leading-relaxed">
+                {data.description}
+              </p>
+              
+              <div className="space-y-5">
+                {data.steps.map((step, idx) => (
+                  <div key={idx} className="flex gap-4 items-start">
+                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-sage/40 flex items-center justify-center text-forest mt-0.5">
+                      <step.icon className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="font-medium text-ink text-sm mb-1">{step.title}</h4>
+                      <p className="text-muted text-sm leading-relaxed">{step.text}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            
+            <div className="p-5 border-t border-border bg-gray-50 flex justify-end">
+              <button 
+                onClick={() => setIsOpen(false)}
+                className="px-5 py-2 bg-forest text-white text-sm font-medium rounded-lg hover:bg-forest/90 transition-colors shadow-sm"
+              >
+                Đã hiểu
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}

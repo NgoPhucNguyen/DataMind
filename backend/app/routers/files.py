@@ -18,12 +18,13 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 
 from app.core.dependencies import get_current_user
 from app.core import cache
+from app.core.errors import DataMindException, ErrorSeverity
 from app.schemas.files import ProfileResponse, SemanticContext, ColumnProfile
 from app.schemas.cleaner import (
     IssueDetectRequest, IssueReport,
     AutoCleanRequest, AutoCleanResponse, DiffReport,
     ConfirmCleanRequest, CleanDatasetResponse, SummaryForModule3,
-    ValidationResult,
+    ValidationResult, ManualCleanPreviewRequest
 )
 from pydantic import BaseModel
 from app.services import profiler_service, llm_service, cleaner_service
@@ -43,9 +44,16 @@ def _validate_extension(filename: str) -> str:
     for ext in ALLOWED_EXTENSIONS:
         if lower.endswith(ext):
             return ext
-    raise HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail=f"Chỉ chấp nhận file: {', '.join(ALLOWED_EXTENSIONS)}",
+    raise DataMindException(
+        code="ERR_FILE_EXT_INVALID",
+        severity=ErrorSeverity.BLOCKING,
+        user_message=f"Chỉ chấp nhận file: {', '.join(ALLOWED_EXTENSIONS)}",
+        technical_detail={
+            "module": "files",
+            "location": "_validate_extension",
+            "root_cause": f"Extension không hợp lệ từ filename: '{filename}'"
+        },
+        suggested_action=None
     )
 
 
@@ -86,10 +94,19 @@ def _read_dataframe(file_bytes: io.BytesIO, ext: str) -> pd.DataFrame:
         df = df.dropna(how='all')
 
         return df
+    except DataMindException:
+        raise
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Không thể đọc file: {str(e)}",
+        raise DataMindException(
+            code="ERR_FILE_PARSE_FAILED",
+            severity=ErrorSeverity.BLOCKING,
+            user_message=f"Không thể đọc file: {str(e)}",
+            technical_detail={
+                "module": "files",
+                "location": "_read_dataframe",
+                "root_cause": f"Exception khi parse file (ext={ext}): {str(e)}"
+            },
+            suggested_action=None
         )
 
 
@@ -115,15 +132,29 @@ async def profile_file(
     content = await file.read()
 
     if len(content) > MAX_FILE_SIZE_BYTES:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail="File vượt quá giới hạn 10MB.",
+        raise DataMindException(
+            code="ERR_FILE_TOO_LARGE",
+            severity=ErrorSeverity.BLOCKING,
+            user_message="File vượt quá giới hạn 10MB.",
+            technical_detail={
+                "module": "files",
+                "location": "profile_file",
+                "root_cause": f"File size {len(content)} bytes vượt quá MAX_FILE_SIZE_BYTES={MAX_FILE_SIZE_BYTES}"
+            },
+            suggested_action=None
         )
 
     if len(content) == 0:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="File rỗng.",
+        raise DataMindException(
+            code="ERR_FILE_EMPTY",
+            severity=ErrorSeverity.BLOCKING,
+            user_message="File rỗng.",
+            technical_detail={
+                "module": "files",
+                "location": "profile_file",
+                "root_cause": "File upload có content length = 0"
+            },
+            suggested_action=None
         )
 
     # 3. Tính hash để kiểm tra cache
@@ -159,7 +190,14 @@ async def profile_file(
 
     # 7. Gọi Gemini LLM để phân tích ngữ cảnh (có fallback nếu lỗi)
     semantic_raw = await llm_service.get_semantic_context(columns_raw)
+    column_semantics = semantic_raw.pop("column_semantics", {})
+    
     semantic = SemanticContext(**semantic_raw)
+    
+    for col in columns:
+        semantic_info = column_semantics.get(col.name, {})
+        col.semantic_type = semantic_info.get("semantic_type", "GENERAL_TEXT")
+        col.semantic_confidence = float(semantic_info.get("confidence", 0.0))
 
     # 8. Tạo response
     result = ProfileResponse(
@@ -222,12 +260,16 @@ def _load_df_from_cache(file_hash: str) -> tuple[pd.DataFrame, str, str]:
     """
     cached = cache.get_file_bytes(file_hash)
     if cached is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=(
-                "Phiên làm việc đã hết hạn hoặc file không tìm thấy. "
-                "Vui lòng upload lại."
-            ),
+        raise DataMindException(
+            code="ERR_SYS_CACHE_EXPIRED",
+            severity=ErrorSeverity.CRITICAL,
+            user_message="Phiên làm việc đã hết hạn hoặc file không tìm thấy. Vui lòng upload lại.",
+            technical_detail={
+                "module": "files",
+                "location": "_load_df_from_cache",
+                "root_cause": f"cache.get_file_bytes('{file_hash}') trả về None — TTL hết hoặc Redis miss"
+            },
+            suggested_action=None
         )
     file_bytes = io.BytesIO(cached["bytes"])
     df = _read_dataframe(file_bytes, cached["ext"])
@@ -252,12 +294,20 @@ async def detect_issues(
     current_user: dict = Depends(get_current_user),
 ):
     df, filename, _ = _load_df_from_cache(body.file_hash)
+    
+    # Load profile to get semantic mapping
+    profile_data = cache.get_profile(body.file_hash)
+    column_semantics = {}
+    if profile_data:
+        for col in profile_data.get("columns", []):
+            column_semantics[col.get("name")] = col.get("semantic_type", "GENERAL_TEXT")
 
     report_raw = cleaner_service.detect_issues(
         df=df,
         filename=filename,
         file_hash=body.file_hash,
         overridden_types=body.overridden_types,
+        column_semantics=column_semantics,
     )
 
     logger.info(
@@ -324,13 +374,86 @@ async def auto_clean(
         if pd.api.types.is_datetime64_any_dtype(preview_df[col]):
             preview_df[col] = preview_df[col].dt.strftime('%Y-%m-%d %H:%M:%S')
 
+    preview_df = preview_df.reset_index(names="original_index")
+
+    # Tính toán lại error_cells cho tập dữ liệu sau auto-clean
+    profile_data = cache.get_profile(body.file_hash)
+    column_semantics = {}
+    if profile_data:
+        for col in profile_data.get("columns", []):
+            column_semantics[col.get("name")] = col.get("semantic_type", "GENERAL_TEXT")
+    
+    # Chỉ tính lỗi trên preview_df để hiển thị cho nhẹ, hoặc tính trên cleaned_df nếu muốn đầy đủ
+    # Chú ý: Auto-clean không chủ động sửa semantic error nên ta báo cáo lỗi trên preview_df
+    error_cells = cleaner_service._get_error_cells(preview_df, body.overridden_types, column_semantics)
+
     return AutoCleanResponse(
         file_hash=body.file_hash,
         diff_report=DiffReport(**diff_raw),
         validation=validation_res,
         preview_data=preview_df.to_dict(orient="records"),
+        error_cells=error_cells,
     )
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Endpoint: POST /files/manual-clean-preview
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.post(
+    "/manual-clean-preview",
+    summary="Xem trước kết quả làm sạch thủ công",
+    description="Áp dụng chuỗi hành động làm sạch thủ công và trả về dữ liệu mẫu mà chưa lưu vào cache."
+)
+async def manual_clean_preview(
+    body: ManualCleanPreviewRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    try:
+        df, filename, _ = _load_df_from_cache(body.file_hash)
+    except DataMindException as dme:
+        # file cache expired
+        raise HTTPException(status_code=410, detail=dme.user_message)
+    except Exception as e:
+        logger.error(f"Load cache error in manual-clean-preview: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Không thể tải dữ liệu từ bộ nhớ đệm.")
+
+    try:
+        # Áp dụng các hành động thủ công
+        cleaned_df = cleaner_service.apply_manual_actions(df, body.actions)
+        
+        # Lấy 100 dòng đầu tiên giữ nguyên thứ tự gốc (tương tự như detect_issues)
+        # để tránh việc row nhảy vị trí liên tục khi user edit (Smart Preview cũ dùng nan_mask gây lộn xộn index)
+        preview_df = cleaned_df.head(100).copy()
+        
+        profile_data = cache.get_profile(body.file_hash)
+        column_semantics = {}
+        if profile_data:
+            for col in profile_data.get("columns", []):
+                column_semantics[col.get("name")] = col.get("semantic_type", "GENERAL_TEXT")
+        
+        # Phân tích lỗi trên preview_df (giữ nguyên original index)
+        error_cells = cleaner_service._get_error_cells(preview_df, {}, column_semantics)
+        
+        preview_df = preview_df.replace({float('nan'): None, pd.NaT: None})
+        for col in preview_df.columns:
+            if pd.api.types.is_datetime64_any_dtype(preview_df[col]):
+                preview_df[col] = preview_df[col].dt.strftime('%Y-%m-%d %H:%M:%S')
+                
+        # Lưu index gốc thành original_index
+        preview_df = preview_df.reset_index(names="original_index")
+                
+        return {
+            "preview_data": preview_df.to_dict(orient="records"),
+            "error_cells": error_cells
+        }
+        
+    except ValueError as ve:
+        logger.warning(f"Manual Clean Validation Error: {ve}")
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        logger.error(f"Manual Clean Error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Đã xảy ra lỗi hệ thống khi áp dụng thao tác làm sạch thủ công.")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Endpoint: POST /files/confirm-clean
@@ -351,11 +474,31 @@ async def confirm_clean(
 ):
     df, filename, _ = _load_df_from_cache(body.file_hash)
 
-    # Chạy auto_clean lần cuối (manual mode: user tự sửa trước — cần luồng kéo dài sau)
-    cleaned_df, diff_raw = cleaner_service.auto_clean(
-        df=df,
-        overridden_types=body.overridden_types,
-    )
+    if body.clean_mode == "manual":
+        try:
+            cleaned_df = cleaner_service.apply_manual_actions(df, body.actions)
+        except ValueError as ve:
+            logger.warning(f"Manual Clean Validation Error in confirm_clean: {ve}")
+            raise HTTPException(status_code=400, detail=str(ve))
+        
+        # Giả lập diff_raw đơn giản cho manual mode để tránh lỗi serialize
+        diff_raw = {
+            "original_rows": len(df),
+            "clean_rows": len(cleaned_df),
+            "original_cols": len(df.columns),
+            "clean_cols": len(cleaned_df.columns),
+            "duplicate_rows_removed": len(df) - len(cleaned_df),
+            "columns_dropped": [],
+            "missing_filled": {},
+            "types_converted": {},
+            "encoding_fixed": {}
+        }
+    else:
+        # Chạy auto_clean lần cuối (mặc định)
+        cleaned_df, diff_raw = cleaner_service.auto_clean(
+            df=df,
+            overridden_types=body.overridden_types,
+        )
 
     # Validate cuối
     validation_dict = cleaner_service.validate_clean_dataset(cleaned_df)
@@ -364,9 +507,16 @@ async def confirm_clean(
     if not validation_res.can_proceed:
         # Lấy thông báo lỗi đầu tiên để show, thực tế có list lỗi trong hard_blocks
         reason = validation_res.hard_blocks[0].message if validation_res.hard_blocks else "Dữ liệu không hợp lệ."
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=reason,
+        raise DataMindException(
+            code="ERR_CLN_VALIDATION_FAILED",
+            severity=ErrorSeverity.BLOCKING,
+            user_message=reason,
+            technical_detail={
+                "module": "files",
+                "location": "confirm_clean",
+                "root_cause": f"validation_res.can_proceed=False, hard_blocks={[b.message for b in validation_res.hard_blocks]}"
+            },
+            suggested_action=None
         )
 
     # Xuất ra CSV bytes
@@ -382,6 +532,9 @@ async def confirm_clean(
     session_id = str(uuid.uuid4())
     confirmed_at = datetime.now(timezone.utc).isoformat()
     summary = cleaner_service.build_summary_for_module3(cleaned_df)
+
+    # Lưu metadata session vào Redis để Module Visualization sử dụng
+    cache.set_session_metadata(session_id, summary)
 
     # Cache file bytes theo session_id để Module 3 có thể lấy ra
     cache.set_file_bytes(session_id, csv_bytes, filename, ".csv")

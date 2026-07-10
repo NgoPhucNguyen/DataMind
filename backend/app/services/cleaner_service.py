@@ -19,6 +19,7 @@ import numpy as np
 import pandas as pd
 
 from app.services.profiler_service import clean_to_numeric
+from app.services import semantic_rules
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +94,78 @@ def _safe_sample(series: pd.Series, n: int = 3) -> list[Any]:
             result.append(str(v))
     return result
 
+def _get_error_cells(
+    df: pd.DataFrame, 
+    overridden_types: dict[str, str], 
+    column_semantics: dict[str, str] | None = None,
+    downgraded_cols: set[str] | None = None
+) -> list[dict]:
+    """
+    Trả về danh sách các ô (cell) bị lỗi.
+    [{"row_id": int, "column": str, "issue_type": "missing" | "type_mismatch" | "encoding" | "semantic_error"}]
+    """
+    error_cells = []
+    
+    for col_name in df.columns:
+        series = df[col_name]
+        col_type = overridden_types.get(col_name, _infer_type(series))
+
+        # 4. Semantic errors (must be checked before skipping text columns)
+        col_sem = column_semantics or {}
+        downgraded = downgraded_cols or set()
+        semantic_type = col_sem.get(str(col_name), "GENERAL_TEXT")
+        if semantic_type != "GENERAL_TEXT":
+            severity = "hint" if str(col_name) in downgraded else semantic_rules.get_semantic_severity(semantic_type)
+            for idx, val in series.items():
+                if not semantic_rules.validate_cell(val, semantic_type):
+                    error_cells.append({
+                        "row_id": int(idx),
+                        "column": str(col_name),
+                        "issue_type": "semantic_error",
+                        "severity": severity,
+                        "semantic_type": semantic_type
+                    })
+
+        if col_type == "text":
+            continue
+
+        # 1. Missing values
+        missing_indices = series[series.isna()].index
+        for idx in missing_indices:
+            error_cells.append({
+                "row_id": int(idx),
+                "column": str(col_name),
+                "issue_type": "missing"
+            })
+
+        # 2. Wrong type
+        if pd.api.types.is_object_dtype(series.dtype) and col_type == "numeric":
+            convertible, _ = _is_numeric_convertible(series)
+            if convertible:
+                # Tìm các dòng không convert được (sau khi ép kiểu thành số bị NaN nhưng gốc không NaN)
+                non_null = series.dropna()
+                parsed = clean_to_numeric(non_null)
+                mismatch_indices = parsed[parsed.isna()].index
+                for idx in mismatch_indices:
+                    error_cells.append({
+                        "row_id": int(idx),
+                        "column": str(col_name),
+                        "issue_type": "type_mismatch"
+                    })
+
+
+        # 3. Encoding lỗi
+        if pd.api.types.is_object_dtype(series.dtype):
+            non_null = series.dropna()
+            for idx, val in non_null.items():
+                if _BAD_CHAR_PATTERN.search(str(val)):
+                    error_cells.append({
+                        "row_id": int(idx),
+                        "column": str(col_name),
+                        "issue_type": "encoding"
+                    })
+                    
+    return error_cells
 
 # ─── detect_issues ──────────────────────────────────────────────────────────
 
@@ -101,22 +174,55 @@ def detect_issues(
     filename: str,
     file_hash: str,
     overridden_types: dict[str, str] | None = None,
+    column_semantics: dict[str, str] | None = None,
 ) -> dict:
     """
-    Quét toàn bộ DataFrame và phân loại vấn đề theo 4 nhóm.
+    Quét toàn bộ DataFrame và phân loại vấn đề theo 4 nhóm gốc + nhóm Semantic Errors.
     Trả về dict tương thích với IssueReport schema.
     """
     overridden_types = overridden_types or {}
+    column_semantics = column_semantics or {}
     total_rows = len(df)
 
     missing_values = []
     wrong_types = []
     encoding_errors = []
+    semantic_errors = []
     duplicates_info = None
+    downgraded_cols = set()
 
     for col_name in df.columns:
         series = df[col_name]
         col_type = overridden_types.get(col_name, _infer_type(series))
+
+        # Check semantic errors regardless of basic text types
+        semantic_type = column_semantics.get(str(col_name), "GENERAL_TEXT")
+        if semantic_type != "GENERAL_TEXT":
+            violation_count = 0
+            for val in series:
+                if not semantic_rules.validate_cell(val, semantic_type):
+                    violation_count += 1
+                    
+            if violation_count > 0:
+                total_non_null = len(series.dropna())
+                is_system_error = semantic_rules.is_semantic_error_column(violation_count, total_non_null)
+                severity = semantic_rules.get_semantic_severity(semantic_type)
+                
+                # Report as system semantic error ONLY IF it exceeds threshold and is "error" severity
+                if is_system_error and severity == "error":
+                    violation_pct = round(violation_count / (total_non_null if total_non_null > 0 else 1) * 100, 2)
+                    if violation_pct > 50.0:
+                        severity = "hint"
+                        downgraded_cols.add(str(col_name))
+                        logger.warning(f"Downgrading severity of {col_name} ({semantic_type}) to 'hint' because violation rate is suspiciously high ({violation_pct}%).")
+                    else:
+                        semantic_errors.append({
+                            "column": str(col_name),
+                            "semantic_type": semantic_type,
+                            "violation_count": violation_count,
+                            "violation_pct": violation_pct,
+                            "severity": severity
+                        })
 
         if col_type == "text":
             continue
@@ -162,8 +268,18 @@ def detect_issues(
             "duplicate_count": dup_count,
             "total_rows": total_rows,
         }
+        
+    error_cells = _get_error_cells(df, overridden_types, column_semantics, downgraded_cols)
 
-    has_issues = bool(missing_values or wrong_types or encoding_errors or duplicates_info)
+    has_issues = bool(missing_values or wrong_types or encoding_errors or duplicates_info or semantic_errors)
+
+    # Lấy dữ liệu mẫu cho preview
+    preview_df = df.head(100).copy()
+    preview_df = preview_df.replace({float('nan'): None, pd.NaT: None})
+    for col in preview_df.columns:
+        if pd.api.types.is_datetime64_any_dtype(preview_df[col]):
+            preview_df[col] = preview_df[col].dt.strftime('%Y-%m-%d %H:%M:%S')
+    preview_df = preview_df.reset_index(names="original_index")
 
     return {
         "file_hash": file_hash,
@@ -173,8 +289,11 @@ def detect_issues(
         "missing_values": missing_values,
         "wrong_types": wrong_types,
         "encoding_errors": encoding_errors,
+        "semantic_errors": semantic_errors,
         "duplicates": duplicates_info,
+        "error_cells": error_cells,
         "has_issues": has_issues,
+        "preview_data": preview_df.to_dict(orient="records"),
     }
 
 
@@ -406,3 +525,107 @@ def build_summary_for_module3(df: pd.DataFrame) -> dict:
         "numeric_columns": [str(c) for c in numeric_cols],
         "categorical_columns": [str(c) for c in categorical_cols],
     }
+
+
+# ─── apply_manual_actions ───────────────────────────────────────────────────
+
+def apply_manual_actions(df: pd.DataFrame, actions: list) -> pd.DataFrame:
+    """
+    Áp dụng tuần tự các thao tác làm sạch thủ công (Manual Action Recipe) lên DataFrame.
+    """
+    cleaned = df.copy()
+    
+    for action in actions:
+        try:
+            # action có thể là Pydantic model (từ API) hoặc dict
+            act_type = getattr(action, "action_type", None)
+            if not act_type and isinstance(action, dict):
+                act_type = action.get("action_type")
+                
+            col = getattr(action, "column", None)
+            if not col and isinstance(action, dict):
+                col = action.get("column")
+                
+            params = getattr(action, "params", {})
+            if not params and isinstance(action, dict):
+                params = action.get("params", {})
+                
+            if act_type == "DROP_COLUMN":
+                if col in cleaned.columns:
+                    cleaned = cleaned.drop(columns=[col])
+                    
+            elif act_type == "DROP_DUPLICATES":
+                cleaned = cleaned.drop_duplicates(keep="first")
+                
+            elif act_type == "STRIP_BAD_CHARS":
+                if col in cleaned.columns and pd.api.types.is_object_dtype(cleaned[col].dtype):
+                    cleaned[col] = cleaned[col].apply(_strip_bad_chars)
+                    
+            elif act_type == "CONVERT_TO_NUMERIC":
+                if col in cleaned.columns:
+                    cleaned[col] = clean_to_numeric(cleaned[col])
+                    
+            elif act_type == "CONVERT_TO_DATETIME":
+                if col in cleaned.columns:
+                    cleaned[col] = pd.to_datetime(cleaned[col], errors='coerce')
+                    
+            elif act_type == "FILL_MISSING_MEDIAN":
+                if col in cleaned.columns:
+                    fill_val = cleaned[col].median()
+                    cleaned[col] = cleaned[col].fillna(fill_val)
+                    
+            elif act_type == "FILL_MISSING_UNKNOWN":
+                if col in cleaned.columns:
+                    cleaned[col] = cleaned[col].fillna("Không xác định")
+                    
+            elif act_type == "FILL_MISSING_CUSTOM_VALUE":
+                if col in cleaned.columns:
+                    val = params.get("value")
+                    cleaned[col] = cleaned[col].fillna(val)
+                    
+            elif act_type == "FILL_MISSING_MEAN":
+                if col in cleaned.columns:
+                    fill_val = cleaned[col].mean()
+                    cleaned[col] = cleaned[col].fillna(fill_val)
+                    
+            elif act_type == "FILL_MISSING_MODE":
+                if col in cleaned.columns:
+                    mode_s = cleaned[col].mode()
+                    # Nếu có mode thì lấy phần tử đầu, không thì dùng "Unknown" cho an toàn
+                    fill_val = mode_s.iloc[0] if len(mode_s) > 0 else "Unknown"
+                    cleaned[col] = cleaned[col].fillna(fill_val)
+                    
+            elif act_type == "RENAME_COLUMN":
+                if col in cleaned.columns:
+                    new_name = params.get("new_name")
+                    if new_name:
+                        cleaned = cleaned.rename(columns={col: str(new_name)})
+
+            elif act_type == "BATCH_EDIT_CELLS":
+                edits = params.get("edits", [])
+                for edit in edits:
+                    r_id = edit.get("row_id")
+                    c_name = edit.get("column")
+                    n_val = edit.get("new_value")
+                    
+                    if c_name not in cleaned.columns:
+                        raise ValueError(f"Không thể sửa ô: Cột '{c_name}' không tồn tại (có thể đã bị xóa hoặc đổi tên trước đó).")
+                        
+                    if r_id is None or pd.isna(r_id):
+                        raise ValueError("Không thể sửa ô: row_id không được để trống (None/NaN).")
+                        
+                    if r_id in cleaned.index:
+                        try:
+                            cleaned.at[r_id, c_name] = n_val
+                        except Exception as e:
+                            logger.warning(f"Không thể sửa ô tại dòng {r_id}, cột {c_name}: {e}")
+                    else:
+                        raise ValueError(f"Không thể sửa ô: Dòng {r_id} không tồn tại trong dữ liệu.")
+                        
+        except ValueError as ve:
+            # Re-raise ValueError để router bắt và trả về 400
+            raise ve
+        except Exception as e:
+            logger.warning(f"Error applying action {action}: {e}")
+            
+    return cleaned

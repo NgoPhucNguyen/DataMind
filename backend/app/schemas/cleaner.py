@@ -15,6 +15,14 @@ from typing import Any
 
 # ─── Sub-models cho từng loại issue ────────────────────────────────────────
 
+class ErrorCell(BaseModel):
+    """Lưu trữ tọa độ chính xác của các ô lỗi (missing, type_mismatch, encoding)."""
+    row_id: int
+    column: str
+    issue_type: str
+    severity: str | None = None
+    semantic_type: str | None = None
+
 class MissingIssue(BaseModel):
     """Thông tin missing values trong 1 cột."""
     column: str
@@ -45,6 +53,14 @@ class DuplicateIssue(BaseModel):
     duplicate_count: int      # Số dòng trùng (không tính dòng giữ lại)
     total_rows: int
 
+class SemanticIssue(BaseModel):
+    """Cột có lỗi ngữ nghĩa vượt ngưỡng hệ thống."""
+    column: str
+    semantic_type: str
+    violation_count: int
+    violation_pct: float
+    severity: str
+
 
 # ─── IssueReport (response của detect-issues) ─────────────────────────────
 
@@ -60,8 +76,11 @@ class IssueReport(BaseModel):
     missing_values: list[MissingIssue]
     wrong_types: list[WrongTypeIssue]
     encoding_errors: list[EncodingIssue]
+    semantic_errors: list[SemanticIssue] = []
     duplicates: DuplicateIssue | None     # None nếu không có duplicate nào
+    error_cells: list[ErrorCell] = []
     has_issues: bool                      # True nếu có ít nhất 1 vấn đề
+    preview_data: list[dict] = []         # Sample data kèm original_index
 
 
 # ─── Request bodies ────────────────────────────────────────────────────────
@@ -78,11 +97,28 @@ class AutoCleanRequest(BaseModel):
     overridden_types: dict[str, str] = {}
 
 
+class CleanAction(BaseModel):
+    """
+    Thao tác làm sạch thủ công (Manual Action Recipe).
+    Hỗ trợ BATCH_EDIT_CELLS với params: {"edits": [{"row_id": int, "column": str, "new_value": any}]}
+    """
+    action_type: str            # "DROP_COLUMN", "FILL_MISSING_MEAN", "RENAME_COLUMN", "BATCH_EDIT_CELLS", v.v.
+    column: str                 # Tên cột áp dụng ("all" nếu là DROP_DUPLICATES, BATCH_EDIT_CELLS có thể dùng "all" hoặc bỏ qua)
+    params: dict[str, Any] = {} # Dữ liệu bổ sung (vd: {"value": 0}, {"new_name": "age"}, {"edits": [...]})
+
+
 class ConfirmCleanRequest(BaseModel):
     """Request body cho POST /files/confirm-clean."""
     file_hash: str
     clean_mode: str                          # "auto" | "manual"
     overridden_types: dict[str, str] = {}
+    actions: list[CleanAction] = []          # Dành cho chế độ manual
+
+
+class ManualCleanPreviewRequest(BaseModel):
+    """Request body cho POST /files/manual-clean-preview."""
+    file_hash: str
+    actions: list[CleanAction]
 
 
 # ─── DiffReport (thay đổi sau khi clean) ──────────────────────────────────
@@ -136,6 +172,7 @@ class AutoCleanResponse(BaseModel):
     diff_report: DiffReport
     validation: ValidationResult | None = None
     preview_data: list[dict] = []
+    error_cells: list[ErrorCell] = []     # Lỗi (như semantic_error) còn tồn đọng sau auto-clean
 
 
 # ─── summary_for_module3 ──────────────────────────────────────────────────

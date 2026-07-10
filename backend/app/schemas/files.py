@@ -19,6 +19,8 @@ class ColumnProfile(BaseModel):
     disguised_numeric: dict | None = None
     type_warning: str | None = None
     unnamed_warning: str | None = None
+    semantic_type: str | None = None
+    semantic_confidence: float | None = None
 
 
 class SemanticContext(BaseModel):

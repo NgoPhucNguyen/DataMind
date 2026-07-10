@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useFileSession } from "../contexts/FileSessionContext";
 import { useToast } from "../contexts/ToastContext";
 import api from "../services/axiosClient";
-import { Check, X, AlertTriangle, ArrowLeft, ArrowRight, Lock, FolderUp, Upload, Info, Settings, Edit2 } from "lucide-react";
+import { Check, X, AlertTriangle, ArrowLeft, ArrowRight, Lock, FolderUp, Upload, Info, Settings, Edit2, ChevronUp, ChevronDown } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer,
   LineChart, Line, PieChart, Pie, Cell
@@ -12,14 +12,17 @@ import { useRef } from "react";
 import { profileFile } from "../services/profilerService";
 import { detectIssues, autoClean, confirmClean } from "../services/cleanerService";
 import PageHeader from "../components/PageHeader";
-import { TEXT, PAGE, BTN, BADGE, CARD } from "../constants/ui";
+import { TEXT, BTN, BADGE, CARD } from "../constants/ui";
 
 // --- Components Biểu Đồ ---
 
 import {
-  DistributionChart, CategoricalChart, TrendChart, 
+  DistributionChart, CategoricalChart, TrendChart,
   CorrelationHeatmap, PieChartComponent, BoxPlotChart
 } from "../components/charts/ChartComponents";
+import PageHelpDocs from "../components/PageHelpDocs";
+
+import AnchorScatterPanel from "../components/charts/AnchorScatterPanel";
 
 
 
@@ -32,11 +35,11 @@ const COLOR_PRESETS = [
 
 const ENABLE_CHART_EDIT = false; // bật lại khi xử lý xong cache-invalidation cho edit chart
 
-const ChartCard = ({ chart, isSelected, toggleChart, summary, onUpdate }) => {
+const ChartCard = ({ chart, isSelected, toggleChart, summary, onUpdate, onCellClick, anchorPair }) => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [localTitle, setLocalTitle] = useState(chart.user_title || chart.title);
-  
+
   const handleTitleBlur = () => {
     setIsEditingTitle(false);
     onUpdate(chart.id, { user_title: localTitle });
@@ -53,16 +56,16 @@ const ChartCard = ({ chart, isSelected, toggleChart, summary, onUpdate }) => {
     let newStats = summary?.columns?.[newCol];
 
     if (newCol !== chart.col || !newData || newType !== chart.type) {
-       if (newType === "histogram" || newType === "box") newData = newStats?.distribution_bins;
-       else if (newType === "bar" || newType === "pie") newData = newStats?.top_values;
-       else if (newType === "line") newData = newStats?.trend_data;
+      if (newType === "histogram" || newType === "box") newData = newStats?.distribution_bins;
+      else if (newType === "bar" || newType === "pie") newData = newStats?.top_values;
+      else if (newType === "line") newData = newStats?.trend_data;
     }
 
     const newAutoTitle = newCol !== chart.col ? `${newType} - ${newCol}` : (chart.auto_title || chart.title);
 
-    onUpdate(chart.id, { 
-      type: newType, 
-      col: newCol, 
+    onUpdate(chart.id, {
+      type: newType,
+      col: newCol,
       color: newColor,
       data: newData,
       title: newCol !== chart.col ? newAutoTitle : chart.title,
@@ -82,7 +85,7 @@ const ChartCard = ({ chart, isSelected, toggleChart, summary, onUpdate }) => {
       <div className="flex justify-between items-start mb-4">
         <div className="flex items-center gap-2 flex-1">
           {ENABLE_CHART_EDIT && (
-            <button 
+            <button
               onClick={() => setIsSettingsOpen(!isSettingsOpen)}
               className="p-1.5 text-muted hover:text-ink rounded-md hover:bg-sage/40 transition-colors"
               title="Cài đặt biểu đồ"
@@ -90,9 +93,9 @@ const ChartCard = ({ chart, isSelected, toggleChart, summary, onUpdate }) => {
               <Settings className="w-4 h-4" />
             </button>
           )}
-          
+
           {isEditingTitle ? (
-            <input 
+            <input
               autoFocus
               className="px-2 py-1 border border-forest rounded text-sm font-semibold outline-none w-full max-w-xs"
               value={localTitle}
@@ -101,7 +104,7 @@ const ChartCard = ({ chart, isSelected, toggleChart, summary, onUpdate }) => {
               onKeyDown={e => e.key === 'Enter' && handleTitleBlur()}
             />
           ) : (
-            <div 
+            <div
               className="group flex items-center gap-2 cursor-pointer"
               onClick={() => setIsEditingTitle(true)}
             >
@@ -110,7 +113,7 @@ const ChartCard = ({ chart, isSelected, toggleChart, summary, onUpdate }) => {
             </div>
           )}
         </div>
-        
+
         <button
           onClick={() => toggleChart(chart.id)}
           className={`w-6 h-6 rounded flex items-center justify-center border transition-colors shrink-0 ${isSelected ? "bg-[#121A14] border-[#121A14] text-white" : "border-[#EAEAEA] text-transparent hover:border-[#626C65]/50"}`}
@@ -159,11 +162,11 @@ const ChartCard = ({ chart, isSelected, toggleChart, summary, onUpdate }) => {
         </form>
       )}
 
-      <div className="h-72">
+      <div className={chart.type === "heatmap" ? "h-[500px] lg:h-[70vh] lg:max-h-[800px] flex flex-col w-full" : "h-72"}>
         {chart.type === "histogram" && <DistributionChart data={chart.data} color={chart.color} />}
         {chart.type === "bar" && <CategoricalChart data={chart.data} color={chart.color} />}
         {chart.type === "line" && <TrendChart data={chart.data} color={chart.color} />}
-        {chart.type === "heatmap" && <CorrelationHeatmap matrix={chart.matrix} topCorr={chart.topCorr} />}
+        {chart.type === "heatmap" && <CorrelationHeatmap matrix={chart.matrix} topCorr={chart.topCorr} onCellClick={onCellClick} anchorPair={anchorPair} />}
         {chart.type === "pie" && <PieChartComponent data={chart.data} color={chart.color} />}
         {chart.type === "box" && <BoxPlotChart stats={stats} color={chart.color} />}
       </div>
@@ -266,12 +269,20 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
   const [activeTab, setActiveTab] = useState("distribution");
   const [charts, setCharts] = useState({ distribution: [], correlation: [], time: [], other: [] });
   const [selectedChartIds, setSelectedChartIds] = useState(new Set());
+  const [selectionExpanded, setSelectionExpanded] = useState(false);
 
   const [showDirectUpload, setShowDirectUpload] = useState(false);
   const [isDirectUploading, setIsDirectUploading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [directSummary, setDirectSummary] = useState(null);
   const fileInputRef = useRef(null);
+
+  // --- Anchor state (Correlation Heatmap click-to-explore) ---
+  const [anchorPair, setAnchorPair] = useState(null);
+  const [scatterData, setScatterData] = useState(null);
+  const [scatterLoading, setScatterLoading] = useState(false);
+  const [scatterError, setScatterError] = useState(null);
+  const abortRef = useRef(null);
 
   useEffect(() => {
     if (!fileSession.statisticalSummary && !fileSession.fileHash) {
@@ -382,6 +393,48 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
     if (newSet.has(id)) newSet.delete(id);
     else newSet.add(id);
     setSelectedChartIds(newSet);
+  };
+
+  // --- Anchor handlers ---
+  const handleAnchorSelect = async (colA, colB, r) => {
+    // Abort any in-flight scatter request (race condition fix)
+    if (abortRef.current) abortRef.current.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    // Set anchor state immediately (UI responds instantly)
+    setAnchorPair({ colA, colB, r });
+    setScatterLoading(true);
+    setScatterError(null);
+    setScatterData(null);
+
+    try {
+      const res = await api.post("/visualize/scatter-data", {
+        session_id: fileSession.sessionId,
+        col_x: colA,
+        col_y: colB,
+      }, { signal: controller.signal });
+
+      // Only update if this controller hasn't been aborted
+      if (!controller.signal.aborted) {
+        setScatterData(res.data);
+      }
+    } catch (err) {
+      if (err.name !== 'CanceledError' && !controller.signal.aborted) {
+        setScatterError(err.response?.data?.detail || "Không thể tải dữ liệu phân tán.");
+      }
+    } finally {
+      if (!controller.signal.aborted) {
+        setScatterLoading(false);
+      }
+    }
+  };
+
+  const handleAnchorClear = () => {
+    if (abortRef.current) abortRef.current.abort();
+    setAnchorPair(null);
+    setScatterData(null);
+    setScatterError(null);
   };
 
   const handleUpdateChart = (id, newConfig) => {
@@ -538,35 +591,38 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
   const activeCharts = charts[activeTab] || [];
 
   return (
-    <div className="min-h-screen bg-[#FBFBFA] text-[#121A14] flex flex-col lg:flex-row font-sans">
+    <div className="min-h-full bg-[#FBFBFA] text-[#121A14] flex flex-col font-sans relative">
 
-      {/* Main Content Area */}
-      <div className="flex-1 overflow-y-auto">
-        <div className={PAGE.wrapper}>
+      {/* Main Content Area — full width */}
+      <div className="flex-1 pb-12">
+        <div className="px-6 sm:px-8 py-8 max-w-7xl mx-auto">
           <PageHeader
             title="Trực quan hóa Dữ liệu"
             subtitle="Hệ thống đã tự động chọn và xếp hạng các biểu đồ thú vị nhất. Bạn có thể chọn biểu đồ để đưa vào báo cáo cuối cùng."
             actions={
-              !pipelineMode && !showDirectUpload ? (
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={() => navigate("/cleaner")}
-                    className={`${BTN.secondary} flex items-center gap-1.5`}
-                  >
-                    <ArrowLeft className="w-4 h-4" /> Quay lại
-                  </button>
-                  <button
-                    onClick={() => {
-                      clearFileSession();
-                      setShowDirectUpload(true);
-                      setDirectSummary(null);
-                    }}
-                    className={`${BTN.secondary} flex items-center gap-1.5`}
-                  >
-                    <FolderUp className="w-4 h-4" /> Tải file khác
-                  </button>
-                </div>
-              ) : null
+              <div className="flex items-center gap-3">
+                <PageHelpDocs pageId="visualize" />
+                {!pipelineMode && !showDirectUpload && (
+                  <>
+                    <button
+                      onClick={() => navigate("/cleaner")}
+                      className={`${BTN.secondary} flex items-center gap-1.5`}
+                    >
+                      <ArrowLeft className="w-4 h-4" /> Quay lại
+                    </button>
+                    <button
+                      onClick={() => {
+                        clearFileSession();
+                        setShowDirectUpload(true);
+                        setDirectSummary(null);
+                      }}
+                      className={`${BTN.secondary} flex items-center gap-1.5`}
+                    >
+                      <FolderUp className="w-4 h-4" /> Tải file khác
+                    </button>
+                  </>
+                )}
+              </div>
             }
           />
 
@@ -582,8 +638,8 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
                 )}
               </h2>
               <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
-                <span className={`flex items-center gap-1.5 ${fileSession.capabilities.histogram ? 'text-forest font-semibold' : 'text-[#9F2F2D]/80'}`}>
-                  {fileSession.capabilities.histogram ? <Check className="w-4 h-4 shrink-0" /> : <X className="w-4 h-4 shrink-0" />} Phân phối
+                <span className={`flex items-center gap-1.5 ${(fileSession.capabilities.histogram || fileSession.capabilities.bar_chart) ? 'text-forest font-semibold' : 'text-[#9F2F2D]/80'}`}>
+                  {(fileSession.capabilities.histogram || fileSession.capabilities.bar_chart) ? <Check className="w-4 h-4 shrink-0" /> : <X className="w-4 h-4 shrink-0" />} Phân phối
                 </span>
                 <span className={`flex items-center gap-1.5 ${fileSession.capabilities.correlation ? 'text-forest font-semibold' : 'text-[#9F2F2D]/80'}`}>
                   {fileSession.capabilities.correlation ? <Check className="w-4 h-4 shrink-0" /> : <X className="w-4 h-4 shrink-0" />} Tương quan
@@ -627,7 +683,7 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
               <p className="text-muted">Không có biểu đồ nào phù hợp trong mục này.</p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
               {activeCharts.map(chart => {
                 // Determine if chart is disabled by capabilities
                 let isDisabled = false;
@@ -647,14 +703,16 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
                 }
 
                 return (
-                  <div key={chart.id} className="relative group">
+                  <div key={chart.id} className={`relative group ${chart.type === 'heatmap' ? 'xl:col-span-2' : ''}`}>
                     <div className={`transition-all ${isDisabled ? 'opacity-20 grayscale pointer-events-none' : ''}`}>
-                      <ChartCard 
-                        chart={chart} 
-                        isSelected={selectedChartIds.has(chart.id)} 
-                        toggleChart={toggleChart} 
+                      <ChartCard
+                        chart={chart}
+                        isSelected={selectedChartIds.has(chart.id)}
+                        toggleChart={toggleChart}
                         summary={fileSession.statisticalSummary}
                         onUpdate={handleUpdateChart}
+                        onCellClick={chart.type === "heatmap" ? handleAnchorSelect : undefined}
+                        anchorPair={chart.type === "heatmap" ? anchorPair : undefined}
                       />
                     </div>
 
@@ -673,39 +731,70 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
               })}
             </div>
           )}
+
+          {/* Anchor Scatter Panel — appears below chart grid when a correlation cell is clicked */}
+          {activeTab === "correlation" && anchorPair && (
+            <AnchorScatterPanel
+              colA={anchorPair.colA}
+              colB={anchorPair.colB}
+              rValue={anchorPair.r}
+              scatterData={scatterData}
+              loading={scatterLoading}
+              error={scatterError}
+              onClear={handleAnchorClear}
+            />
+          )}
         </div>
       </div>
 
-      {/* Sidebar (Selection Panel) */}
-      <div className="w-full lg:w-80 bg-[#F9F9F8] border-l border-border flex flex-col shrink-0 lg:h-screen lg:sticky lg:top-0">
-        <div className="p-6 border-b border-border">
-          <h2 className="font-bold text-lg mb-1 text-ink">Biểu đồ đã chọn</h2>
-          <p className="text-xs text-muted">Sẽ xuất hiện trong báo cáo AI</p>
-        </div>
-
-        <div className="flex-1 p-6 overflow-y-auto space-y-3">
-          {selectedChartIds.size === 0 ? (
-            <p className="text-sm text-muted/60 text-center py-10">Chưa có biểu đồ nào được chọn.</p>
-          ) : (
-            [...charts.distribution, ...charts.correlation, ...charts.time, ...charts.other]
-              .filter(c => selectedChartIds.has(c.id))
-              .map(c => (
-                <div key={`sel_${c.id}`} className="bg-white border border-border rounded-lg p-3 flex justify-between items-center text-sm text-ink shadow-sm">
-                  <span className="truncate pr-2 font-medium">{c.user_title || c.title}</span>
-                  <button onClick={() => toggleChart(c.id)} className="text-muted hover:text-red-500 shrink-0"><X className="w-4 h-4" /></button>
-                </div>
-              ))
-          )}
-        </div>
-
-        <div className="p-6 border-t border-border bg-[#F9F9F8]">
-          <div className="flex justify-between items-center mb-4 text-sm">
-            <span className="text-muted">Tổng cộng</span>
-            <span className="font-semibold text-forest">{selectedChartIds.size} biểu đồ</span>
+      {/* Sticky Bottom Bar (Selection Panel) */}
+      <div className="sticky bottom-0 z-40 w-full bg-white/95 backdrop-blur-md border-t border-border shadow-[0_-4px_20px_rgba(0,0,0,0.06)] mt-auto">
+        {/* Expanded panel — list of selected charts */}
+        {selectionExpanded && (
+          <div className="max-w-7xl mx-auto px-6 sm:px-8 py-4 border-b border-border">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-ink">Biểu đồ đã chọn — sẽ xuất hiện trong báo cáo AI</h3>
+              <button
+                onClick={() => setSelectionExpanded(false)}
+                className="text-muted hover:text-ink p-1 transition-colors"
+              >
+                <ChevronDown className="w-4 h-4" />
+              </button>
+            </div>
+            {selectedChartIds.size === 0 ? (
+              <p className="text-sm text-muted/60 py-3">Chưa có biểu đồ nào được chọn. Nhấn vào checkbox trên biểu đồ để chọn.</p>
+            ) : (
+              <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto">
+                {[...charts.distribution, ...charts.correlation, ...charts.time, ...charts.other]
+                  .filter(c => selectedChartIds.has(c.id))
+                  .map(c => (
+                    <div key={`sel_${c.id}`} className="bg-[#F9F9F8] border border-border rounded-lg px-3 py-2 flex items-center gap-2 text-sm text-ink">
+                      <span className="truncate max-w-[200px] font-medium">{c.user_title || c.title}</span>
+                      <button onClick={() => toggleChart(c.id)} className="text-muted hover:text-red-500 shrink-0 transition-colors">
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))
+                }
+              </div>
+            )}
           </div>
+        )}
+
+        {/* Bottom action bar */}
+        <div className="max-w-7xl mx-auto px-6 sm:px-8 py-3 flex items-center justify-between">
+          <button
+            onClick={() => setSelectionExpanded(!selectionExpanded)}
+            className="flex items-center gap-2 text-sm text-muted hover:text-ink transition-colors"
+          >
+            {selectionExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
+            <span className="font-semibold text-forest">{selectedChartIds.size}</span>
+            <span>biểu đồ đã chọn</span>
+          </button>
+
           <button
             onClick={handleConfirm}
-            className={`${BTN.primary} w-full py-3 flex items-center justify-center gap-2`}
+            className={`${BTN.primary} px-6 py-2.5 flex items-center gap-2`}
           >
             Chốt danh sách & Chuyển tiếp <ArrowRight className="w-4 h-4" />
           </button>

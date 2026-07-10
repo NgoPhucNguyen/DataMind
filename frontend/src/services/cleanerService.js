@@ -25,7 +25,18 @@ export const autoClean = (file_hash, overridden_types = {}) =>
  * @param {string} file_hash
  * @param {"auto"|"manual"} clean_mode
  * @param {Object} overridden_types
+ * @param {Array} actions
  * @returns {Promise<CleanDatasetResponse>}
  */
-export const confirmClean = (file_hash, clean_mode = "auto", overridden_types = {}) =>
-  api.post("/files/confirm-clean", { file_hash, clean_mode, overridden_types });
+export const confirmClean = (file_hash, clean_mode = "auto", overridden_types = {}, actions = []) =>
+  api.post("/files/confirm-clean", { file_hash, clean_mode, overridden_types, actions });
+
+/**
+ * Lấy dữ liệu xem trước khi làm sạch thủ công.
+ * Trả về 100 dòng preview mà chưa chốt.
+ * @param {string} file_hash
+ * @param {Array} actions
+ * @returns {Promise<Object>}
+ */
+export const manualCleanPreview = (file_hash, actions = []) =>
+  api.post("/files/manual-clean-preview", { file_hash, actions });

@@ -1,12 +1,43 @@
 import pandas as pd
 import numpy as np
+import random
+import io
+import json
 from app.services import cleaner_service
 from app.services import chart_insights
+from app.core.errors import DataMindException, ErrorSeverity
+from app.core import cache
 
-def compute_statistics(df: pd.DataFrame, warnings: list = None) -> dict:
+def compute_statistics(session_id: str, warnings: list = None) -> dict:
     if warnings is None:
         warnings = []
-        
+
+    # Lưu ý: Bỏ short-circuit chặn hoàn toàn /compute tại đây, vì Frontend vẫn
+    # cần đọc các thông số thống kê của các cột chữ, thời gian (ngay cả khi
+    # dataset không có đủ cột số). Thay vào đó, ta sẽ check ở dưới và trả về
+    # thuộc tính `correlation_error` thay vì raise 422.
+
+    # ── Load file bytes & parse DataFrame (chỉ chạy khi metadata pass/absent) ──
+    # Lazy import để tránh circular dependency (router → service → router)
+    from app.routers.files import _read_dataframe
+
+    cached_file = cache.get_file_bytes(session_id)
+    if cached_file is None:
+        raise DataMindException(
+            code="ERR_SYS_CACHE_EXPIRED",
+            severity=ErrorSeverity.CRITICAL,
+            user_message="Phiên làm việc đã hết hạn hoặc file không tìm thấy. Vui lòng upload lại.",
+            technical_detail={
+                "module": "visualize_service",
+                "location": "compute_statistics",
+                "root_cause": f"cache.get_file_bytes('{session_id}') trả về None — TTL hết hoặc Redis miss"
+            },
+            suggested_action=None
+        )
+
+    file_bytes = io.BytesIO(cached_file["bytes"])
+    df = _read_dataframe(file_bytes, cached_file["ext"])
+
     report_header = cleaner_service.build_report_header(warnings, len(df))
     
     summary = {
@@ -39,7 +70,7 @@ def compute_statistics(df: pd.DataFrame, warnings: list = None) -> dict:
             is_datetime = False
             if pd.api.types.is_object_dtype(series) or pd.api.types.is_string_dtype(series):
                 try:
-                    dt_series = pd.to_datetime(series, errors='coerce')
+                    dt_series = pd.to_datetime(series, errors='coerce', format='mixed')
                     # Nếu trên 50% là datetime hợp lệ
                     if dt_series.notna().sum() > len(series) * 0.5:
                         dtype = "datetime"
@@ -179,27 +210,127 @@ def compute_statistics(df: pd.DataFrame, warnings: list = None) -> dict:
         summary["columns"][col] = col_summary
 
     # Correlation
-    if len(numeric_cols) >= 2:
-        # Limit to top 20 numeric cols
-        corr_cols = numeric_cols[:20]
-        corr_df = df[corr_cols].corr()
-        
-        corr_matrix = {}
-        top_correlations = []
-        for i, col_a in enumerate(corr_cols):
-            corr_matrix[col_a] = {}
-            for j, col_b in enumerate(corr_cols):
-                val = corr_df.loc[col_a, col_b]
-                if pd.isna(val):
-                    val = 0.0
-                val = float(val)
-                corr_matrix[col_a][col_b] = val
+    if len(numeric_cols) < 2:
+        summary["correlation_error"] = "Dữ liệu không đủ cột dạng số để vẽ biểu đồ tương quan (cần tối thiểu 2 cột)."
+        return summary
+
+    # Limit to top 20 numeric cols (len(numeric_cols) >= 2 is guaranteed here)
+    corr_cols = numeric_cols[:20]
+    corr_df = df[corr_cols].corr()
+    
+    corr_matrix = {}
+    top_correlations = []
+    for i, col_a in enumerate(corr_cols):
+        corr_matrix[col_a] = {}
+        for j, col_b in enumerate(corr_cols):
+            val = corr_df.loc[col_a, col_b]
+            if pd.isna(val):
+                val = 0.0
+            val = float(val)
+            corr_matrix[col_a][col_b] = val
+            
+            # Add to top correlations if |r| > 0.5 and i < j
+            if i < j and abs(val) > 0.5:
+                top_correlations.append({"col_a": col_a, "col_b": col_b, "r": round(val, 4)})
                 
-                # Add to top correlations if |r| > 0.5 and i < j
-                if i < j and abs(val) > 0.5:
-                    top_correlations.append({"col_a": col_a, "col_b": col_b, "r": round(val, 4)})
-                    
-        summary["correlation_matrix"] = corr_matrix
-        summary["top_correlations"] = sorted(top_correlations, key=lambda x: abs(x["r"]), reverse=True)
+    summary["correlation_matrix"] = corr_matrix
+    summary["top_correlations"] = sorted(top_correlations, key=lambda x: abs(x["r"]), reverse=True)
 
     return summary
+
+
+def get_scatter_data(df: pd.DataFrame, col_x: str, col_y: str, max_points: int = 500) -> dict:
+    """
+    Trích xuất dữ liệu điểm phân tán cho cặp cột đã chọn (anchor).
+    
+    - Validate cột tồn tại và là numeric
+    - Drop NaN ở cả hai cột
+    - Downsample bằng seeded random (seed=42) nếu vượt max_points
+    - Không tính lại r — frontend đọc từ correlation_matrix có sẵn
+    """
+    # Validate columns exist
+    if col_x not in df.columns:
+        raise DataMindException(
+            code="ERR_VIZ_SCATTER_INVALID_COL",
+            severity=ErrorSeverity.BLOCKING,
+            user_message=f"Cột '{col_x}' không tồn tại trong dữ liệu.",
+            technical_detail={
+                "module": "visualize_service",
+                "location": "get_scatter_data",
+                "root_cause": f"col_x='{col_x}' không có trong df.columns"
+            },
+            suggested_action=None
+        )
+    if col_y not in df.columns:
+        raise DataMindException(
+            code="ERR_VIZ_SCATTER_INVALID_COL",
+            severity=ErrorSeverity.BLOCKING,
+            user_message=f"Cột '{col_y}' không tồn tại trong dữ liệu.",
+            technical_detail={
+                "module": "visualize_service",
+                "location": "get_scatter_data",
+                "root_cause": f"col_y='{col_y}' không có trong df.columns"
+            },
+            suggested_action=None
+        )
+    
+    # Validate columns are numeric
+    if not pd.api.types.is_numeric_dtype(df[col_x]):
+        raise DataMindException(
+            code="ERR_VIZ_SCATTER_INVALID_COL",
+            severity=ErrorSeverity.BLOCKING,
+            user_message=f"Cột '{col_x}' không phải kiểu số.",
+            technical_detail={
+                "module": "visualize_service",
+                "location": "get_scatter_data",
+                "root_cause": f"col_x='{col_x}' dtype={df[col_x].dtype}, expected numeric"
+            },
+            suggested_action=None
+        )
+    if not pd.api.types.is_numeric_dtype(df[col_y]):
+        raise DataMindException(
+            code="ERR_VIZ_SCATTER_INVALID_COL",
+            severity=ErrorSeverity.BLOCKING,
+            user_message=f"Cột '{col_y}' không phải kiểu số.",
+            technical_detail={
+                "module": "visualize_service",
+                "location": "get_scatter_data",
+                "root_cause": f"col_y='{col_y}' dtype={df[col_y].dtype}, expected numeric"
+            },
+            suggested_action=None
+        )
+    
+    # Drop rows where either column is NaN
+    valid_df = df[[col_x, col_y]].dropna()
+    total = len(valid_df)
+    
+    if total == 0:
+        return {
+            "col_x": col_x,
+            "col_y": col_y,
+            "points": [],
+            "count": 0,
+            "total": 0,
+        }
+    
+    # Downsample via seeded random sampling if necessary
+    if total > max_points:
+        random.seed(42)
+        indices = sorted(random.sample(range(total), max_points))
+        sampled = valid_df.iloc[indices]
+    else:
+        sampled = valid_df
+    
+    points = [
+        {"x": float(row[col_x]), "y": float(row[col_y])}
+        for _, row in sampled.iterrows()
+    ]
+    
+    return {
+        "col_x": col_x,
+        "col_y": col_y,
+        "points": points,
+        "count": len(points),
+        "total": total,
+    }
+

@@ -5,6 +5,7 @@ import { profileFile } from "../services/profilerService";
 import { useToast } from "../contexts/ToastContext";
 import { Upload, AlertTriangle, Clock, Download, AlertCircle, Info, RotateCw, RotateCcw, ArrowLeft, ArrowRight, Zap, CheckCircle } from "lucide-react";
 import PageHeader from "../components/PageHeader";
+import PageHelpDocs from "../components/PageHelpDocs";
 import { TEXT, PAGE, BTN, BADGE, CARD } from "../constants/ui";
 
 // Các kiểu cột người dùng có thể override
@@ -196,22 +197,25 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
           title="Phân tích dữ liệu"
           subtitle="Tổng quan cấu trúc và chất lượng tập dữ liệu"
           actions={
-            pipelineMode ? (
-              <button
-                onClick={handleSkipContext}
-                disabled={!result}
-                className={`${BTN.primary} flex items-center gap-1.5 ${!result ? "opacity-50 cursor-not-allowed" : ""}`}
-              >
-                Tiếp tục <ArrowRight className="w-4 h-4" />
-              </button>
-            ) : (
-              <button
-                onClick={() => navigate("/home")}
-                className={`${BTN.secondary} flex items-center gap-1.5`}
-              >
-                <ArrowLeft className="w-4 h-4" /> Trang chủ
-              </button>
-            )
+            <div className="flex items-center gap-3">
+              <PageHelpDocs pageId="profiler" />
+              {pipelineMode ? (
+                <button
+                  onClick={handleSkipContext}
+                  disabled={!result}
+                  className={`${BTN.primary} flex items-center gap-1.5 ${!result ? "opacity-50 cursor-not-allowed" : ""}`}
+                >
+                  Tiếp tục <ArrowRight className="w-4 h-4" />
+                </button>
+              ) : (
+                <button
+                  onClick={() => navigate("/home")}
+                  className={`${BTN.secondary} flex items-center gap-1.5`}
+                >
+                  <ArrowLeft className="w-4 h-4" /> Trang chủ
+                </button>
+              )}
+            </div>
           }
         />
 

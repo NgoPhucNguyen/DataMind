@@ -16,11 +16,11 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 
 logger = logging.getLogger(__name__)
 
-# Fallback trả về khi LLM lỗi hoặc không có key
 _FALLBACK_CONTEXT = {
     "domain": "Unknown",
     "confidence": 0.0,
     "reasoning": "Không thể phân tích ngữ cảnh tự động.",
+    "column_semantics": {}
 }
 
 _GEMINI_MODEL = os.getenv("GEMINI_MODEL")
@@ -51,7 +51,7 @@ def _build_prompt(columns: list[dict]) -> str:
         line = (
             f"- Cột '{col['name']}': kiểu={col['detected_type']}, "
             f"unique={col['unique_count']}, "
-            f"mẫu={col.get('sample_values', [])[:3]}"
+            f"mẫu={col.get('sample_values', [])[:5]}"
         )
         col_summary_lines.append(line)
 
@@ -62,12 +62,25 @@ def _build_prompt(columns: list[dict]) -> str:
 {col_summary}
 
 Hãy đoán dataset này thuộc lĩnh vực nào (Marketing, HR, Finance, Education, Healthcare, E-commerce, Logistics, hoặc Other).
+Đồng thời, với mỗi cột, hãy phân loại `semantic_type` thành một trong các nhãn sau: 
+SEQUENCE_NUMBER, PERSON_NAME, PHONE_NUMBER, EMAIL, ADDRESS, MONEY, GENERAL_TEXT, DATE_TIME, CODE_ID.
+
+QUAN TRỌNG: 
+- Bạn phải ưu tiên phân loại dựa trên GIÁ TRỊ MẪU THẬT SỰ thay vì chỉ dựa vào tên cột.
+- Nếu cột có giá trị dạng "chữ + số" hoặc "tiền tố + số" (ví dụ "SEQ-101", "ORD-2024-001"), PHẢI phân loại là CODE_ID, KHÔNG phải SEQUENCE_NUMBER.
+- SEQUENCE_NUMBER chỉ được dùng cho cột có giá trị là số nguyên thuần túy (không có chữ hay ký tự đặc biệt).
 
 Trả về JSON theo đúng format sau, KHÔNG có markdown, KHÔNG có giải thích thêm:
 {{
   "domain": "<tên lĩnh vực>",
   "confidence": <số thực 0.0 đến 1.0>,
-  "reasoning": "<lý giải ngắn gọn trong 1-2 câu>"
+  "reasoning": "<lý giải ngắn gọn trong 1-2 câu>",
+  "column_semantics": {{
+    "<tên cột 1>": {{
+      "semantic_type": "<nhãn>",
+      "confidence": <số thực 0.0 đến 1.0>
+    }}
+  }}
 }}"""
 
 
@@ -101,11 +114,21 @@ async def get_semantic_context(columns: list[dict]) -> dict[str, Any]:
             raw_text = raw_text.strip()
 
         parsed = json.loads(raw_text)
+        
+        column_semantics = parsed.get("column_semantics", {})
+        # Áp dụng cơ chế fallback: nếu confidence < 0.75 -> fallback về GENERAL_TEXT
+        for col_name, info in column_semantics.items():
+            conf = float(info.get("confidence", 0.0))
+            stype = info.get("semantic_type", "GENERAL_TEXT")
+            logger.info("Gemini semantic %s: type=%s, confidence=%.2f", col_name, stype, conf)
+            if conf < 0.75:
+                info["semantic_type"] = "GENERAL_TEXT"
 
         return {
             "domain": str(parsed.get("domain", "Unknown")),
             "confidence": float(parsed.get("confidence", 0.0)),
             "reasoning": str(parsed.get("reasoning", "")),
+            "column_semantics": column_semantics,
         }
 
     except asyncio.TimeoutError:

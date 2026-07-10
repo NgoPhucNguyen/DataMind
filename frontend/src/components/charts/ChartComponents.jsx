@@ -1,3 +1,5 @@
+import { useState } from "react";
+import { ZoomIn, ZoomOut } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer,
   LineChart, Line, PieChart, Pie, Cell
@@ -56,7 +58,9 @@ export const TrendChart = ({ data = [], color = "#1B4324" }) => {
   );
 };
 
-export const CorrelationHeatmap = ({ matrix, topCorr }) => {
+export const CorrelationHeatmap = ({ matrix, topCorr, onCellClick, anchorPair }) => {
+  const [zoom, setZoom] = useState(1);
+
   if (!matrix || Object.keys(matrix).length === 0) return <p className="text-muted text-sm">Không đủ cột số để tính tương quan.</p>;
 
   const cols = Object.keys(matrix);
@@ -70,33 +74,74 @@ export const CorrelationHeatmap = ({ matrix, topCorr }) => {
     return "bg-[#F9F9F8] text-muted";
   };
 
+  const isAnchored = (row, col) => {
+    if (!anchorPair) return false;
+    return (anchorPair.colA === row && anchorPair.colB === col) ||
+           (anchorPair.colA === col && anchorPair.colB === row);
+  };
+
+  const isDiagonal = (row, col) => row === col;
+
   return (
-    <div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-xs text-center border-collapse">
-          <thead>
-            <tr>
-              <th className="p-2 border border-border bg-[#F9F9F8]"></th>
-              {cols.map(c => <th key={c} className="p-2 border border-border bg-[#F9F9F8] text-ink truncate max-w-[80px]" title={c}>{c}</th>)}
-            </tr>
-          </thead>
-          <tbody>
-            {cols.map(row => (
-              <tr key={row}>
-                <th className="p-2 border border-border bg-[#F9F9F8] text-left text-ink truncate max-w-[80px]" title={row}>{row}</th>
-                {cols.map(col => {
-                  const val = matrix[row][col];
-                  return (
-                    <td key={col} className={`p-2 border border-border ${getColor(val)}`}>
-                      {val.toFixed(2)}
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+    <div className="flex flex-col h-full w-full">
+      <div className="flex justify-end gap-2 mb-2 shrink-0">
+        <button onClick={() => setZoom(z => Math.max(0.4, z - 0.2))} className="p-1.5 border border-[#EAEAEA] bg-white text-[#626C65] hover:bg-[#EAF2EB] hover:text-[#1B4324] rounded-md transition-colors" title="Thu nhỏ">
+          <ZoomOut size={16} strokeWidth={1.5} />
+        </button>
+        <span className="text-xs font-mono flex items-center justify-center w-12 text-[#626C65]">{Math.round(zoom * 100)}%</span>
+        <button onClick={() => setZoom(z => Math.min(2, z + 0.2))} className="p-1.5 border border-[#EAEAEA] bg-white text-[#626C65] hover:bg-[#EAF2EB] hover:text-[#1B4324] rounded-md transition-colors" title="Phóng to">
+          <ZoomIn size={16} strokeWidth={1.5} />
+        </button>
       </div>
+      
+      <div className="overflow-auto flex-1 relative border border-[#EAEAEA] rounded-lg bg-[#F9F9F8]">
+        <div style={{ transform: `scale(${zoom})`, transformOrigin: 'top left', minWidth: 'max-content' }} className="p-2 transition-transform duration-200">
+          <table className="w-full text-xs text-center border-collapse bg-white shadow-sm">
+            <thead>
+              <tr>
+                <th className="p-2 border border-border bg-[#F9F9F8] sticky top-0 left-0 z-[60]"></th>
+                {cols.map(c => <th key={c} className="p-2 border border-border bg-[#F9F9F8] text-ink truncate max-w-[100px] sticky top-0 z-[50] shadow-[0_1px_0_#EAEAEA]" title={c}>{c}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {cols.map(row => (
+                <tr key={row}>
+                  <th className="p-2 border border-border bg-[#F9F9F8] text-left text-ink truncate max-w-[100px] sticky left-0 z-[50] shadow-[1px_0_0_#EAEAEA]" title={row}>{row}</th>
+                  {cols.map(col => {
+                    const val = matrix[row][col];
+                    const diagonal = isDiagonal(row, col);
+                    const anchored = isAnchored(row, col);
+
+                    return (
+                      <td
+                        key={col}
+                        className={`p-2 border border-border transition-all duration-150 ${getColor(val)} ${
+                          diagonal
+                            ? "opacity-50 cursor-default"
+                            : `cursor-pointer hover:ring-2 hover:ring-[#1B4324]/50 hover:z-30 relative ${
+                                anchored ? "ring-2 ring-[#1B4324] bg-[#1B4324]/10 z-30 font-bold" : ""
+                              }`
+                        }`}
+                        onClick={diagonal ? undefined : () => onCellClick?.(row, col, val)}
+                        title={diagonal ? `${row} (self)` : `${row} × ${col}: ${val.toFixed(4)}`}
+                      >
+                        {val.toFixed(2)}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {onCellClick && (
+        <p className="text-xs text-[#626C65] mt-3 text-center">
+          Click vào ô để khám phá chi tiết mối tương quan
+        </p>
+      )}
+
       {topCorr && topCorr.length > 0 && (
         <div className="mt-4">
           <p className="text-sm font-semibold mb-2 text-ink">Tương quan mạnh nhất:</p>
