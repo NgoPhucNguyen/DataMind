@@ -5,8 +5,10 @@ import os
 
 security = HTTPBearer()
 
-JWT_SECRET = os.getenv("SECRET_KEY") 
-JWT_ALGORITHM = "HS256"
+from app.core.security import SECRET_KEY, ALGORITHM
+
+JWT_SECRET = SECRET_KEY
+JWT_ALGORITHM = ALGORITHM
 
 
 def get_current_user(

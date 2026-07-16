@@ -44,17 +44,17 @@ services:
     build: .
     container_name: datamind_api
     env_file:
-      - .env
+      - .env.local
     volumes:
       - .:/app
     environment:
-      DATABASE_URL: ${DATABASE_URL}
-      REDIS_URL: ${REDIS_URL}
-      SECRET_KEY: ${SECRET_KEY}
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/datamind_local
+      REDIS_URL: redis://redis:6379
+      SECRET_KEY: 2617faf205ed8ce922560dbc098d7effa887b94a5c51375e200a40218cd971c6
       GEMINI_API_KEY: ${GEMINI_API_KEY}
       GEMINI_MODEL: ${GEMINI_MODEL}
-      DEBUG: ${DEBUG}
-      CORS_ORIGINS: ${CORS_ORIGINS}
+      DEBUG: "True"
+      CORS_ORIGINS: "http://localhost:3000,http://localhost:5173"
     ports:
       - "8000:8000"
     depends_on:

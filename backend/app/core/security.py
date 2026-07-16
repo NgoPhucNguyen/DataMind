@@ -6,6 +6,14 @@ from dotenv import load_dotenv
 
 
 SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY:
+    raise RuntimeError(
+        "SECRET_KEY chưa được cấu hình. Đặt biến môi trường SECRET_KEY "
+        "(chuỗi ngẫu nhiên, tối thiểu 32 ký tự) trước khi khởi động server."
+    )
+if len(SECRET_KEY) < 32:
+    raise RuntimeError("SECRET_KEY quá ngắn (cần tối thiểu 32 ký tự).")
+
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 60 * 24))  # 24h default
 

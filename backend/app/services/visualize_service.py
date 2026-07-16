@@ -8,7 +8,7 @@ from app.services import chart_insights
 from app.core.errors import DataMindException, ErrorSeverity
 from app.core import cache
 
-def compute_statistics(session_id: str, warnings: list = None) -> dict:
+def compute_statistics(user_id: int, session_id: str, warnings: list = None) -> dict:
     if warnings is None:
         warnings = []
 
@@ -21,7 +21,7 @@ def compute_statistics(session_id: str, warnings: list = None) -> dict:
     # Lazy import để tránh circular dependency (router → service → router)
     from app.routers.files import _read_dataframe
 
-    cached_file = cache.get_file_bytes(session_id)
+    cached_file = cache.get_file_bytes(user_id, session_id)
     if cached_file is None:
         raise DataMindException(
             code="ERR_SYS_CACHE_EXPIRED",

@@ -164,15 +164,15 @@ async def profile_file(
     # 4. Kiểm tra Redis cache
     if force_refresh:
         # User bấm "Phân tích lại" → xóa cache cũ trước, rồi chạy lại từ đầu
-        cache.delete_profile(file_hash)
+        cache.delete_profile(current_user["user_id"], file_hash)
         logger.info("Force refresh: deleted cache for file_hash=%s user=%s", file_hash, current_user["user_id"])
     else:
-        cached_data = cache.get_profile(file_hash)
+        cached_data = cache.get_profile(current_user["user_id"], file_hash)
         if cached_data:
             logger.info("Cache HIT: file_hash=%s user=%s", file_hash, current_user["user_id"])
             # FIX: Mặc dù profile cache hit (TTL 24h), file bytes có thể đã hết hạn (TTL 1h).
             # Ta cần đảm bảo file bytes được lưu lại vào cache.
-            cache.set_file_bytes(file_hash, content, file.filename, ext)
+            cache.set_file_bytes(current_user["user_id"], file_hash, content, file.filename, ext)
             return ProfileResponse(**cached_data, cached=True)
     # 5. Parse DataFrame từ memory buffer
     file_bytes = io.BytesIO(content)
@@ -213,10 +213,10 @@ async def profile_file(
     # 9. Lưu vào Redis cache (bỏ qua nếu Redis lỗi)
     cache_data = result.model_dump()
     cache_data.pop("cached", None)  # Không lưu field cached vào Redis
-    cache.set_profile(file_hash, cache_data)
+    cache.set_profile(current_user["user_id"], file_hash, cache_data)
 
     # 10. Lưu file bytes vào Redis để Cleaner endpoints tái dùng (TTL 1h)
-    cache.set_file_bytes(file_hash, content, file.filename, ext)
+    cache.set_file_bytes(current_user["user_id"], file_hash, content, file.filename, ext)
 
     logger.info(
         "Profiled: file=%s rows=%d cols=%d domain=%s user=%s",
@@ -244,7 +244,7 @@ async def save_session_context(
     body: SessionContextRequest,
     current_user: dict = Depends(get_current_user),
 ):
-    cache.set_user_context(body.session_id, body.description, body.purpose)
+    cache.set_user_context(current_user["user_id"], body.session_id, body.description, body.purpose)
     return {"status": "ok"}
 
 
@@ -252,13 +252,13 @@ async def save_session_context(
 # Helper: tái tải DataFrame từ Redis cache
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _load_df_from_cache(file_hash: str) -> tuple[pd.DataFrame, str, str]:
+def _load_df_from_cache(user_id: int, file_hash: str) -> tuple[pd.DataFrame, str, str]:
     """
-    Lấy file bytes từ Redis cache và parse thành DataFrame.
-    Raise 404 nếu không tìm thấy (hết TTL hoặc Redis chưa có).
+    Lấy file bytes từ Redis cache (chỉ trong phạm vi user_id sở hữu) và parse thành DataFrame.
+    Raise 404 nếu không tìm thấy (hết TTL, Redis chưa có, hoặc file_hash thuộc user khác).
     Trả về (df, filename, ext).
     """
-    cached = cache.get_file_bytes(file_hash)
+    cached = cache.get_file_bytes(user_id, file_hash)
     if cached is None:
         raise DataMindException(
             code="ERR_SYS_CACHE_EXPIRED",
@@ -267,7 +267,7 @@ def _load_df_from_cache(file_hash: str) -> tuple[pd.DataFrame, str, str]:
             technical_detail={
                 "module": "files",
                 "location": "_load_df_from_cache",
-                "root_cause": f"cache.get_file_bytes('{file_hash}') trả về None — TTL hết hoặc Redis miss"
+                "root_cause": f"cache.get_file_bytes(user={user_id}, '{file_hash}') trả về None — TTL hết, Redis miss, hoặc không thuộc sở hữu user này"
             },
             suggested_action=None
         )
@@ -293,10 +293,10 @@ async def detect_issues(
     body: IssueDetectRequest,
     current_user: dict = Depends(get_current_user),
 ):
-    df, filename, _ = _load_df_from_cache(body.file_hash)
+    df, filename, _ = _load_df_from_cache(current_user["user_id"], body.file_hash)
     
     # Load profile to get semantic mapping
-    profile_data = cache.get_profile(body.file_hash)
+    profile_data = cache.get_profile(current_user["user_id"], body.file_hash)
     column_semantics = {}
     if profile_data:
         for col in profile_data.get("columns", []):
@@ -339,7 +339,7 @@ async def auto_clean(
     body: AutoCleanRequest,
     current_user: dict = Depends(get_current_user),
 ):
-    df, filename, _ = _load_df_from_cache(body.file_hash)
+    df, filename, _ = _load_df_from_cache(current_user["user_id"], body.file_hash)
 
     cleaned_df, diff_raw = cleaner_service.auto_clean(
         df=df,
@@ -360,7 +360,7 @@ async def auto_clean(
     cleaned_df.to_csv(buf, index=False)
     buf.seek(0)
     clean_hash = f"{body.file_hash}_clean"
-    cache.set_file_bytes(clean_hash, buf.read(), filename, ".csv")
+    cache.set_file_bytes(current_user["user_id"], clean_hash, buf.read(), filename, ".csv")
 
     logger.info(
         "AutoClean: file=%s rows %d→%d user=%s",
@@ -377,7 +377,7 @@ async def auto_clean(
     preview_df = preview_df.reset_index(names="original_index")
 
     # Tính toán lại error_cells cho tập dữ liệu sau auto-clean
-    profile_data = cache.get_profile(body.file_hash)
+    profile_data = cache.get_profile(current_user["user_id"], body.file_hash)
     column_semantics = {}
     if profile_data:
         for col in profile_data.get("columns", []):
@@ -410,7 +410,7 @@ async def manual_clean_preview(
     current_user: dict = Depends(get_current_user),
 ):
     try:
-        df, filename, _ = _load_df_from_cache(body.file_hash)
+        df, filename, _ = _load_df_from_cache(current_user["user_id"], body.file_hash)
     except DataMindException as dme:
         # file cache expired
         raise HTTPException(status_code=410, detail=dme.user_message)
@@ -426,7 +426,7 @@ async def manual_clean_preview(
         # để tránh việc row nhảy vị trí liên tục khi user edit (Smart Preview cũ dùng nan_mask gây lộn xộn index)
         preview_df = cleaned_df.head(100).copy()
         
-        profile_data = cache.get_profile(body.file_hash)
+        profile_data = cache.get_profile(current_user["user_id"], body.file_hash)
         column_semantics = {}
         if profile_data:
             for col in profile_data.get("columns", []):
@@ -472,7 +472,7 @@ async def confirm_clean(
     body: ConfirmCleanRequest,
     current_user: dict = Depends(get_current_user),
 ):
-    df, filename, _ = _load_df_from_cache(body.file_hash)
+    df, filename, _ = _load_df_from_cache(current_user["user_id"], body.file_hash)
 
     if body.clean_mode == "manual":
         try:
@@ -534,10 +534,10 @@ async def confirm_clean(
     summary = cleaner_service.build_summary_for_module3(cleaned_df)
 
     # Lưu metadata session vào Redis để Module Visualization sử dụng
-    cache.set_session_metadata(session_id, summary)
+    cache.set_session_metadata(current_user["user_id"], session_id, summary)
 
     # Cache file bytes theo session_id để Module 3 có thể lấy ra
-    cache.set_file_bytes(session_id, csv_bytes, filename, ".csv")
+    cache.set_file_bytes(current_user["user_id"], session_id, csv_bytes, filename, ".csv")
 
     logger.info(
         "ConfirmClean: session=%s file=%s mode=%s rows=%d user=%s",

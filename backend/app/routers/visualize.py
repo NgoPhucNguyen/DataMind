@@ -26,7 +26,7 @@ async def compute(
     # visualize_service.compute_statistics(session_id) — router chỉ dispatch.
     try:
         summary = visualize_service.compute_statistics(
-            body.session_id, warnings=body.warnings
+            current_user["user_id"], body.session_id, warnings=body.warnings
         )
     except DataMindException as e:
         logger.warning(f"DataMindException in compute: {e.code} - {e.user_message}")
@@ -63,7 +63,7 @@ async def scatter_data(
     # ── Short-circuit: kiểm tra metadata cho scatter validation ─────────────
     # Nếu metadata tồn tại, kiểm tra cột có hợp lệ và là numeric không
     # trước khi load toàn bộ file bytes.
-    metadata = cache.get_session_metadata(body.session_id)
+    metadata = cache.get_session_metadata(current_user["user_id"], body.session_id)
     if metadata is not None:
         # Đảm bảo metadata là dict (Redis có thể trả về JSON string)
         if isinstance(metadata, str):
@@ -113,7 +113,7 @@ async def scatter_data(
         )
 
     # ── Load file bytes & parse DataFrame (chỉ chạy khi metadata pass/absent) ──
-    cached = cache.get_file_bytes(body.session_id)
+    cached = cache.get_file_bytes(current_user["user_id"], body.session_id)
     if cached is None:
         raise HTTPException(
             status_code=status.HTTP_410_GONE,

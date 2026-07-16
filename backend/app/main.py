@@ -1,3 +1,6 @@
+from slowapi.errors import RateLimitExceeded
+from slowapi import _rate_limit_exceeded_handler
+from app.core.limiter import limiter
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
@@ -25,7 +28,8 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan
 )
-
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 raw_frontend_urls = os.getenv(
     "FRONTEND_URLS", 
     "http://localhost:3000,http://localhost:5173"

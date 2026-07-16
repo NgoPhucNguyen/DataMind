@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-
+from fastapi import Request   # thêm Request vào import fastapi có sẵn
+from app.core.limiter import limiter
 from app.core.database import get_db
 from app.core.security import hash_password, verify_password, create_access_token, verify_google_id_token
 from app.models import (
@@ -37,7 +38,8 @@ def _user_to_response(user: User) -> UserResponse:
     status_code=status.HTTP_201_CREATED,
     summary="Đăng ký tài khoản mới",
 )
-def register(body: RegisterRequest, db: Session = Depends(get_db)):
+@limiter.limit("10/hour")
+def register(request: Request, body: RegisterRequest, db: Session = Depends(get_db)):
     # Kiểm tra email
     existing = db.query(User).filter(User.email == body.email).first()
 
@@ -90,7 +92,8 @@ def register(body: RegisterRequest, db: Session = Depends(get_db)):
     status_code=status.HTTP_200_OK,
     summary="Đăng nhập và nhận JWT token",
 )
-def login(body: LoginRequest, db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+def login(request: Request, body: LoginRequest, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == body.email).first()
 
     if not user or not verify_password(body.password, user.password):
@@ -107,7 +110,8 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
         token=TokenResponse(access_token=access_token),
     )
 @router.post("/google", response_model=LoginResponse, status_code=status.HTTP_200_OK)
-def login_with_google(body: GoogleLoginRequest, db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+def login_with_google(request: Request, body: GoogleLoginRequest, db: Session = Depends(get_db)):
     try:
         idinfo = verify_google_id_token(body.credential)
     except ValueError:
