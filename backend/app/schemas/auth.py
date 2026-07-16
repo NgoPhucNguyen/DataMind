@@ -28,12 +28,8 @@ class RegisterRequest(BaseModel):
     @field_validator("password")
     @classmethod
     def validate_password(cls, v: str) -> str:
-       if len(v) < 8:
-        raise ValueError("Mật khẩu phải có ít nhất 8 ký tự")
-       if not re.search(r"[A-Za-z]", v):
-        raise ValueError("Mật khẩu phải chứa ít nhất 1 chữ cái")
-       if not re.search(r"[0-9]", v):
-        raise ValueError("Mật khẩu phải chứa ít nhất 1 chữ số")
+       if len(v) < 6:
+        raise ValueError("Mật khẩu phải có ít nhất 6 ký tự")
        return v
 
 class GoogleLoginRequest(BaseModel):
