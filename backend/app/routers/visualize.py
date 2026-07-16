@@ -5,6 +5,7 @@ import io
 import logging
 
 from app.core.dependencies import get_current_user
+from app.core.database import get_db
 from app.core import cache
 from app.core.errors import DataMindException, ErrorSeverity
 from app.routers.files import _read_dataframe
@@ -141,3 +142,149 @@ async def scatter_data(
         raise HTTPException(status_code=500, detail="Lỗi trong quá trình tính toán dữ liệu phân tán.")
     
     return result
+
+class ExplainRequest(BaseModel):
+    session_id: str
+    chart_type: str
+    col_x: str
+    col_y: str | None = None
+    tier: str = "tier1"
+    auto_insights: list = []
+
+@router.post("/explain", summary="Giải thích biểu đồ bằng AI")
+async def explain_chart(
+    body: ExplainRequest,
+    current_user: dict = Depends(get_current_user),
+    db = Depends(get_db)
+):
+    from app.services.ai_explain_service import check_ai_access, build_explain_prompt, call_gemini_explain, AI_EXPLAIN_COST
+    from app.models import CreditTransaction, TransactionType
+    
+    # 0. Lấy file hash
+    metadata = cache.get_session_metadata(body.session_id)
+    cached_file = cache.get_file_bytes(body.session_id)
+    if not cached_file:
+        raise HTTPException(status_code=410, detail="Phiên làm việc đã hết hạn.")
+    
+    # Lấy hash từ session_id hoặc tự tạo nếu cần (trong hệ thống hiện tại file_hash thường được lưu cùng lúc)
+    # Tuy nhiên vì session_id thường sinh từ hash nên lấy trực tiếp
+    # Tốt nhất lấy thông tin metadata để có stats
+    import hashlib
+    # Tái tạo hash từ session bytes (dùng làm key tạm nếu ko có file_hash gốc)
+    file_hash = hashlib.md5(cached_file["bytes"]).hexdigest()
+    
+    # Sort columns for consistent caching if 2 columns
+    sorted_x, sorted_y = body.col_x, body.col_y
+    if body.col_y:
+        sorted_x, sorted_y = sorted([body.col_x, body.col_y])
+
+    # 1. Check edited cache (Tier 2)
+    edited = cache.get_ai_explain_edited(
+        current_user["user_id"], file_hash, body.chart_type, sorted_x, sorted_y, body.tier
+    )
+    if edited:
+        return {"content": edited, "tier": body.tier, "source": "user", "cached": True}
+
+    # 2. Check original cache (Tier 1)
+    original = cache.get_ai_explain_original(
+        file_hash, body.chart_type, sorted_x, sorted_y, body.tier
+    )
+    if original:
+        return {"content": original, "tier": body.tier, "source": "ai", "cached": True}
+
+    # 3. Cache Miss -> Check AI Access (Bypass -> Feature Flag -> Credits)
+    wallet = await check_ai_access(current_user, db)
+
+    # 4. Load stats & Build prompt
+    # metadata["columns"] can be: list of strings, list of dicts, or a dict.
+    # In most cases it's a list of column names (strings), so stats are minimal.
+    # The frontend already sends auto_insights which carries the important context.
+    col_stats = {}
+    try:
+        if metadata and isinstance(metadata, dict) and "columns" in metadata:
+            columns = metadata["columns"]
+            if isinstance(columns, dict):
+                col_stats = columns.get(body.col_x, {})
+            elif isinstance(columns, list) and len(columns) > 0 and isinstance(columns[0], dict):
+                col_stats = next((c for c in columns if c.get("name") == body.col_x), {})
+    except Exception:
+        col_stats = {}
+    
+    prompt = build_explain_prompt(body.chart_type, col_stats, body.col_x, body.col_y, body.auto_insights)
+    
+    # 5. Call Gemini
+    explanation = await call_gemini_explain(prompt)
+    
+    # 6. Save original cache
+    cache.set_ai_explain_original(
+        file_hash, body.chart_type, sorted_x, sorted_y, body.tier, explanation
+    )
+    
+    # 7. Deduct credit (Safe none check)
+    if wallet is not None:
+        wallet.balance = float(wallet.balance) - AI_EXPLAIN_COST
+        tx = CreditTransaction(
+            user_id=current_user["user_id"],
+            amount=AI_EXPLAIN_COST,
+            type=TransactionType.DEBIT,
+            description=f"AI Explain Chart ({body.chart_type})"
+        )
+        db.add(tx)
+        db.commit()
+
+    return {"content": explanation, "tier": body.tier, "source": "ai", "cached": False}
+
+
+class SaveExplainRequest(BaseModel):
+    session_id: str
+    chart_type: str
+    col_x: str
+    col_y: str | None = None
+    tier: str = "tier1"
+    content: str
+
+@router.post("/explain/save", summary="Lưu nội dung AI giải thích do user sửa")
+async def save_explain(
+    body: SaveExplainRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    cached_file = cache.get_file_bytes(body.session_id)
+    if not cached_file:
+        raise HTTPException(status_code=410, detail="Phiên làm việc đã hết hạn.")
+    
+    import hashlib
+    file_hash = hashlib.md5(cached_file["bytes"]).hexdigest()
+    
+    sorted_x, sorted_y = body.col_x, body.col_y
+    if body.col_y:
+        sorted_x, sorted_y = sorted([body.col_x, body.col_y])
+        
+    cache.set_ai_explain_edited(
+        current_user["user_id"], file_hash, body.chart_type, sorted_x, sorted_y, body.tier, body.content
+    )
+    return {"message": "Đã lưu bản nháp."}
+
+
+@router.get("/explain/suggestions", summary="Gợi ý tương quan tự động (Tier 1.5)")
+async def get_suggestions(
+    session_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    from app.services.ai_explain_service import get_correlation_suggestions
+    
+    cached_file = cache.get_file_bytes(session_id)
+    if not cached_file:
+        raise HTTPException(status_code=410, detail="Phiên làm việc đã hết hạn.")
+        
+    file_bytes = io.BytesIO(cached_file["bytes"])
+    try:
+        df = _read_dataframe(file_bytes, cached_file["ext"])
+    except Exception as e:
+        logger.error(f"Error reading df: {e}")
+        raise HTTPException(status_code=400, detail="Không đọc được dữ liệu")
+        
+    summary = visualize_service.compute_statistics(session_id)
+    
+    suggestions = get_correlation_suggestions(df, summary)
+    return suggestions
+

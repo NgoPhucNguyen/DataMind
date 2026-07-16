@@ -1,19 +1,17 @@
 import { useState, useRef, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { getUser, logout } from "../services/authService";
+import { useAuth } from "../contexts/AuthContext";
 import { Wallet, Settings, LogOut, LayoutDashboard, Sparkles, ChevronDown, Menu, X } from "lucide-react";
 const NAV_LINKS = [
     { label: "Trang chủ", path: "/" },
     { label: "Giá cả", path: "/pricing" },
-    { label: "Cách hoạt động", path: "/how-it-works" },
-    { label: "Thử nghiệm", path: "/demo" },
     { label: "Tài liệu", path: "/docs" },
 ];
 
 export default function Navbar() {
     const navigate = useNavigate();
     const location = useLocation();
-    const user = getUser();
+    const { user, logout } = useAuth();
     const [showMenu, setShowMenu] = useState(false);
     const [showMobileMenu, setShowMobileMenu] = useState(false);
     const menuRef = useRef(null);
@@ -77,7 +75,7 @@ export default function Navbar() {
                 {user ? (
                     <div className="flex items-center gap-4 relative" ref={menuRef}>
                         <button
-                            onClick={() => navigate("/home")}
+                            onClick={() => navigate("/profiler")}
                             className="text-sm bg-ink hover:bg-ink/80 text-white px-4 py-2 rounded-lg font-semibold transition-all hidden sm:block"
                         >
                             Vào Dashboard
@@ -104,7 +102,7 @@ export default function Navbar() {
                                 
                                 <div className="p-1">
                                     <button
-                                        onClick={() => { setShowMenu(false); navigate("/home"); }}
+                                        onClick={() => { setShowMenu(false); navigate("/profiler"); }}
                                         className="w-full text-left px-3 py-2 text-sm text-ink hover:bg-sage/40 transition-colors flex items-center gap-2 font-medium rounded-md"
                                     >
                                         <LayoutDashboard className="w-4 h-4 text-muted" /> Bảng điều khiển

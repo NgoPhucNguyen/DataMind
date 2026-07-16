@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 import os
 from dotenv import load_dotenv
 
+load_dotenv(override=True)
 
 from app.routers import auth as auth_router
 from app.routers import credits as credits_router
@@ -62,3 +63,5 @@ if __name__ == "__main__":
         port=int(os.getenv("PORT", 8000)),
         reload=os.getenv("DEBUG", "True") == "True"
     )
+
+

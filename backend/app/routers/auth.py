@@ -28,6 +28,7 @@ def _user_to_response(user: User) -> UserResponse:
         full_name=user.full_name,
         email=user.email,
         created_at=user.created_at.isoformat(),
+        ai_insights_enabled=user.ai_insights_enabled,
     )
 
 

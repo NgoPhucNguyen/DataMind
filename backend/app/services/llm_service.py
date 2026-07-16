@@ -138,7 +138,9 @@ async def get_semantic_context(columns: list[dict]) -> dict[str, Any]:
         logger.warning("Gemini trả về JSON không hợp lệ: %s", e)
         return _FALLBACK_CONTEXT
     except Exception as e:
+        import traceback
         logger.error(f"Gemini thất bại sau 3 lần thử: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
         return _FALLBACK_CONTEXT
 
 async def generate_report_intro(metadata: dict, charts: list) -> str:

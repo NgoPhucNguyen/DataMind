@@ -1,4 +1,4 @@
-from sqlalchemy import Column, BigInteger, String, DateTime, ForeignKey, Numeric, Enum, JSON
+from sqlalchemy import Column, BigInteger, String, DateTime, ForeignKey, Numeric, Enum, JSON, Boolean
 from sqlalchemy.orm import declarative_base, relationship
 from datetime import datetime
 import enum
@@ -32,6 +32,7 @@ class User(Base):
 
     google_id = Column(String, unique=True, nullable=True, index=True)
     avatar_url = Column(String, nullable=True)
+    ai_insights_enabled = Column(Boolean, default=False, nullable=False)
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

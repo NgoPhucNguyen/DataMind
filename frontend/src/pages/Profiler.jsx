@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useFileSession } from "../contexts/FileSessionContext";
+import { useAuth } from "../contexts/AuthContext";
 import { profileFile } from "../services/profilerService";
 import { useToast } from "../contexts/ToastContext";
 import { Upload, AlertTriangle, Clock, Download, AlertCircle, Info, RotateCw, RotateCcw, ArrowLeft, ArrowRight, Zap, CheckCircle } from "lucide-react";
@@ -53,6 +54,7 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
   const navigate = useNavigate();
   const location = useLocation();
   const { showToast } = useToast();
+  const { user } = useAuth();
   const { fileSession, updateFileSession, clearFileSession } = useFileSession();
 
   const [isDragging, setIsDragging] = useState(false);
@@ -111,6 +113,12 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
   const handleFile = async (file, forceRefresh = false) => {
     if (!file) return;
 
+    // Gate: must be logged in to upload
+    if (!user) {
+      showToast("Vui lòng đăng nhập để tải file lên và phân tích.", "warning");
+      navigate("/login", { state: { from: location } });
+      return;
+    }
     const allowed = [".csv", ".xlsx", ".xls"];
     const ext = file.name.toLowerCase().slice(file.name.lastIndexOf("."));
     if (!allowed.includes(ext)) {

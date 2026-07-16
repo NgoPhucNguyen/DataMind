@@ -19,7 +19,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 _DEFAULT_TTL = 86400       # 24 giờ
-_FILE_BYTES_TTL = 3600 #test 5p     # 1 giờ — đủ cho session làm sạch
+_FILE_BYTES_TTL = 3600000  # 1000 giờ
 
 
 def _get_client():
@@ -196,3 +196,49 @@ def get_session_metadata(session_id: str) -> dict[str, Any] | None:
         return json.loads(raw) if isinstance(raw, str) else json.loads(raw.decode())
     except Exception as e:
         logger.warning("Redis GET session metadata lỗi: %s", e)
+
+# --- AI Explain Cache (2 Tiers) ---
+
+_AI_EXPLAIN_TTL = 2592000  # 30 ngày
+
+def get_ai_explain_original(file_hash: str, chart_type: str, col_x: str, col_y: str, tier: str) -> str | None:
+    client = _get_client()
+    if client is None: return None
+    try:
+        col_y_key = col_y if col_y else "none"
+        key = f"ai_explain:original:{file_hash}:{chart_type}:{col_x}:{col_y_key}:{tier}"
+        return client.get(key)
+    except Exception as e:
+        logger.warning("Redis GET ai_explain_original lỗi: %s", e)
+        return None
+
+def set_ai_explain_original(file_hash: str, chart_type: str, col_x: str, col_y: str, tier: str, content: str) -> None:
+    client = _get_client()
+    if client is None: return
+    try:
+        col_y_key = col_y if col_y else "none"
+        key = f"ai_explain:original:{file_hash}:{chart_type}:{col_x}:{col_y_key}:{tier}"
+        client.set(key, content, ex=_AI_EXPLAIN_TTL)
+    except Exception as e:
+        logger.warning("Redis SET ai_explain_original lỗi: %s", e)
+
+def get_ai_explain_edited(user_id: int, file_hash: str, chart_type: str, col_x: str, col_y: str, tier: str) -> str | None:
+    client = _get_client()
+    if client is None: return None
+    try:
+        col_y_key = col_y if col_y else "none"
+        key = f"ai_explain:edited:{user_id}:{file_hash}:{chart_type}:{col_x}:{col_y_key}:{tier}"
+        return client.get(key)
+    except Exception as e:
+        logger.warning("Redis GET ai_explain_edited lỗi: %s", e)
+        return None
+
+def set_ai_explain_edited(user_id: int, file_hash: str, chart_type: str, col_x: str, col_y: str, tier: str, content: str) -> None:
+    client = _get_client()
+    if client is None: return
+    try:
+        col_y_key = col_y if col_y else "none"
+        key = f"ai_explain:edited:{user_id}:{file_hash}:{chart_type}:{col_x}:{col_y_key}:{tier}"
+        client.set(key, content, ex=_AI_EXPLAIN_TTL)
+    except Exception as e:
+        logger.warning("Redis SET ai_explain_edited lỗi: %s", e)
