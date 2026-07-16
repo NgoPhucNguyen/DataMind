@@ -99,7 +99,7 @@ export default function Register() {
                 id="reg-password"
                 type="password"
                 name="password"
-                placeholder="Tối thiểu 6 ký tự"
+                placeholder="Tối thiểu 8 ký tự và phải có ít nhất 1 chữ cái"
                 required
                 autoComplete="new-password"
                 value={formData.password}

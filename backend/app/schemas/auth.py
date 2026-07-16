@@ -28,9 +28,9 @@ class RegisterRequest(BaseModel):
     @field_validator("password")
     @classmethod
     def validate_password(cls, v: str) -> str:
-        if len(v) < 6:
-            raise ValueError("Mật khẩu phải có ít nhất 6 ký tự")
-        return v
+       if len(v) < 6:
+        raise ValueError("Mật khẩu phải có ít nhất 6 ký tự")
+       return v
 
 class GoogleLoginRequest(BaseModel):
     credential: str 
