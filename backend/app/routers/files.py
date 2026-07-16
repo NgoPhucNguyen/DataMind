@@ -188,16 +188,16 @@ async def profile_file(
     columns_raw = profiler_service.profile_dataframe(df)
     columns = [ColumnProfile(**col) for col in columns_raw]
 
-    # 7. Gọi Gemini LLM để phân tích ngữ cảnh (có fallback nếu lỗi)
-    semantic_raw = await llm_service.get_semantic_context(columns_raw)
-    column_semantics = semantic_raw.pop("column_semantics", {})
-    
-    semantic = SemanticContext(**semantic_raw)
+    # 7. Ngữ cảnh mặc định (KHÔNG gọi Gemini tự động — user bấm nút để kích hoạt)
+    semantic = SemanticContext(
+        domain="Chưa phân tích",
+        confidence=0.0,
+        reasoning="Nhấn nút 'Phân tích AI' để hệ thống nhận diện lĩnh vực dữ liệu.",
+    )
     
     for col in columns:
-        semantic_info = column_semantics.get(col.name, {})
-        col.semantic_type = semantic_info.get("semantic_type", "GENERAL_TEXT")
-        col.semantic_confidence = float(semantic_info.get("confidence", 0.0))
+        col.semantic_type = "GENERAL_TEXT"
+        col.semantic_confidence = 0.0
 
     # 8. Tạo response
     result = ProfileResponse(
@@ -225,6 +225,62 @@ async def profile_file(
     )
 
     return result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Endpoint: POST /files/ai-context
+# Gọi Gemini theo yêu cầu (không tự động) để phân tích ngữ cảnh dataset
+# ─────────────────────────────────────────────────────────────────────────────
+
+class AIContextRequest(BaseModel):
+    file_hash: str
+
+@router.post(
+    "/ai-context",
+    summary="Phân tích ngữ cảnh AI theo yêu cầu",
+    description="Gọi Gemini để nhận diện lĩnh vực dataset. Yêu cầu file đã được profile trước đó.",
+)
+async def analyze_ai_context(
+    body: AIContextRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    # 1. Lấy profile từ cache
+    profile_data = cache.get_profile(current_user["user_id"], body.file_hash)
+    if not profile_data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Không tìm thấy dữ liệu profile. Vui lòng upload lại file.",
+        )
+
+    columns_raw = profile_data.get("columns", [])
+
+    # 2. Gọi Gemini
+    semantic_raw = await llm_service.get_semantic_context(columns_raw)
+    column_semantics = semantic_raw.pop("column_semantics", {})
+
+    # 3. Cập nhật profile trong cache với kết quả AI
+    profile_data["semantic_context"] = {
+        "domain": semantic_raw["domain"],
+        "confidence": semantic_raw["confidence"],
+        "reasoning": semantic_raw["reasoning"],
+    }
+    for col in profile_data.get("columns", []):
+        sem_info = column_semantics.get(col["name"], {})
+        col["semantic_type"] = sem_info.get("semantic_type", "GENERAL_TEXT")
+        col["semantic_confidence"] = float(sem_info.get("confidence", 0.0))
+
+    cache.set_profile(current_user["user_id"], body.file_hash, profile_data)
+
+    logger.info(
+        "AI Context: file_hash=%s domain=%s confidence=%.2f user=%s",
+        body.file_hash, semantic_raw["domain"], semantic_raw["confidence"],
+        current_user["user_id"],
+    )
+
+    return {
+        "semantic_context": profile_data["semantic_context"],
+        "column_semantics": column_semantics,
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────

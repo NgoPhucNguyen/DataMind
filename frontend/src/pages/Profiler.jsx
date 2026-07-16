@@ -2,9 +2,9 @@ import { useState, useRef, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useFileSession } from "../contexts/FileSessionContext";
 import { useAuth } from "../contexts/AuthContext";
-import { profileFile } from "../services/profilerService";
+import { profileFile, requestAIContext } from "../services/profilerService";
 import { useToast } from "../contexts/ToastContext";
-import { Upload, AlertTriangle, Clock, Download, AlertCircle, Info, RotateCw, RotateCcw, ArrowLeft, ArrowRight, Zap, CheckCircle } from "lucide-react";
+import { Upload, AlertTriangle, Clock, Download, AlertCircle, Info, RotateCw, RotateCcw, ArrowLeft, ArrowRight, Zap, CheckCircle, Sparkles, Loader2 } from "lucide-react";
 import PageHeader from "../components/PageHeader";
 import PageHelpDocs from "../components/PageHelpDocs";
 import { TEXT, PAGE, BTN, BADGE, CARD } from "../constants/ui";
@@ -61,6 +61,8 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [lastFile, setLastFile] = useState(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiAnalyzed, setAiAnalyzed] = useState(false);
 
   const result = fileSession.profileData;
   const overrides = fileSession.overrides || {};
@@ -133,6 +135,7 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
     setOverrides({});
     setLoading(true);
     setLastFile(file);
+    setAiAnalyzed(false);
 
     try {
       const res = await profileFile(file, forceRefresh);
@@ -179,6 +182,31 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
     setResult(null);
     setOverrides({});
     setError(null);
+    setAiAnalyzed(false);
+  };
+
+  const handleRequestAI = async () => {
+    if (!result?.file_hash || aiLoading) return;
+    setAiLoading(true);
+    try {
+      const res = await requestAIContext(result.file_hash);
+      const { semantic_context } = res.data;
+      // Update the semantic context in the result
+      setResult({
+        ...result,
+        semantic_context: semantic_context,
+      });
+      setAiAnalyzed(true);
+      showToast("Phân tích AI thành công!", "success");
+    } catch (err) {
+      const detail = err?.response?.data?.detail;
+      showToast(
+        typeof detail === "string" ? detail : "Không thể phân tích AI lúc này. Vui lòng thử lại sau.",
+        "error"
+      );
+    } finally {
+      setAiLoading(false);
+    }
   };
 
   const getEffectiveType = (col) => overrides[col.name] || col.detected_type;
@@ -284,7 +312,7 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
             {/* Summary bar */}
             <div className="flex flex-wrap items-center gap-3 text-sm bg-[#F9F9F8] border border-border px-4 py-2.5 rounded-lg">
               <span className="font-medium text-ink">
-                Tìm thấy {result.total_columns} cột · {result.columns.filter(c => c.null_pct > 60 || c.unique_count === 1 || c.low_confidence).length} cột có vấn đề · {result.total_rows.toLocaleString()} dòng · Đề tài: {result.semantic_context.domain} ({Math.round(result.semantic_context.confidence * 100)}%)
+                Tìm thấy {result.total_columns} cột · {result.columns.filter(c => c.null_pct > 60 || c.unique_count === 1 || c.low_confidence).length} cột có vấn đề · {result.total_rows.toLocaleString()} dòng{aiAnalyzed ? ` · Đề tài: ${result.semantic_context.domain} (${Math.round(result.semantic_context.confidence * 100)}%)` : ""}
               </span>
               {result.cached && (
                 <div className="flex items-center gap-2 ml-2">
@@ -310,18 +338,45 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
               </button>
             </div>
 
-            {/* Semantic Context card */}
+            {/* Semantic Context card — on-demand AI */}
             <div className={CARD}>
-              <h2 className={TEXT.sectionTitle}>Ngữ cảnh tập dữ liệu</h2>
-              <div className="flex items-center gap-3 flex-wrap mb-2 mt-4">
-                <span className="font-serif text-xl text-ink">
-                  {result.semantic_context.domain}
-                </span>
-                <ConfidenceBadge confidence={result.semantic_context.confidence} />
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <h2 className={TEXT.sectionTitle}>Ngữ cảnh tập dữ liệu</h2>
+                {!aiAnalyzed && (
+                  <button
+                    id="profiler-ai-btn"
+                    onClick={handleRequestAI}
+                    disabled={aiLoading}
+                    className={`${BTN.primary} flex items-center gap-2 text-sm`}
+                  >
+                    {aiLoading ? (
+                      <><Loader2 className="w-4 h-4 animate-spin" /> Đang phân tích...</>
+                    ) : (
+                      <><Sparkles className="w-4 h-4" /> Phân tích AI</>
+                    )}
+                  </button>
+                )}
               </div>
-              {result.semantic_context.reasoning && (
-                <p className={TEXT.body}>
-                  {result.semantic_context.reasoning}
+
+              {aiAnalyzed ? (
+                <>
+                  <div className="flex items-center gap-3 flex-wrap mb-2 mt-4">
+                    <span className="font-serif text-xl text-ink">
+                      {result.semantic_context.domain}
+                    </span>
+                    <ConfidenceBadge confidence={result.semantic_context.confidence} />
+                  </div>
+                  {result.semantic_context.reasoning && (
+                    <p className={TEXT.body}>
+                      {result.semantic_context.reasoning}
+                    </p>
+                  )}
+                </>
+              ) : (
+                <p className={`${TEXT.secondary} mt-3`}>
+                  {aiLoading
+                    ? "Đang gọi Gemini AI để nhận diện lĩnh vực dữ liệu..."
+                    : "Nhấn nút \"Phân tích AI\" để hệ thống tự động nhận diện lĩnh vực và ngữ cảnh của dữ liệu."}
                 </p>
               )}
             </div>
