@@ -8,41 +8,40 @@ import {
 import { useEffect } from "react";
 import { useToast } from "./contexts/ToastContext";
 import { FileSessionProvider } from "./contexts/FileSessionContext";
+import { AuthProvider, useAuth } from "./contexts/AuthContext";
 
 import LandingPage from "./pages/LandingPage";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
-import Home from "./pages/Home";
 import Pricing from "./pages/Pricing";
 import Wallet from "./pages/Wallet";
 import Profiler from "./pages/Profiler";
 import Cleaner from "./pages/Cleaner";
 import Visualize from "./pages/Visualize";
 import Report from "./pages/Report";
-import HowItWorks from "./pages/HowItWorks";
-import Demo from "./pages/Demo";
 import Docs from "./pages/Docs";
 import Pipeline from "./pages/Pipeline";
 
 import Navbar from "./components/Navbar";
 import Sidebar from "./components/Sidebar";
 
-const PUBLIC_PATHS = ["/", "/login", "/register", "/how-it-works", "/demo", "/docs", "/pricing"];
+// /profiler is accessible without login (upload will gate on its own)
+const PUBLIC_PATHS = ["/", "/login", "/register", "/docs", "/pricing", "/profiler", '/cleaner', '/visualize', '/pipeline'];
 const HIDDEN_NAVBAR_PATHS = [];
 
 // ===================== Protected Route =====================
 function RequireAuth({ children }) {
   const location = useLocation();
   const { showToast } = useToast();
-  const token = localStorage.getItem("token");
+  const { user } = useAuth();
 
   useEffect(() => {
-    if (!token) {
+    if (!user) {
       showToast("Vui lòng đăng nhập để tiếp tục sử dụng tính năng này.", "warning");
     }
   }, []);
 
-  if (!token) {
+  if (!user) {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
@@ -51,10 +50,10 @@ function RequireAuth({ children }) {
 
 // ===================== Guest Only =====================
 function GuestOnly({ children }) {
-  const token = localStorage.getItem("token");
+  const { user } = useAuth();
 
-  if (token) {
-    return <Navigate to="/home" replace />;
+  if (user) {
+    return <Navigate to="/profiler" replace />;
   }
 
   return children;
@@ -63,23 +62,24 @@ function GuestOnly({ children }) {
 // ===================== Layout =====================
 function Layout() {
   const location = useLocation();
+  const { user } = useAuth();
 
-  // Xác định xem đang ở Public hay Dashboard (Protected)
+  // Determine if we're on a public page
   const isPublic = PUBLIC_PATHS.includes(location.pathname);
 
-  // Hiển thị Navbar toàn cục (nếu ở Public và không bị ẩn)
+  // Show Navbar on public pages
   const showNavbar = isPublic && !HIDDEN_NAVBAR_PATHS.includes(location.pathname);
 
-  // Hiển thị Sidebar (chỉ khi ở Dashboard)
-  const showSidebar = !isPublic;
+  // Show Sidebar only when logged in AND on a protected page
+  const showSidebar = !isPublic && !!user;
 
   return (
     <div className={`min-h-screen bg-canvas text-ink flex ${showSidebar ? "md:flex-row max-md:flex-col" : "flex-col"}`}>
-      {/* Sidebar cho Dashboard */}
+      {/* Sidebar for Dashboard */}
       {showSidebar && <Sidebar />}
 
       <div className={`flex-1 flex flex-col ${showSidebar ? "h-screen overflow-hidden max-md:pb-16" : ""}`}>
-        {/* Top Navbar cho Public pages (hoặc mobile Dashboard) */}
+        {/* Top Navbar for Public pages (or mobile Dashboard) */}
         {(showNavbar || showSidebar) && (
           <div className={showSidebar ? "md:hidden" : ""}>
             <Navbar />
@@ -88,39 +88,29 @@ function Layout() {
 
         <main className={`flex-1 relative ${showSidebar ? "overflow-y-auto" : ""}`}>
           <Routes>
-            {/* Public */}
-            <Route path="/" element={<LandingPage />} />
+            {/* Public — redirect logged-in users straight to dashboard */}
+            <Route
+              path="/"
+              element={user ? <Navigate to="/profiler" replace /> : <LandingPage />}
+            />
 
             <Route path="/login" element={<GuestOnly><Login /></GuestOnly>} />
 
             <Route path="/register" element={<GuestOnly><Register /></GuestOnly>} />
 
-            {/* Protected */}
-            <Route
-              path="/home"
-              element={
-                <RequireAuth>
-                  <Home />
-                </RequireAuth>
-              }
-            />
-
             <Route path="/pricing" element={<Pricing />} />
 
+            <Route path="/docs" element={<Docs />} />
+
+            {/* Profiler — public browse, upload gates itself */}
+            <Route path="/profiler" element={<Profiler />} />
+
+            {/* Protected */}
             <Route
               path="/wallet"
               element={
                 <RequireAuth>
                   <Wallet />
-                </RequireAuth>
-              }
-            />
-
-            <Route
-              path="/profiler"
-              element={
-                <RequireAuth>
-                  <Profiler />
                 </RequireAuth>
               }
             />
@@ -152,15 +142,6 @@ function Layout() {
               }
             />
 
-            {/* Redirect shims for old URLs */}
-            <Route path="/ua_profiler" element={<Navigate to="/profiler" replace />} />
-            <Route path="/ua_cleaner" element={<Navigate to="/cleaner" replace />} />
-            <Route path="/ua_visualize" element={<Navigate to="/visualize" replace />} />
-
-            <Route path="/how-it-works" element={<HowItWorks />} />
-            <Route path="/demo" element={<Demo />} />
-            <Route path="/docs" element={<Docs />} />
-
             <Route
               path="/pipeline"
               element={
@@ -179,6 +160,14 @@ function Layout() {
               }
             />
 
+            {/* Redirect shims for old URLs */}
+            <Route path="/home" element={<Navigate to="/profiler" replace />} />
+            <Route path="/ua_profiler" element={<Navigate to="/profiler" replace />} />
+            <Route path="/ua_cleaner" element={<Navigate to="/cleaner" replace />} />
+            <Route path="/ua_visualize" element={<Navigate to="/visualize" replace />} />
+            <Route path="/how-it-works" element={<Navigate to="/" replace />} />
+            <Route path="/demo" element={<Navigate to="/" replace />} />
+
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main>
@@ -191,9 +180,11 @@ function Layout() {
 function App() {
   return (
     <BrowserRouter>
-      <FileSessionProvider>
-        <Layout />
-      </FileSessionProvider>
+      <AuthProvider>
+        <FileSessionProvider>
+          <Layout />
+        </FileSessionProvider>
+      </AuthProvider>
     </BrowserRouter>
   );
 }

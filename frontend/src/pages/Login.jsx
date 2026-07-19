@@ -2,15 +2,17 @@ import { useState } from "react";
 import { login, loginWithGoogle } from "../services/authService";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { useToast } from "../contexts/ToastContext";
+import { useAuth } from "../contexts/AuthContext";
 import GoogleSignInButton from "../components/GoogleSignInButton";
 
 export default function Login() {
   const navigate = useNavigate();
   const location = useLocation();
   const { showToast } = useToast();
+  const { login: authLogin } = useAuth();
 
-  // Sau khi login, quay lại trang người dùng muốn vào (nếu bị redirect)
-  const from = location.state?.from?.pathname || "/home";
+  // After login, go back to the page the user tried to visit
+  const from = location.state?.from?.pathname || "/profiler";
 
   const [formData, setFormData] = useState({ email: "", password: "" });
   const [loading, setLoading] = useState(false);
@@ -24,8 +26,7 @@ export default function Login() {
     setGoogleLoading(true);
     try {
       const response = await loginWithGoogle(credential);
-      localStorage.setItem("token", response.token.access_token);
-      localStorage.setItem("user", JSON.stringify(response.user));
+      authLogin(response.user, response.token.access_token);
       showToast("Đăng nhập thành công! Chào mừng bạn quay trở lại.", "success");
       navigate(from, { replace: true });
     } catch (error) {
@@ -45,8 +46,7 @@ export default function Login() {
     setLoading(true);
     try {
       const response = await login(formData);
-      localStorage.setItem("token", response.token.access_token);
-      localStorage.setItem("user", JSON.stringify(response.user));
+      authLogin(response.user, response.token.access_token);
       showToast("Đăng nhập thành công! Chào mừng bạn quay trở lại.", "success");
       navigate(from, { replace: true });
     } catch (error) {

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { getUser, logout } from "../services/authService";
-import { LayoutDashboard, FileSearch, Wand2, PieChart, Workflow, ChevronLeft, ChevronRight, LogOut, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { useAuth } from "../contexts/AuthContext";
+import { FileSearch, Wand2, PieChart, Workflow, ChevronLeft, ChevronRight, LogOut, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 
 export default function Sidebar() {
   const [sidebarState, setSidebarState] = useState(() => {
@@ -10,7 +10,7 @@ export default function Sidebar() {
   
   const location = useLocation();
   const navigate = useNavigate();
-  const user = getUser();
+  const { user, logout } = useAuth();
 
   const updateState = (newState) => {
     setSidebarState(newState);
@@ -18,7 +18,6 @@ export default function Sidebar() {
   };
 
   const menuItems = [
-    { path: "/home", label: "Tổng quan", icon: <LayoutDashboard className="w-5 h-5" /> },
     { path: "/profiler", label: "Phân tích", icon: <FileSearch className="w-5 h-5" /> },
     { path: "/cleaner", label: "Làm sạch", icon: <Wand2 className="w-5 h-5" /> },
     { path: "/visualize", label: "Trực quan hóa", icon: <PieChart className="w-5 h-5" /> },

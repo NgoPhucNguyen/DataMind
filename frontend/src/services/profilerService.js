@@ -19,3 +19,12 @@ export const profileFile = (file, forceRefresh = false) => {
     },
   });
 };
+
+/**
+ * Gọi Gemini AI để phân tích ngữ cảnh dataset (on-demand).
+ * @param {string} fileHash - Hash của file đã profile
+ * @returns {Promise} { semantic_context, column_semantics }
+ */
+export const requestAIContext = (fileHash) => {
+  return api.post("/files/ai-context", { file_hash: fileHash });
+};

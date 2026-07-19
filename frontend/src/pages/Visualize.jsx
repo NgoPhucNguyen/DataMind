@@ -23,6 +23,9 @@ import {
 import PageHelpDocs from "../components/PageHelpDocs";
 
 import AnchorScatterPanel from "../components/charts/AnchorScatterPanel";
+import AIInsightsCard from "../components/charts/AIInsightsCard";
+import CorrelationSuggestions from "../components/charts/CorrelationSuggestions";
+import { getUser } from "../services/authService";
 
 
 
@@ -35,7 +38,7 @@ const COLOR_PRESETS = [
 
 const ENABLE_CHART_EDIT = false; // bật lại khi xử lý xong cache-invalidation cho edit chart
 
-const ChartCard = ({ chart, isSelected, toggleChart, summary, onUpdate, onCellClick, anchorPair }) => {
+const ChartCard = ({ chart, isSelected, toggleChart, summary, onUpdate, onCellClick, anchorPair, ai_insights_enabled, sessionId, fileHash }) => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [localTitle, setLocalTitle] = useState(chart.user_title || chart.title);
@@ -188,6 +191,15 @@ const ChartCard = ({ chart, isSelected, toggleChart, summary, onUpdate, onCellCl
           </p>
         </div>
       )}
+
+      {ai_insights_enabled && chart.type !== "heatmap" && (
+        <AIInsightsCard 
+          sessionId={sessionId}
+          fileHash={fileHash}
+          chart={chart}
+          autoInsights={insights}
+        />
+      )}
     </div>
   );
 };
@@ -264,6 +276,9 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
   const navigate = useNavigate();
   const { showToast } = useToast();
   const { fileSession, updateFileSession, clearFileSession } = useFileSession();
+  
+  const currentUser = getUser() || {};
+  const { ai_insights_enabled } = currentUser;
 
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState("distribution");
@@ -713,6 +728,9 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
                         onUpdate={handleUpdateChart}
                         onCellClick={chart.type === "heatmap" ? handleAnchorSelect : undefined}
                         anchorPair={chart.type === "heatmap" ? anchorPair : undefined}
+                        ai_insights_enabled={ai_insights_enabled}
+                        sessionId={fileSession.sessionId}
+                        fileHash={fileSession.fileHash}
                       />
                     </div>
 
@@ -730,6 +748,13 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
                 );
               })}
             </div>
+          )}
+
+          {activeTab === "correlation" && ai_insights_enabled && (
+            <CorrelationSuggestions 
+              sessionId={fileSession.sessionId}
+              onSelectAnchor={handleAnchorSelect}
+            />
           )}
 
           {/* Anchor Scatter Panel — appears below chart grid when a correlation cell is clicked */}

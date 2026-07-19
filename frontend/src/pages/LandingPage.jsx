@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { getUser } from "../services/authService";
+import { useAuth } from "../contexts/AuthContext";
 import HowItWorks from "./HowItWorks";
 import Demo from "./Demo";
 import { Search, Bot, BarChart } from "lucide-react";
@@ -24,7 +24,7 @@ const FEATURES = [
 
 export default function LandingPage() {
   const navigate = useNavigate();
-  const user = getUser();
+  const { user } = useAuth();
 
   return (
     <div className="min-h-screen bg-canvas text-ink flex flex-col overflow-x-hidden font-sans">
@@ -41,7 +41,7 @@ export default function LandingPage() {
         {/* Headline */}
         <div className="max-w-2xl">
           <h1 className="text-5xl md:text-6xl font-serif tracking-tight leading-tight mb-4 text-ink">
-            Hiểu dữ liệu của bạn{" "}
+            Xử lý dữ liệu của bạn{" "}
             <span className="text-forest italic font-semibold">
               trong vài giây
             </span>
@@ -57,7 +57,7 @@ export default function LandingPage() {
           {user ? (
             <button
               id="hero-dashboard-btn"
-              onClick={() => navigate("/home")}
+              onClick={() => navigate("/profiler")}
               className="bg-[#111111] hover:bg-[#222222] text-white px-8 py-3.5 rounded-lg font-semibold text-base transition-all active:scale-[0.98] shadow-sm"
             >
               Vào Dashboard →
@@ -113,7 +113,7 @@ export default function LandingPage() {
 
 // Static Pricing Section for Landing Page
 function PricingSection({ navigate }) {
-  const user = getUser();
+  const { user } = useAuth();
 
   return (
     <div className="py-20 max-w-5xl mx-auto px-6 w-full">

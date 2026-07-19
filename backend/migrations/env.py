@@ -15,8 +15,8 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Load DATABASE_URL from .env.local and override whatever is in alembic.ini
-load_dotenv(".env.local")
+# Load DATABASE_URL from .env and override whatever is in alembic.ini
+load_dotenv(".env")
 db_url = os.getenv("DATABASE_URL")
 if db_url:
     config.set_main_option("sqlalchemy.url", db_url)

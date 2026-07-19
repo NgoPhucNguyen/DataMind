@@ -1,0 +1,25 @@
+Vai trò của Gemini API key trong DataMind Pipeline (từ Profiler, Cleaner tới Visualization và Report)
+
+Gemini API Key đóng vai trò cấp quyền truy cập để hệ thống gọi các mô hình ngôn ngữ lớn (LLM) của Google (như Gemini 1.5 Flash và Gemini 2.5 Flash), nhằm tích hợp khả năng AI vào các giai đoạn khác nhau trong luồng xử lý dữ liệu. Chi tiết như sau:
+
+1. Giai đoạn Profiler & Cleaner (Phân tích ngữ cảnh và phân loại cột)
+- File liên quan: `backend/app/services/llm_service.py` (hàm `get_semantic_context`).
+- Vai trò: Dựa trên các thông số kỹ thuật thu thập được từ bước Profiler (tên cột, kiểu dữ liệu, số lượng giá trị unique, mẫu dữ liệu thật), hệ thống sẽ gửi prompt cho Gemini để lấy được phân tích ngữ cảnh (semantic context).
+- Công dụng chi tiết:
+  + Dự đoán lĩnh vực (domain) của tập dữ liệu (ví dụ: Marketing, Finance, HR, Healthcare...).
+  + Gán nhãn ngữ nghĩa (semantic_type) một cách thông minh cho từng cột (ví dụ: SEQUENCE_NUMBER, EMAIL, MONEY, PERSON_NAME, DATE_TIME, CODE_ID...). Hệ thống ưu tiên đánh giá dựa trên mẫu dữ liệu thực tế thay vì chỉ nhìn vào tên cột.
+  + Thông tin ngữ nghĩa này giúp ích rất lớn cho giai đoạn Cleaner để đưa ra các quyết định làm sạch dữ liệu chuẩn xác hơn.
+
+2. Giai đoạn Visualization (Giải thích biểu đồ tự động bằng AI)
+- File liên quan: `backend/app/services/ai_explain_service.py` và `backend/app/routers/visualize.py`.
+- Vai trò: Gemini đóng vai trò như một Data Analyst chuyên nghiệp để giải thích ý nghĩa các biểu đồ trực quan (histogram, bar, pie, box, line, heatmap).
+- Công dụng chi tiết: Nhận vào các thông số thống kê của một biểu đồ cụ thể, kết hợp với các nhận xét tự động (auto-insights), Gemini sẽ sinh ra một đoạn văn (3-5 câu) phân tích ý nghĩa đằng sau những con số. Hệ thống cũng yêu cầu AI đưa ra các giả thuyết kinh doanh hợp lý (nguyên nhân, hệ quả) dựa trên kiến thức nền tảng.
+- Lưu ý: Tính năng "AI Explain" này yêu cầu người dùng phải được kích hoạt tính năng AI Insights và mỗi lần gọi AI sẽ trừ một lượng tín dụng (credits) nhất định từ ví của người dùng. Hệ thống có cơ chế cache lại câu trả lời để tiết kiệm chi phí.
+
+3. Giai đoạn Report (Sinh báo cáo phân tích tự động)
+- File liên quan: `backend/app/services/llm_service.py` (hàm `generate_report_intro`).
+- Vai trò: Gemini được dùng để tự động viết phần mở đầu (intro) cho báo cáo phân tích tổng thể.
+- Công dụng chi tiết: Dựa trên metadata của bộ dữ liệu (tên file, số dòng, số cột, schema), danh sách các biểu đồ nổi bật được chọn, cũng như ngữ cảnh phân tích (Mô tả, mục đích) do người dùng nhập vào, Gemini sẽ sinh ra một đoạn giới thiệu ngắn gọn (4-5 câu) tóm tắt bộ dữ liệu và nhấn mạnh 1-2 điểm đáng chú ý nhất.
+
+* Cơ chế an toàn (Fallback):
+Trong tất cả các giai đoạn, nếu Gemini API key không được thiết lập (biến môi trường `GEMINI_API_KEY` bị trống), bị lỗi kết nối, quá thời gian phản hồi (timeout), hoặc hết quota, hệ thống sẽ tự động bắt lỗi và trả về dữ liệu mặc định (fallback_context hoặc câu thông báo mặc định). Điều này đảm bảo toàn bộ pipeline (profiler, cleaner, visualization) không bị crash mà vẫn tiếp tục hoạt động, chỉ tính năng AI bị vô hiệu hóa tạm thời.

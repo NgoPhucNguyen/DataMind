@@ -54,6 +54,7 @@ class UserResponse(BaseModel):
     full_name: str
     email: str
     created_at: str
+    ai_insights_enabled: bool = False
 
     model_config = {"from_attributes": True}
 
