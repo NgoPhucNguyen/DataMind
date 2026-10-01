@@ -370,7 +370,7 @@ function DiffReportView({ diff, validationState, filename, previewData, errorCel
   );
 }
 
-function ConfirmedView({ result, previewData, onGoHome, onGoVisualize }) {
+function ConfirmedView({ result, previewData, onGoHome, onGoVisualize, onBackToEdit }) {
   const summary = result.summary_for_module3;
   return (
     <div className="space-y-4">
@@ -417,13 +417,23 @@ function ConfirmedView({ result, previewData, onGoHome, onGoVisualize }) {
 
       {/* Next steps */}
       <div className="flex items-center justify-between gap-3">
-        <button
-          id="cleaner-go-home-btn"
-          onClick={onGoHome}
-          className={`${BTN.secondary} flex items-center gap-2`}
-        >
-          <ArrowLeft className="w-4 h-4 inline-block mr-1" /> Về trang chủ
-        </button>
+        <div className="flex gap-3">
+          <button
+            id="cleaner-go-home-btn"
+            onClick={onGoHome}
+            className={`${BTN.secondary} flex items-center gap-2`}
+          >
+            <ArrowLeft className="w-4 h-4 inline-block mr-1" /> Về trang chủ
+          </button>
+          {onBackToEdit && (
+            <button
+              onClick={onBackToEdit}
+              className={`${BTN.secondary} flex items-center gap-2`}
+            >
+              <ArrowLeft className="w-4 h-4 inline-block mr-1" /> Quay lại sửa tiếp
+            </button>
+          )}
+        </div>
         <button
           id="cleaner-go-module3-btn"
           onClick={onGoVisualize}
@@ -615,7 +625,7 @@ export default function Cleaner({ pipelineMode, onComplete, onError }) {
               {!pipelineMode && (
                 <>
                   <button
-                    onClick={() => navigate(fileHash ? "/profiler" : "/home")}
+                    onClick={() => navigate(fileHash ? "/dashboard/profiler" : "/dashboard/profiler")}
                     className={`${BTN.secondary} flex items-center gap-1.5`}
                   >
                     <ArrowLeft className="w-4 h-4" /> Quay lại
@@ -721,7 +731,7 @@ export default function Cleaner({ pipelineMode, onComplete, onError }) {
                     Upload file khác
                   </button>
                   <button
-                    onClick={() => navigate("/profiler")}
+                    onClick={() => navigate("/dashboard/profiler")}
                     className={BTN.primary}
                   >
                     Xem lại dữ liệu gốc
@@ -783,8 +793,8 @@ export default function Cleaner({ pipelineMode, onComplete, onError }) {
             {step === "confirmed" && confirmedResult && (
               <ConfirmedView
                 result={confirmedResult}
-                previewData={previewData}
-                onGoHome={() => navigate("/home")}
+                previewData={confirmedResult.preview_data && confirmedResult.preview_data.length > 0 ? confirmedResult.preview_data : previewData}
+                onGoHome={() => navigate("/dashboard/profiler")}
                 onGoVisualize={() => {
                   updateFileSession({
                     sessionId: confirmedResult.session_id,
@@ -792,7 +802,15 @@ export default function Cleaner({ pipelineMode, onComplete, onError }) {
                     warnings: confirmedResult.validation?.warnings || []
                   });
                   if (pipelineMode && onComplete) onComplete();
-                  else navigate("/visualize");
+                  else navigate("/dashboard/visualize");
+                }}
+                onBackToEdit={() => {
+                  if (confirmedResult.clean_mode === "manual") {
+                    setStep("manual_workspace");
+                  } else {
+                    setStep("choosing_mode");
+                  }
+                  setConfirmedResult(null);
                 }}
               />
             )}

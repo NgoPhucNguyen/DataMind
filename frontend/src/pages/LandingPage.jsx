@@ -57,7 +57,7 @@ export default function LandingPage() {
           {user ? (
             <button
               id="hero-dashboard-btn"
-              onClick={() => navigate("/profiler")}
+              onClick={() => navigate("/dashboard/profiler")}
               className="bg-[#111111] hover:bg-[#222222] text-white px-8 py-3.5 rounded-lg font-semibold text-base transition-all active:scale-[0.98] shadow-sm"
             >
               Vào Dashboard →

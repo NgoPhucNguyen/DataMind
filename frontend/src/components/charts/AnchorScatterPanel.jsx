@@ -1,10 +1,10 @@
 import {
   ScatterChart, Scatter, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer
 } from "recharts";
-import { X, AlertTriangle } from "lucide-react";
+import { X, AlertTriangle, Check } from "lucide-react";
 import { CARD, TEXT, BTN, BADGE } from "../../constants/ui";
 
-const AnchorScatterPanel = ({ colA, colB, rValue, scatterData, loading, error, onClear }) => {
+const AnchorScatterPanel = ({ colA, colB, rValue, scatterData, loading, error, onClear, isSelected, onToggle }) => {
   const rBadgeClass = rValue > 0
     ? `${BADGE.success}`
     : `${BADGE.error}`;
@@ -21,14 +21,23 @@ const AnchorScatterPanel = ({ colA, colB, rValue, scatterData, loading, error, o
             r = {typeof rValue === "number" ? rValue.toFixed(4) : rValue}
           </span>
         </div>
-        <button
-          onClick={onClear}
-          className={`${BTN.secondary} flex items-center gap-1.5`}
-          title="Bỏ chọn cặp cột"
-        >
-          <X className="w-4 h-4" strokeWidth={1.5} />
-          Bỏ chọn
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onToggle}
+            className={`w-6 h-6 rounded flex items-center justify-center border-[2.5px] transition-colors shrink-0 ${isSelected ? "bg-[#121A14] border-[#121A14] text-white" : "border-[#87938B] text-transparent hover:border-[#121A14]"}`}
+            title="Thêm biểu đồ vào báo cáo"
+          >
+            <Check className="w-4 h-4" strokeWidth={3} />
+          </button>
+          <button
+            onClick={onClear}
+            className={`${BTN.secondary} flex items-center gap-1.5`}
+            title="Bỏ chọn cặp cột"
+          >
+            <X className="w-4 h-4" strokeWidth={1.5} />
+            Bỏ chọn
+          </button>
+        </div>
       </div>
 
       {/* Loading state */}

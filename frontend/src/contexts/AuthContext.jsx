@@ -1,5 +1,5 @@
-import { createContext, useContext, useState, useCallback } from "react";
-import { getUser } from "../services/authService";
+import { createContext, useContext, useState, useCallback, useEffect } from "react";
+import { getUser, getMySubscription } from "../services/authService";
 
 // ── Context ───────────────────────────────────────────────
 const AuthContext = createContext(null);
@@ -8,6 +8,24 @@ const AuthContext = createContext(null);
 export function AuthProvider({ children }) {
   // Initialise from localStorage so a page refresh keeps the session
   const [user, setUser] = useState(() => getUser());
+  const [subscription, setSubscription] = useState(null);
+
+  const reloadSubscription = useCallback(async () => {
+    if (!user) {
+      setSubscription(null);
+      return;
+    }
+    try {
+      const data = await getMySubscription();
+      setSubscription(data);
+    } catch (err) {
+      console.error("Failed to load subscription:", err);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    reloadSubscription();
+  }, [reloadSubscription]);
 
   const login = useCallback((userData, token) => {
     localStorage.setItem("token", token);
@@ -19,12 +37,13 @@ export function AuthProvider({ children }) {
     localStorage.removeItem("token");
     localStorage.removeItem("user");
     setUser(null);
+    setSubscription(null);
   }, []);
 
   const token = user ? localStorage.getItem("token") : null;
 
   return (
-    <AuthContext.Provider value={{ user, token, login, logout }}>
+    <AuthContext.Provider value={{ user, token, subscription, login, logout, reloadSubscription }}>
       {children}
     </AuthContext.Provider>
   );

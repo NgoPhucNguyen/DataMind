@@ -92,7 +92,7 @@ def _try_datetime(series: pd.Series) -> bool:
     if len(sample) == 0:
         return False
     try:
-        parsed = pd.to_datetime(sample, errors="coerce")
+        parsed = pd.to_datetime(sample, format='mixed', errors="coerce")
         success_rate = parsed.notna().mean()
         return float(success_rate) >= DATETIME_PARSE_THRESHOLD
     except Exception:

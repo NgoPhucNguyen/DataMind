@@ -16,7 +16,10 @@ from datetime import datetime, timezone
 import pandas as pd
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_current_user, get_current_user_with_tier
+from app.core.database import get_db
+from sqlalchemy.orm import Session
+from app.services.ai_usage_service import check_ai_quota, record_ai_usage
 from app.core import cache
 from app.core.errors import DataMindException, ErrorSeverity
 from app.schemas.files import ProfileResponse, SemanticContext, ColumnProfile
@@ -123,7 +126,7 @@ def _read_dataframe(file_bytes: io.BytesIO, ext: str) -> pd.DataFrame:
 async def profile_file(
     file: UploadFile = File(..., description="File CSV hoặc Excel cần phân tích"),
     force_refresh: bool = False,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user_with_tier),
 ):
     # 1. Validate extension
     ext = _validate_extension(file.filename)
@@ -160,6 +163,14 @@ async def profile_file(
     # 3. Tính hash để kiểm tra cache
     CACHE_VERSION = "v4"
     file_hash = f"{CACHE_VERSION}:{hashlib.md5(content).hexdigest()}"
+
+    if current_user.get("tier") == "free":
+        if not cache.check_active_session(current_user["user_id"], file_hash):
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Bạn đang xử lý file khác, vui lòng đợi hoàn tất hoặc nâng cấp Pro để xử lý nhiều file cùng lúc."
+            )
+    cache.set_active_session(current_user["user_id"], file_hash)
 
     # 4. Kiểm tra Redis cache
     if force_refresh:
@@ -218,6 +229,19 @@ async def profile_file(
     # 10. Lưu file bytes vào Redis để Cleaner endpoints tái dùng (TTL 1h)
     cache.set_file_bytes(current_user["user_id"], file_hash, content, file.filename, ext)
 
+    # Save profiler report section
+    cache.set_report_section(current_user["user_id"], file_hash, "profiler", {
+        "file_name": file.filename,
+        "row_count": len(df),
+        "col_count": len(df.columns),
+        "schema": [c.model_dump() for c in columns]
+    })
+
+    # 11. Build và cache Markdown Dataset Context (Part 1) cho AI Explain
+    from app.services.context_builder import build_dataset_context
+    dataset_md = build_dataset_context(cache_data)
+    cache.set_dataset_context_md(current_user["user_id"], file_hash, dataset_md)
+
     logger.info(
         "Profiled: file=%s rows=%d cols=%d domain=%s user=%s",
         file.filename, len(df), len(df.columns),
@@ -243,7 +267,10 @@ class AIContextRequest(BaseModel):
 async def analyze_ai_context(
     body: AIContextRequest,
     current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
+    check_ai_quota(current_user["user_id"], db)
+
     # 1. Lấy profile từ cache
     profile_data = cache.get_profile(current_user["user_id"], body.file_hash)
     if not profile_data:
@@ -256,6 +283,12 @@ async def analyze_ai_context(
 
     # 2. Gọi Gemini
     semantic_raw = await llm_service.get_semantic_context(columns_raw)
+    
+    if semantic_raw.get("domain") == "Unknown" and semantic_raw.get("confidence") == 0.0:
+        record_ai_usage(db, current_user["user_id"], "ai-context", "fallback_used")
+    else:
+        record_ai_usage(db, current_user["user_id"], "ai-context", "success")
+
     column_semantics = semantic_raw.pop("column_semantics", {})
 
     # 3. Cập nhật profile trong cache với kết quả AI
@@ -270,6 +303,11 @@ async def analyze_ai_context(
         col["semantic_confidence"] = float(sem_info.get("confidence", 0.0))
 
     cache.set_profile(current_user["user_id"], body.file_hash, profile_data)
+
+    # 4. Re-build và cache lại Markdown Dataset Context (Part 1) vì có domain mới
+    from app.services.context_builder import build_dataset_context
+    dataset_md = build_dataset_context(profile_data)
+    cache.set_dataset_context_md(current_user["user_id"], body.file_hash, dataset_md)
 
     logger.info(
         "AI Context: file_hash=%s domain=%s confidence=%.2f user=%s",
@@ -393,11 +431,19 @@ async def detect_issues(
 )
 async def auto_clean(
     body: AutoCleanRequest,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user_with_tier),
 ):
+    if current_user.get("tier") == "free":
+        if not cache.check_active_session(current_user["user_id"], body.file_hash):
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Bạn đang xử lý file khác, vui lòng đợi hoàn tất hoặc nâng cấp Pro để xử lý nhiều file cùng lúc."
+            )
+    cache.set_active_session(current_user["user_id"], body.file_hash)
+
     df, filename, _ = _load_df_from_cache(current_user["user_id"], body.file_hash)
 
-    cleaned_df, diff_raw = cleaner_service.auto_clean(
+    cleaned_df, diff_raw, cleaning_log = cleaner_service.auto_clean(
         df=df,
         overridden_types=body.overridden_types,
     )
@@ -463,8 +509,16 @@ async def auto_clean(
 )
 async def manual_clean_preview(
     body: ManualCleanPreviewRequest,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user_with_tier),
 ):
+    if current_user.get("tier") == "free":
+        if not cache.check_active_session(current_user["user_id"], body.file_hash):
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Bạn đang xử lý file khác, vui lòng đợi hoàn tất hoặc nâng cấp Pro để xử lý nhiều file cùng lúc."
+            )
+    cache.set_active_session(current_user["user_id"], body.file_hash)
+
     try:
         df, filename, _ = _load_df_from_cache(current_user["user_id"], body.file_hash)
     except DataMindException as dme:
@@ -476,7 +530,7 @@ async def manual_clean_preview(
 
     try:
         # Áp dụng các hành động thủ công
-        cleaned_df = cleaner_service.apply_manual_actions(df, body.actions)
+        cleaned_df, _ = cleaner_service.apply_manual_actions(df, body.actions)
         
         # Lấy 100 dòng đầu tiên giữ nguyên thứ tự gốc (tương tự như detect_issues)
         # để tránh việc row nhảy vị trí liên tục khi user edit (Smart Preview cũ dùng nan_mask gây lộn xộn index)
@@ -526,13 +580,22 @@ async def manual_clean_preview(
 )
 async def confirm_clean(
     body: ConfirmCleanRequest,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user_with_tier),
 ):
+    if current_user.get("tier") == "free":
+        if not cache.check_active_session(current_user["user_id"], body.file_hash):
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Bạn đang xử lý file khác, vui lòng đợi hoàn tất hoặc nâng cấp Pro để xử lý nhiều file cùng lúc."
+            )
+    cache.set_active_session(current_user["user_id"], body.file_hash)
+
     df, filename, _ = _load_df_from_cache(current_user["user_id"], body.file_hash)
 
     if body.clean_mode == "manual":
         try:
-            cleaned_df = cleaner_service.apply_manual_actions(df, body.actions)
+            logger.info(f"CONFIRM_CLEAN MANUAL ACTIONS: {body.actions}")
+            cleaned_df, cleaning_log = cleaner_service.apply_manual_actions(df, body.actions)
         except ValueError as ve:
             logger.warning(f"Manual Clean Validation Error in confirm_clean: {ve}")
             raise HTTPException(status_code=400, detail=str(ve))
@@ -551,7 +614,7 @@ async def confirm_clean(
         }
     else:
         # Chạy auto_clean lần cuối (mặc định)
-        cleaned_df, diff_raw = cleaner_service.auto_clean(
+        cleaned_df, diff_raw, cleaning_log = cleaner_service.auto_clean(
             df=df,
             overridden_types=body.overridden_types,
         )
@@ -588,6 +651,9 @@ async def confirm_clean(
     session_id = str(uuid.uuid4())
     confirmed_at = datetime.now(timezone.utc).isoformat()
     summary = cleaner_service.build_summary_for_module3(cleaned_df)
+    
+    # Store file_hash in metadata so visualize service can lookup provenance
+    summary["file_hash"] = body.file_hash
 
     # Lưu metadata session vào Redis để Module Visualization sử dụng
     cache.set_session_metadata(current_user["user_id"], session_id, summary)
@@ -595,11 +661,29 @@ async def confirm_clean(
     # Cache file bytes theo session_id để Module 3 có thể lấy ra
     cache.set_file_bytes(current_user["user_id"], session_id, csv_bytes, filename, ".csv")
 
+    cache.set_cleaning_log(current_user["user_id"], body.file_hash, cleaning_log)
+    cache.set_report_section(current_user["user_id"], body.file_hash, "cleaner", {
+        "actions_taken": cleaning_log,
+        "clean_mode": body.clean_mode,
+        "stats": diff_raw
+    })
+    cache.invalidate_downstream_state(current_user["user_id"], body.file_hash)
+
     logger.info(
         "ConfirmClean: session=%s file=%s mode=%s rows=%d user=%s",
         session_id, filename, body.clean_mode,
         diff_raw["clean_rows"], current_user["user_id"],
     )
+    
+    # Generate preview data from cleaned_df
+    preview_df = cleaned_df.head(100).copy()
+    preview_df = preview_df.replace({float('nan'): None, pd.NaT: None})
+    for col in preview_df.columns:
+        if pd.api.types.is_datetime64_any_dtype(preview_df[col]):
+            preview_df[col] = preview_df[col].dt.strftime('%Y-%m-%d %H:%M:%S')
+    if "original_index" not in preview_df.columns:
+        preview_df = preview_df.reset_index(names="original_index")
+    preview_data = preview_df.to_dict(orient="records")
 
     return CleanDatasetResponse(
         session_id=session_id,
@@ -610,6 +694,7 @@ async def confirm_clean(
         clean_mode=body.clean_mode,
         confirmed_at=confirmed_at,
         validation=validation_res,
+        preview_data=preview_data
     )
 
 #Need checking!
@@ -667,3 +752,14 @@ def _upload_to_supabase(csv_bytes: bytes, original_filename: str, user_id: int) 
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Không thể lưu file lên storage: {str(e)[:200]}",
         )
+
+@router.delete(
+    "/session/active",
+    summary="Hủy session hiện tại",
+    description="Cho phép user hủy tiến trình để xử lý file khác."
+)
+async def clear_active_session_endpoint(
+    current_user: dict = Depends(get_current_user_with_tier),
+):
+    cache.clear_active_session(current_user["user_id"])
+    return {"message": "Session đã được hủy thành công."}

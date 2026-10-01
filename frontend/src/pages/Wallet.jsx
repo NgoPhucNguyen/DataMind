@@ -50,7 +50,7 @@ export default function Wallet() {
             {/* Header */}
             <header className="border-b border-border px-6 py-4 flex justify-between items-center bg-white sticky top-0 z-10">
                 <button
-                    onClick={() => navigate("/home")}
+                    onClick={() => navigate("/dashboard/profiler")}
                     className="flex items-center gap-2 text-muted hover:text-ink text-sm font-medium transition-colors"
                 >
                     <ArrowLeft className="w-4 h-4 inline-block mr-1" /> Về trang chủ

@@ -314,7 +314,7 @@ def _infer_type(series: pd.Series) -> str:
 def auto_clean(
     df: pd.DataFrame,
     overridden_types: dict[str, str] | None = None,
-) -> tuple[pd.DataFrame, dict]:
+) -> tuple[pd.DataFrame, dict, list]:
     """
     Làm sạch tự động theo rule mặc định:
       - Duplicate rows → drop, giữ dòng đầu
@@ -323,7 +323,7 @@ def auto_clean(
       - Missing numeric → fill median
       - Missing text/categorical → fill mode hoặc "Unknown"
 
-    Trả về (cleaned_df, diff_report_dict).
+    Trả về (cleaned_df, diff_report_dict, cleaning_log).
     """
     overridden_types = overridden_types or {}
     original_rows = len(df)
@@ -336,6 +336,7 @@ def auto_clean(
     types_converted: dict[str, str] = {}
     encoding_fixed: dict[str, int] = {}
     columns_dropped: list[str] = []
+    cleaning_log = []
 
     # ── 0. Drop quá rỗng (>= 90%) ──────────────────────────
     for col_name in cleaned.columns:
@@ -343,11 +344,14 @@ def auto_clean(
         if null_pct >= 90.0:
             cleaned = cleaned.drop(columns=[col_name])
             columns_dropped.append(str(col_name))
+            cleaning_log.append({"column": str(col_name), "action": "drop_column", "reason": ">= 90% missing values"})
 
     # ── 1. Drop duplicates ─────────────────────────────────
     before_dedup = len(cleaned)
     cleaned = cleaned.drop_duplicates(keep="first")
     duplicate_rows_removed = before_dedup - len(cleaned)
+    if duplicate_rows_removed > 0:
+        cleaning_log.append({"column": "all", "action": "drop_duplicates", "rows_affected": duplicate_rows_removed, "reason": "duplicate rows"})
 
     # ── 2. Per-column operations ───────────────────────────
     for col_name in cleaned.columns:
@@ -363,6 +367,7 @@ def auto_clean(
             bad_fixed = int((series.fillna("").astype(str) != new_series.fillna("").astype(str)).sum())
             if bad_fixed > 0:
                 encoding_fixed[str(col_name)] = bad_fixed
+                cleaning_log.append({"column": str(col_name), "action": "strip_bad_chars", "rows_affected": bad_fixed, "reason": "encoding errors"})
             cleaned[col_name] = new_series
             series = cleaned[col_name]  # refresh
 
@@ -372,33 +377,40 @@ def auto_clean(
             converted = clean_to_numeric(series)
             cleaned[col_name] = converted
             types_converted[str(col_name)] = f"{original_dtype} → float64"
+            cleaning_log.append({"column": str(col_name), "action": "convert_to_numeric", "reason": "wrong type"})
             series = cleaned[col_name]  # refresh
 
         # 2b2. Convert wrong type → datetime
         if pd.api.types.is_object_dtype(series.dtype) and col_type == "datetime":
             original_dtype = str(series.dtype)
-            converted = pd.to_datetime(series, errors='coerce')
+            converted = pd.to_datetime(series, format='mixed', errors='coerce')
             cleaned[col_name] = converted
             types_converted[str(col_name)] = f"{original_dtype} → datetime64"
+            cleaning_log.append({"column": str(col_name), "action": "convert_to_datetime", "reason": "wrong type"})
             series = cleaned[col_name]  # refresh
 
         # 2c. Fill missing
         null_before = int(series.isna().sum())
         if null_before > 0:
+            action_name = "fill_missing"
             if col_type == "numeric":
                 fill_val = series.median()
                 cleaned[col_name] = series.fillna(fill_val)
+                action_name = "fill_missing_median"
             elif col_type in ["categorical", "multiple_choice"]:
                 cleaned[col_name] = series.fillna("Không xác định")
+                action_name = "fill_missing_unknown"
             elif col_type == "datetime":
                 pass
             else:
                 cleaned[col_name] = series.fillna("Không xác định")
+                action_name = "fill_missing_unknown"
 
         null_after = int(cleaned[col_name].isna().sum()) if col_name in cleaned.columns else 0
         filled_count = null_before - null_after
         if filled_count > 0:
             missing_filled[str(col_name)] = filled_count
+            cleaning_log.append({"column": str(col_name), "action": action_name, "rows_affected": filled_count, "reason": "missing values"})
 
     diff_report = {
         "original_rows": original_rows,
@@ -412,7 +424,7 @@ def auto_clean(
         "encoding_fixed": encoding_fixed,
     }
 
-    return cleaned, diff_report
+    return cleaned, diff_report, cleaning_log
 
 
 # ─── validate_clean_dataset ─────────────────────────────────────────────────
@@ -529,11 +541,12 @@ def build_summary_for_module3(df: pd.DataFrame) -> dict:
 
 # ─── apply_manual_actions ───────────────────────────────────────────────────
 
-def apply_manual_actions(df: pd.DataFrame, actions: list) -> pd.DataFrame:
+def apply_manual_actions(df: pd.DataFrame, actions: list) -> tuple[pd.DataFrame, list]:
     """
     Áp dụng tuần tự các thao tác làm sạch thủ công (Manual Action Recipe) lên DataFrame.
     """
     cleaned = df.copy()
+    cleaning_log = []
     
     for action in actions:
         try:
@@ -553,53 +566,69 @@ def apply_manual_actions(df: pd.DataFrame, actions: list) -> pd.DataFrame:
             if act_type == "DROP_COLUMN":
                 if col in cleaned.columns:
                     cleaned = cleaned.drop(columns=[col])
+                    cleaning_log.append({"column": col, "action": act_type, "reason": "manual"})
                     
             elif act_type == "DROP_DUPLICATES":
+                before_dedup = len(cleaned)
                 cleaned = cleaned.drop_duplicates(keep="first")
+                dedup = before_dedup - len(cleaned)
+                if dedup > 0:
+                    cleaning_log.append({"column": "all", "action": act_type, "rows_affected": dedup, "reason": "manual"})
                 
             elif act_type == "STRIP_BAD_CHARS":
                 if col in cleaned.columns and pd.api.types.is_object_dtype(cleaned[col].dtype):
+                    before = cleaned[col].copy()
                     cleaned[col] = cleaned[col].apply(_strip_bad_chars)
+                    bad_fixed = int((before.fillna("").astype(str) != cleaned[col].fillna("").astype(str)).sum())
+                    if bad_fixed > 0:
+                        cleaning_log.append({"column": col, "action": act_type, "rows_affected": bad_fixed, "reason": "manual"})
                     
             elif act_type == "CONVERT_TO_NUMERIC":
                 if col in cleaned.columns:
                     cleaned[col] = clean_to_numeric(cleaned[col])
+                    cleaning_log.append({"column": col, "action": act_type, "reason": "manual"})
                     
             elif act_type == "CONVERT_TO_DATETIME":
                 if col in cleaned.columns:
                     cleaned[col] = pd.to_datetime(cleaned[col], errors='coerce')
+                    cleaning_log.append({"column": col, "action": act_type, "reason": "manual"})
                     
             elif act_type == "FILL_MISSING_MEDIAN":
                 if col in cleaned.columns:
                     fill_val = cleaned[col].median()
                     cleaned[col] = cleaned[col].fillna(fill_val)
+                    cleaning_log.append({"column": col, "action": act_type, "reason": "manual"})
                     
             elif act_type == "FILL_MISSING_UNKNOWN":
                 if col in cleaned.columns:
                     cleaned[col] = cleaned[col].fillna("Không xác định")
+                    cleaning_log.append({"column": col, "action": act_type, "reason": "manual"})
                     
             elif act_type == "FILL_MISSING_CUSTOM_VALUE":
                 if col in cleaned.columns:
                     val = params.get("value")
                     cleaned[col] = cleaned[col].fillna(val)
+                    cleaning_log.append({"column": col, "action": act_type, "reason": "manual"})
                     
             elif act_type == "FILL_MISSING_MEAN":
                 if col in cleaned.columns:
                     fill_val = cleaned[col].mean()
                     cleaned[col] = cleaned[col].fillna(fill_val)
+                    cleaning_log.append({"column": col, "action": act_type, "reason": "manual"})
                     
             elif act_type == "FILL_MISSING_MODE":
                 if col in cleaned.columns:
                     mode_s = cleaned[col].mode()
-                    # Nếu có mode thì lấy phần tử đầu, không thì dùng "Unknown" cho an toàn
                     fill_val = mode_s.iloc[0] if len(mode_s) > 0 else "Unknown"
                     cleaned[col] = cleaned[col].fillna(fill_val)
+                    cleaning_log.append({"column": col, "action": act_type, "reason": "manual"})
                     
             elif act_type == "RENAME_COLUMN":
                 if col in cleaned.columns:
                     new_name = params.get("new_name")
                     if new_name:
                         cleaned = cleaned.rename(columns={col: str(new_name)})
+                        cleaning_log.append({"column": col, "action": act_type, "reason": "manual"})
 
             elif act_type == "BATCH_EDIT_CELLS":
                 edits = params.get("edits", [])
@@ -609,7 +638,7 @@ def apply_manual_actions(df: pd.DataFrame, actions: list) -> pd.DataFrame:
                     n_val = edit.get("new_value")
                     
                     if c_name not in cleaned.columns:
-                        raise ValueError(f"Không thể sửa ô: Cột '{c_name}' không tồn tại (có thể đã bị xóa hoặc đổi tên trước đó).")
+                        raise ValueError(f"Không thể sửa ô: Cột '{c_name}' không tồn tại.")
                         
                     if r_id is None or pd.isna(r_id):
                         raise ValueError("Không thể sửa ô: row_id không được để trống (None/NaN).")
@@ -617,15 +646,16 @@ def apply_manual_actions(df: pd.DataFrame, actions: list) -> pd.DataFrame:
                     if r_id in cleaned.index:
                         try:
                             cleaned.at[r_id, c_name] = n_val
+                            cleaning_log.append({"column": c_name, "action": act_type, "rows_affected": 1, "reason": "manual"})
                         except Exception as e:
                             logger.warning(f"Không thể sửa ô tại dòng {r_id}, cột {c_name}: {e}")
+                            raise ValueError(f"Không thể cập nhật giá trị '{n_val}' vào cột '{c_name}'. Lỗi kiểu dữ liệu.")
                     else:
                         raise ValueError(f"Không thể sửa ô: Dòng {r_id} không tồn tại trong dữ liệu.")
                         
         except ValueError as ve:
-            # Re-raise ValueError để router bắt và trả về 400
             raise ve
         except Exception as e:
             logger.warning(f"Error applying action {action}: {e}")
             
-    return cleaned
+    return cleaned, cleaning_log

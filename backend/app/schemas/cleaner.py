@@ -204,3 +204,4 @@ class CleanDatasetResponse(BaseModel):
     clean_mode: str                # "auto" | "manual"
     confirmed_at: str              # ISO datetime string
     validation: ValidationResult | None = None
+    preview_data: list[dict] = []

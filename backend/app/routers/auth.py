@@ -19,6 +19,10 @@ from app.schemas.auth import (
     UserResponse,
     TokenResponse,
 )
+from app.services.subscription_service import is_pro
+from app.models import UserAIUsage
+from datetime import timedelta
+from app.core.dependencies import get_current_user
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
@@ -154,3 +158,30 @@ def login_with_google(request: Request, body: GoogleLoginRequest, db: Session = 
     return LoginResponse(message="Đăng nhập bằng Google thành công!",
                          user=_user_to_response(user),
                          token=TokenResponse(access_token=access_token))
+
+@router.get("/me/subscription", status_code=status.HTTP_200_OK)
+def get_my_subscription(
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    user_id = current_user["user_id"]
+    
+    # 1. Determine plan using is_pro
+    plan = "pro" if is_pro(user_id, db) else "free"
+    
+    # 2. Get usage stats and expiration from UserAIUsage
+    ai_usage = db.query(UserAIUsage).filter(UserAIUsage.user_id == user_id).first()
+    
+    runs_used = ai_usage.runs_used if ai_usage else 0
+    runs_limit = ai_usage.runs_limit if ai_usage else 0
+    
+    pro_expires_at = None
+    if plan == "pro" and ai_usage and ai_usage.period_start:
+        pro_expires_at = (ai_usage.period_start + timedelta(days=30)).isoformat()
+        
+    return {
+        "plan": plan,
+        "runs_used": runs_used,
+        "runs_limit": runs_limit,
+        "pro_expires_at": pro_expires_at
+    }

@@ -1,9 +1,9 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useFileSession } from "../contexts/FileSessionContext";
 import { useToast } from "../contexts/ToastContext";
 import api from "../services/axiosClient";
-import { Check, X, AlertTriangle, ArrowLeft, ArrowRight, Lock, FolderUp, Upload, Info, Settings, Edit2, ChevronUp, ChevronDown } from "lucide-react";
+import { Check, X, AlertTriangle, ArrowLeft, ArrowRight, Lock, FolderUp, Upload, Info, Settings, Edit2, ChevronUp, ChevronDown, Lightbulb } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer,
   LineChart, Line, PieChart, Pie, Cell
@@ -24,7 +24,6 @@ import PageHelpDocs from "../components/PageHelpDocs";
 
 import AnchorScatterPanel from "../components/charts/AnchorScatterPanel";
 import AIInsightsCard from "../components/charts/AIInsightsCard";
-import CorrelationSuggestions from "../components/charts/CorrelationSuggestions";
 import { getUser } from "../services/authService";
 
 
@@ -89,12 +88,12 @@ const ChartCard = ({ chart, isSelected, toggleChart, summary, onUpdate, onCellCl
         <div className="flex items-center gap-2 flex-1">
           {ENABLE_CHART_EDIT && (
             <button
-              onClick={() => setIsSettingsOpen(!isSettingsOpen)}
-              className="p-1.5 text-muted hover:text-ink rounded-md hover:bg-sage/40 transition-colors"
-              title="Cài đặt biểu đồ"
-            >
-              <Settings className="w-4 h-4" />
-            </button>
+                      onClick={() => toggleChart(chart.id)}
+                      className="p-1 text-muted hover:text-[#9F2F2D] hover:bg-[#FDEBEC] rounded transition-colors"
+                      title="Bỏ chọn"
+                    >
+                      <X className="w-3.5 h-3.5" strokeWidth={2} />
+                    </button>
           )}
 
           {isEditingTitle ? (
@@ -119,9 +118,9 @@ const ChartCard = ({ chart, isSelected, toggleChart, summary, onUpdate, onCellCl
 
         <button
           onClick={() => toggleChart(chart.id)}
-          className={`w-6 h-6 rounded flex items-center justify-center border transition-colors shrink-0 ${isSelected ? "bg-[#121A14] border-[#121A14] text-white" : "border-[#EAEAEA] text-transparent hover:border-[#626C65]/50"}`}
+          className={`w-6 h-6 rounded flex items-center justify-center border-[2.5px] transition-colors shrink-0 ${isSelected ? "bg-[#121A14] border-[#121A14] text-white" : "border-[#87938B] text-transparent hover:border-[#121A14]"}`}
         >
-          <Check className="w-4 h-4" />
+          <Check className="w-4 h-4" strokeWidth={3} />
         </button>
       </div>
 
@@ -177,7 +176,7 @@ const ChartCard = ({ chart, isSelected, toggleChart, summary, onUpdate, onCellCl
       {chart.type !== "heatmap" && insights.length > 0 && (
         <div className="mt-3 pt-3 border-t border-gray-100">
           <p className="text-xs font-medium text-gray-500 mb-1.5 flex items-center gap-1">
-            📊 Nhận xét tự động
+            <Lightbulb className="w-3.5 h-3.5 text-[#1B4324]" /> Nhận xét tự động
           </p>
           <ul className="space-y-1">
             {insights.map((insight, idx) => (
@@ -192,12 +191,13 @@ const ChartCard = ({ chart, isSelected, toggleChart, summary, onUpdate, onCellCl
         </div>
       )}
 
-      {ai_insights_enabled && chart.type !== "heatmap" && (
+      {ai_insights_enabled && (
         <AIInsightsCard 
           sessionId={sessionId}
           fileHash={fileHash}
           chart={chart}
           autoInsights={insights}
+          anchorPair={anchorPair}
         />
       )}
     </div>
@@ -284,6 +284,7 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
   const [activeTab, setActiveTab] = useState("distribution");
   const [charts, setCharts] = useState({ distribution: [], correlation: [], time: [], other: [] });
   const [selectedChartIds, setSelectedChartIds] = useState(new Set());
+  const [customCharts, setCustomCharts] = useState([]);
   const [selectionExpanded, setSelectionExpanded] = useState(false);
 
   const [showDirectUpload, setShowDirectUpload] = useState(false);
@@ -403,12 +404,23 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
     if (file) handleDirectUpload(file);
   };
 
-  const toggleChart = (id) => {
-    const newSet = new Set(selectedChartIds);
-    if (newSet.has(id)) newSet.delete(id);
-    else newSet.add(id);
-    setSelectedChartIds(newSet);
-  };
+  const toggleChart = useCallback((id, chartObj = null) => {
+    setSelectedChartIds(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(id)) {
+        newSet.delete(id);
+      } else {
+        newSet.add(id);
+        if (chartObj) {
+          setCustomCharts(curr => {
+            if (curr.find(c => c.id === id)) return curr;
+            return [...curr, chartObj];
+          });
+        }
+      }
+      return newSet;
+    });
+  }, []);
 
   // --- Anchor handlers ---
   const handleAnchorSelect = async (colA, colB, r) => {
@@ -472,7 +484,7 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
       return;
     }
 
-    const allCharts = [...charts.distribution, ...charts.correlation, ...charts.time, ...charts.other];
+    const allCharts = [...charts.distribution, ...charts.correlation, ...charts.time, ...charts.other, ...customCharts];
     const confirmed = allCharts
       .filter(c => selectedChartIds.has(c.id))
       .map(c => ({
@@ -488,9 +500,19 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
     if (pipelineMode && onComplete) {
       onComplete();
     } else {
-      navigate("/report");
+      navigate("/dashboard/report");
     }
   };
+
+  const selectedCharts = useMemo(() => {
+    const all = [
+      ...(charts.distribution || []),
+      ...(charts.correlation || []),
+      ...(charts.time || []),
+      ...customCharts
+    ];
+    return all.filter(c => selectedChartIds.has(c.id));
+  }, [charts, customCharts, selectedChartIds]);
 
   if (loading) {
     return (
@@ -585,13 +607,13 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
             </button>
             <div className="flex gap-3">
               <button
-                onClick={() => navigate(pipelineMode ? "/pipeline/profiler" : "/profiler")}
+                onClick={() => navigate(pipelineMode ? "/dashboard/pipeline/profiler" : "/dashboard/profiler")}
                 className="border border-border text-ink py-2 rounded-lg font-semibold w-full hover:bg-sage/20 transition-all text-sm"
               >
                 Quay lại Phân tích
               </button>
               <button
-                onClick={() => navigate(pipelineMode ? "/pipeline/cleaner" : "/cleaner")}
+                onClick={() => navigate(pipelineMode ? "/dashboard/pipeline/cleaner" : "/dashboard/cleaner")}
                 className="border border-border text-ink py-2 rounded-lg font-semibold w-full hover:bg-sage/20 transition-all text-sm"
               >
                 Chi tiết Làm sạch
@@ -620,7 +642,7 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
                 {!pipelineMode && !showDirectUpload && (
                   <>
                     <button
-                      onClick={() => navigate("/cleaner")}
+                      onClick={() => navigate("/dashboard/cleaner")}
                       className={`${BTN.secondary} flex items-center gap-1.5`}
                     >
                       <ArrowLeft className="w-4 h-4" /> Quay lại
@@ -653,14 +675,14 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
                 )}
               </h2>
               <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
-                <span className={`flex items-center gap-1.5 ${(fileSession.capabilities.histogram || fileSession.capabilities.bar_chart) ? 'text-forest font-semibold' : 'text-[#9F2F2D]/80'}`}>
-                  {(fileSession.capabilities.histogram || fileSession.capabilities.bar_chart) ? <Check className="w-4 h-4 shrink-0" /> : <X className="w-4 h-4 shrink-0" />} Phân phối
+                <span className={`flex items-center gap-1.5 ${((fileSession.capabilities.histogram || fileSession.capabilities.bar_chart) && charts.distribution.length > 0) ? 'text-forest font-semibold' : 'text-[#9F2F2D]/80'}`}>
+                  {((fileSession.capabilities.histogram || fileSession.capabilities.bar_chart) && charts.distribution.length > 0) ? <Check className="w-4 h-4 shrink-0" /> : <X className="w-4 h-4 shrink-0" />} Phân phối
                 </span>
-                <span className={`flex items-center gap-1.5 ${fileSession.capabilities.correlation ? 'text-forest font-semibold' : 'text-[#9F2F2D]/80'}`}>
-                  {fileSession.capabilities.correlation ? <Check className="w-4 h-4 shrink-0" /> : <X className="w-4 h-4 shrink-0" />} Tương quan
+                <span className={`flex items-center gap-1.5 ${(fileSession.capabilities.correlation && charts.correlation.length > 0) ? 'text-forest font-semibold' : 'text-[#9F2F2D]/80'}`}>
+                  {(fileSession.capabilities.correlation && charts.correlation.length > 0) ? <Check className="w-4 h-4 shrink-0" /> : <X className="w-4 h-4 shrink-0" />} Tương quan
                 </span>
-                <span className={`flex items-center gap-1.5 ${fileSession.capabilities.line_chart ? 'text-forest font-semibold' : 'text-[#9F2F2D]/80'}`}>
-                  {fileSession.capabilities.line_chart ? <Check className="w-4 h-4 shrink-0" /> : <X className="w-4 h-4 shrink-0" />} Theo thời gian
+                <span className={`flex items-center gap-1.5 ${(fileSession.capabilities.line_chart && charts.time.length > 0) ? 'text-forest font-semibold' : 'text-[#9F2F2D]/80'}`}>
+                  {(fileSession.capabilities.line_chart && charts.time.length > 0) ? <Check className="w-4 h-4 shrink-0" /> : <X className="w-4 h-4 shrink-0" />} Theo thời gian
                 </span>
               </div>
             </div>
@@ -750,12 +772,6 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
             </div>
           )}
 
-          {activeTab === "correlation" && ai_insights_enabled && (
-            <CorrelationSuggestions 
-              sessionId={fileSession.sessionId}
-              onSelectAnchor={handleAnchorSelect}
-            />
-          )}
 
           {/* Anchor Scatter Panel — appears below chart grid when a correlation cell is clicked */}
           {activeTab === "correlation" && anchorPair && (
@@ -767,6 +783,18 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
               loading={scatterLoading}
               error={scatterError}
               onClear={handleAnchorClear}
+              isSelected={selectedChartIds.has(`scatter_${anchorPair.colA}_${anchorPair.colB}`)}
+              onToggle={() => {
+                toggleChart(`scatter_${anchorPair.colA}_${anchorPair.colB}`, {
+                  id: `scatter_${anchorPair.colA}_${anchorPair.colB}`,
+                  type: "scatter",
+                  colA: anchorPair.colA,
+                  colB: anchorPair.colB,
+                  title: `Phân tán: ${anchorPair.colA} × ${anchorPair.colB}`,
+                  data: scatterData,
+                  r: anchorPair.r
+                });
+              }}
             />
           )}
         </div>
@@ -790,9 +818,7 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
               <p className="text-sm text-muted/60 py-3">Chưa có biểu đồ nào được chọn. Nhấn vào checkbox trên biểu đồ để chọn.</p>
             ) : (
               <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto">
-                {[...charts.distribution, ...charts.correlation, ...charts.time, ...charts.other]
-                  .filter(c => selectedChartIds.has(c.id))
-                  .map(c => (
+                {selectedCharts.map(c => (
                     <div key={`sel_${c.id}`} className="bg-[#F9F9F8] border border-border rounded-lg px-3 py-2 flex items-center gap-2 text-sm text-ink">
                       <span className="truncate max-w-[200px] font-medium">{c.user_title || c.title}</span>
                       <button onClick={() => toggleChart(c.id)} className="text-muted hover:text-red-500 shrink-0 transition-colors">

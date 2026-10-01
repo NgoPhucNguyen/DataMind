@@ -32,7 +32,7 @@ export default function Pipeline() {
   useEffect(() => {
     if (step && STEPS.includes(step)) {
       if (step !== "profiler" && !fileSession.fileHash) {
-        navigate("/pipeline/profiler", { replace: true });
+        navigate("/dashboard/pipeline/profiler", { replace: true });
       } else {
         setCurrentStep(step);
         setStepStatus(prev => {
@@ -47,7 +47,7 @@ export default function Pipeline() {
         });
       }
     } else {
-      navigate("/pipeline/profiler", { replace: true });
+      navigate("/dashboard/pipeline/profiler", { replace: true });
     }
   }, [step, fileSession.fileHash, navigate]);
 
@@ -55,7 +55,7 @@ export default function Pipeline() {
     const handleReset = () => {
       setPipelineError(null);
       setStepStatus(STEPS.reduce((acc, s) => ({ ...acc, [s]: "pending" }), {}));
-      navigate("/pipeline/profiler", { replace: true });
+      navigate("/dashboard/pipeline/profiler", { replace: true });
     };
     window.addEventListener("datamind:session-cleared", handleReset);
     return () => window.removeEventListener("datamind:session-cleared", handleReset);
@@ -64,7 +64,7 @@ export default function Pipeline() {
   const handleNext = (nextStep) => {
     setPipelineError(null);
     setStepStatus(prev => ({ ...prev, [currentStep]: "done" }));
-    navigate(`/pipeline/${nextStep}`);
+    navigate(`/dashboard/pipeline/${nextStep}`);
   };
 
   const handleError = (msg) => {
@@ -76,7 +76,7 @@ export default function Pipeline() {
     setPipelineError(null);
     const currentIndex = STEPS.indexOf(currentStep);
     if (currentIndex < STEPS.length - 1) {
-      navigate(`/pipeline/${STEPS[currentIndex + 1]}`);
+      navigate(`/dashboard/pipeline/${STEPS[currentIndex + 1]}`);
     }
   };
 
@@ -84,7 +84,7 @@ export default function Pipeline() {
     profiler: <Profiler pipelineMode onComplete={() => handleNext("cleaner")} onError={handleError} />,
     cleaner: <Cleaner pipelineMode onComplete={() => handleNext("visualize")} onError={handleError} />,
     visualize: <Visualize pipelineMode onComplete={() => handleNext("report")} onError={handleError} />,
-    report: <Report pipelineMode onComplete={() => navigate("/home")} />
+    report: <Report pipelineMode onComplete={() => navigate("/dashboard/profiler")} />
   };
 
   return (
@@ -105,7 +105,7 @@ export default function Pipeline() {
                 <div
                   onClick={() => {
                     if (status === "done" || status === "warning" || isActive) {
-                      navigate(`/pipeline/${s}`);
+                      navigate(`/dashboard/pipeline/${s}`);
                     }
                   }}
                   className={`flex items-center gap-1.5 transition-colors ${status === "done" || status === "warning" || isActive ? "cursor-pointer" : "cursor-default"} ${isActive ? 'text-[#1B4324] border-b-2 border-[#1B4324] pb-0.5 font-semibold' : (status === 'done' ? 'text-forest font-medium hover:text-[#1B4324]' : (status === 'warning' ? 'text-[#d97706] font-medium hover:text-[#b45309]' : 'text-muted'))}`}

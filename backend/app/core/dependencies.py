@@ -33,3 +33,16 @@ def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token"
         )
+
+from app.core.database import get_db
+from sqlalchemy.orm import Session
+from app.models import User
+
+def get_current_user_with_tier(
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    user = db.query(User).filter(User.id == current_user["user_id"]).first()
+    tier = getattr(user, 'tier', "free") if user else "free"
+    current_user["tier"] = tier
+    return current_user

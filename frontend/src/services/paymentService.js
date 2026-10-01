@@ -26,3 +26,14 @@ export const getMySubscription = async () => {
     const response = await api.get("/packages/my-subscription");
     return response.data;
 };
+
+// === Sepay ===
+export const createOrder = async () => {
+    const response = await api.post("/payments/create-order");
+    return response.data;
+};
+
+export const getOrderStatus = async (orderRef) => {
+    const response = await api.get(`/payments/order-status?order_ref=${orderRef}`);
+    return response.data;
+};
