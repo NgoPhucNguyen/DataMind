@@ -22,8 +22,11 @@ async def sepay_webhook(
     request: Request,
     db: Session = Depends(get_db)
 ):
-    print(f"=== X-Forwarded-For header raw: {request.headers.get('x-forwarded-for')} ===")
-    print(f"=== request.client.host: {request.client.host if request.client else None} ===")
+    import os
+    if os.getenv("DEBUG_SEPAY") == "true":
+        print(f"=== X-Forwarded-For: {request.headers.get('x-forwarded-for')} ===")
+        print(f"=== X-Real-IP: {request.headers.get('x-real-ip')} ===")
+        print(f"=== request.client.host: {request.client.host if request.client else None} ===")
     
     # Extract IP from X-Forwarded-For due to ngrok/docker proxy
     forwarded_for = request.headers.get("X-Forwarded-For")

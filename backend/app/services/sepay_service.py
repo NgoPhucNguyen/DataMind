@@ -51,19 +51,21 @@ def verify_sepay_signature(raw_body: bytes, timestamp_str: str, signature_header
     expected_signature = f"sha256={expected_hash}"
     
     # --- DEBUG LOGS FOR DIAGNOSIS ---
-    print("\n--- SEPAY HMAC DEBUG ---")
-    print("1. Raw body:", repr(raw_body))
-    print("2. Timestamp:", timestamp_str)
-    print("3. Signature Header:", signature_header)
-    print("4. Payload to sign:", repr(payload_to_sign))
-    print("5. Expected Signature:", expected_signature)
-    print("--------------------------\n")
+    if os.getenv("DEBUG_SEPAY") == "true":
+        print("\n--- SEPAY HMAC DEBUG ---")
+        print("1. Raw body:", repr(raw_body))
+        print("2. Timestamp:", timestamp_str)
+        print("3. Signature Header:", signature_header)
+        print("4. Payload to sign:", repr(payload_to_sign))
+        print("5. Expected Signature:", expected_signature)
+        print("--------------------------\n")
     
     return hmac.compare_digest(expected_signature, signature_header)
 
 def verify_sepay_ip(client_ip: str) -> bool:
     allowed_ips = get_sepay_allowed_ips()
-    print(f"=== IP CHECK: received='{client_ip}', allowed={allowed_ips} ===")
+    if os.getenv("DEBUG_SEPAY") == "true":
+        print(f"=== IP CHECK: received='{client_ip}', allowed={allowed_ips} ===")
     # If no IPs configured, we might bypass IP check in dev, but for prod should enforce
     if not allowed_ips:
         return True
