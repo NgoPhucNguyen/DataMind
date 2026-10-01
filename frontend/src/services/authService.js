@@ -31,3 +31,8 @@ export const getUser = () => {
         return null;
     }
 };
+
+export const getMySubscription = async () => {
+    const response = await axiosClient.get("/auth/me/subscription");
+    return response.data;
+};

@@ -40,6 +40,11 @@ def compute_statistics(user_id: int, session_id: str, warnings: list = None) -> 
 
     report_header = cleaner_service.build_report_header(warnings, len(df))
     
+    # Get cleaning provenance
+    session_meta = cache.get_session_metadata(user_id, session_id) or {}
+    file_hash = session_meta.get("file_hash")
+    cleaning_log = cache.get_cleaning_log(user_id, file_hash) if file_hash else []
+    
     summary = {
         "shape": [len(df), len(df.columns)],
         "computed_at": pd.Timestamp.utcnow().isoformat(),
@@ -95,6 +100,12 @@ def compute_statistics(user_id: int, session_id: str, warnings: list = None) -> 
             "missing_pct": missing_pct,
             "unique_count": int(unique_count),
         }
+        
+        # Reference provenance from cleaning_log
+        if cleaning_log:
+            prov = [log for log in cleaning_log if log.get("column") in (str(col), "all")]
+            if prov:
+                col_summary["cleaning_provenance"] = prov
 
         # Check ignore conditions
         if missing_pct > 60:

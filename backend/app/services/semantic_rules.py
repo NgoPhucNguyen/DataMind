@@ -69,7 +69,7 @@ def validate_cell(value: Any, semantic_type: str) -> bool:
     elif semantic_type == "DATE_TIME":
         # Sử dụng pandas để parse xem có phải datetime không
         try:
-            pd.to_datetime(str_val, errors='raise')
+            pd.to_datetime(str_val, format='mixed', errors='raise')
             return True
         except (ValueError, TypeError, OverflowError):
             return False

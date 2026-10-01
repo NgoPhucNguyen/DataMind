@@ -1,4 +1,6 @@
+// @refresh reset
 import { createContext, useContext, useState } from "react";
+
 
 const FileSessionContext = createContext(null);
 
@@ -15,6 +17,7 @@ const defaultSession = {
   capabilities: null,
   warnings: [],
   userContext: null,
+  uploadedAt: null,  // epoch ms — used for the 1-hour file expiry countdown
 };
 
 export function FileSessionProvider({ children }) {

@@ -1,0 +1,28 @@
+- Khi phân tích lại ở phần Correlation ( Tương Quan ) khi chọn 1 cột khác, có vẻ nó không rõ ràng cho cái cột đó
+
+
+
+Purpose of DataMind :
+
+That's actually the most important thing to nail down before any more architecture debate — you can't design provenance, reports, or cleaning loops without knowing what the user walks away with. Right now DataMind has a *pipeline* (upload → clean → visualize → report) but it sounds like it might not yet have a clear **value proposition** — the sentence that finishes "a user comes to DataMind because they need ___."
+
+Let's work backward from who's using it, since that determines everything else.
+
+A few different possible "main purposes" — these lead to very different products:
+
+1. **"I have messy data and no time/skill to clean and explore it myself"** → target user is non-technical (marketer, small business owner, student). DataMind's value = doing the tedious analyst work for them. Report should be presentation-ready, minimal jargon, focused on insights not process.
+
+2. **"I want to quickly explore a dataset before deciding how to analyze it properly elsewhere"** → target user is more technical (analyst, researcher) using DataMind as a fast first-pass tool. Value = speed and breadth of automated EDA (exploratory data analysis). Report should show the journey/process, since they'll take these findings and dig deeper manually.
+
+3. **"I want to understand data quality issues I didn't know I had"** → value = trust/auditing. The product's whole point is surfacing what's wrong with your data before you make decisions on it. In this case, the Cleaner step and provenance become the *main* product, not a side step — Visualize/Report are secondary.
+
+4. **"I want an automated report I can hand to someone else (boss, client, teacher)"** → value = deliverable generation. Everything upstream (cleaning, visualizing) is just plumbing to produce a polished, defensible document.
+
+These aren't mutually exclusive, but they have very different centers of gravity, and right now DataMind's architecture (4 equal-weight pipeline steps) suggests it hasn't picked one — which might be exactly what your teacher is sensing when they say it "lacks explanation for users."
+
+A few questions to help narrow it down:
+- When you originally pitched/imagined this project, who did you picture opening it — a student with a messy CSV, a small business owner, a data analyst, someone else?
+- If a user only had time to see **one** thing before closing the tab, what would make them think "okay, this was worth it"? A clean dataset? A chart? An insight? A report they can send to someone?
+- Is this project meant to *replace* a step a user currently does manually (e.g. replaces Excel cleanup), or *assist* a step they don't know how to do at all (e.g. they've never done statistical analysis)?
+
+

@@ -172,6 +172,22 @@ def set_user_context(user_id: int,session_id: str, description: str, purpose: st
     except Exception as e:
         logger.warning("Redis SET user context lỗi: %s", e)
 
+def get_user_context(user_id: int, session_id: str) -> dict | None:
+    """
+    Lấy context của user từ Redis.
+    """
+    client = _get_client()
+    if client is None:
+        return None
+    try:
+        raw = client.get(f"user_context:{user_id, session_id}")
+        if raw is None:
+            return None
+        return json.loads(raw) if isinstance(raw, str) else json.loads(raw.decode())
+    except Exception as e:
+        logger.warning("Redis GET user context lỗi: %s", e)
+        return None
+
 def set_session_metadata(user_id: int,session_id: str, metadata: dict[str, Any], ttl: int = _FILE_BYTES_TTL) -> None:
     """
     Lưu metadata của session vào Redis (ví dụ: schema, loại cột lấy từ Profiler).
@@ -247,3 +263,125 @@ def set_ai_explain_edited(user_id: int, file_hash: str, chart_type: str, col_x: 
         client.set(key, content, ex=_AI_EXPLAIN_TTL)
     except Exception as e:
         logger.warning("Redis SET ai_explain_edited lỗi: %s", e)
+
+def set_dataset_context_md(user_id: int, file_hash: str, md_text: str, ttl: int = 86400) -> None:
+    """Cache Part 1 markdown, cùng vòng đời với profile."""
+    client = _get_client()
+    if client is None: return
+    try:
+        client.set(f"llm_ctx:{user_id}:{file_hash}", md_text, ex=ttl)
+    except Exception as e:
+        logger.warning("Redis SET dataset context md lỗi: %s", e)
+
+def get_dataset_context_md(user_id: int, file_hash: str) -> str | None:
+    """Lấy Part 1 markdown từ cache."""
+    client = _get_client()
+    if client is None: return None
+    try:
+        return client.get(f"llm_ctx:{user_id}:{file_hash}")
+    except Exception as e:
+        logger.warning("Redis GET dataset context md lỗi: %s", e)
+        return None
+
+def set_cleaning_log(user_id: int, file_hash: str, log_data: list, ttl: int = 86400) -> None:
+    """Lưu cleaning_log vào Redis."""
+    client = _get_client()
+    if client is None: return
+    try:
+        client.set(f"cleaning_log:{user_id}:{file_hash}", json.dumps(log_data), ex=ttl)
+    except Exception as e:
+        logger.warning("Redis SET cleaning_log lỗi: %s", e)
+
+def get_cleaning_log(user_id: int, file_hash: str) -> list | None:
+    """Lấy cleaning_log từ Redis."""
+    client = _get_client()
+    if client is None: return None
+    try:
+        raw = client.get(f"cleaning_log:{user_id}:{file_hash}")
+        if not raw: return None
+        return json.loads(raw) if isinstance(raw, str) else json.loads(raw.decode())
+    except Exception as e:
+        logger.warning("Redis GET cleaning_log lỗi: %s", e)
+        return None
+
+def set_report_section(user_id: int, file_hash: str, section_name: str, data: dict, ttl: int = 86400) -> None:
+    """Cập nhật hoặc thêm một section vào report_sections."""
+    client = _get_client()
+    if client is None: return
+    try:
+        key = f"report_sections:{user_id}:{file_hash}"
+        raw = client.get(key)
+        sections = json.loads(raw) if raw and isinstance(raw, str) else json.loads(raw.decode()) if raw else {}
+        sections[section_name] = data
+        client.set(key, json.dumps(sections), ex=ttl)
+    except Exception as e:
+        logger.warning("Redis SET report_section lỗi: %s", e)
+
+def get_all_report_sections(user_id: int, file_hash: str) -> dict | None:
+    """Lấy toàn bộ các report sections."""
+    client = _get_client()
+    if client is None: return None
+    try:
+        raw = client.get(f"report_sections:{user_id}:{file_hash}")
+        if not raw: return None
+        return json.loads(raw) if isinstance(raw, str) else json.loads(raw.decode())
+    except Exception as e:
+        logger.warning("Redis GET report_sections lỗi: %s", e)
+        return None
+
+def invalidate_downstream_state(user_id: int, file_hash: str) -> None:
+    """Xóa hoặc làm cũ các state phụ thuộc vào dataset khi user quay lại bước làm sạch."""
+    client = _get_client()
+    if client is None: return
+    try:
+        # Xóa phần visualize trong report_sections vì biểu đồ cũ không còn đúng với dữ liệu mới
+        key = f"report_sections:{user_id}:{file_hash}"
+        raw = client.get(key)
+        if raw:
+            sections = json.loads(raw) if isinstance(raw, str) else json.loads(raw.decode())
+            if "visualize" in sections:
+                sections.pop("visualize", None)
+                client.set(key, json.dumps(sections), ex=86400)
+        
+        logger.info(f"Invalidated downstream states for user={user_id}, file_hash={file_hash}")
+    except Exception as e:
+        logger.warning("Redis invalidate downstream state lỗi: %s", e)
+
+def check_active_session(user_id: int, file_hash: str) -> bool:
+    """
+    Check if user is processing a different file.
+    Returns True if allowed (same file or no active session), False if blocked.
+    Fails safe (returns True) if Redis errors out.
+    """
+    client = _get_client()
+    if client is None: return True
+    try:
+        active = client.get(f"active_session:{user_id}")
+        if active and active != file_hash:
+            return False
+        return True
+    except Exception as e:
+        logger.error(f"Redis GET active_session error: {e}")
+        return True
+
+def set_active_session(user_id: int, file_hash: str) -> None:
+    """
+    Sets or refreshes the active session TTL for 10 minutes (600s).
+    """
+    client = _get_client()
+    if client is None: return
+    try:
+        client.set(f"active_session:{user_id}", file_hash, ex=600)
+    except Exception as e:
+        logger.error(f"Redis SET active_session error: {e}")
+
+def clear_active_session(user_id: int) -> None:
+    """
+    Clears the active session lock explicitly.
+    """
+    client = _get_client()
+    if client is None: return
+    try:
+        client.delete(f"active_session:{user_id}")
+    except Exception as e:
+        logger.error(f"Redis DELETE active_session error: {e}")

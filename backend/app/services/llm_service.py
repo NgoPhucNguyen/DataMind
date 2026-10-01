@@ -69,6 +69,7 @@ QUAN TRỌNG:
 - Bạn phải ưu tiên phân loại dựa trên GIÁ TRỊ MẪU THẬT SỰ thay vì chỉ dựa vào tên cột.
 - Nếu cột có giá trị dạng "chữ + số" hoặc "tiền tố + số" (ví dụ "SEQ-101", "ORD-2024-001"), PHẢI phân loại là CODE_ID, KHÔNG phải SEQUENCE_NUMBER.
 - SEQUENCE_NUMBER chỉ được dùng cho cột có giá trị là số nguyên thuần túy (không có chữ hay ký tự đặc biệt).
+- BẮT BUỘC: Bạn phải trả lời phần `reasoning` và `domain` hoàn toàn bằng TIẾNG VIỆT, kể cả khi dữ liệu hoặc tên cột đang dùng tiếng Anh hoặc ngôn ngữ khác.
 
 Trả về JSON theo đúng format sau, KHÔNG có markdown, KHÔNG có giải thích thêm:
 {{
@@ -163,13 +164,19 @@ async def generate_report_intro(metadata: dict, charts: list) -> str:
         if user_ctx and (user_ctx.get('description') or user_ctx.get('purpose')):
             user_ctx_str = f"- Ngữ cảnh từ người dùng: Mô tả: {user_ctx.get('description', '')}, Mục đích: {user_ctx.get('purpose', '')}\n"
 
+        cleaner_ctx_str = ""
+        cleaner_summary = metadata.get("cleaner_summary")
+        if cleaner_summary and "stats" in cleaner_summary:
+            stats = cleaner_summary["stats"]
+            cleaner_ctx_str = f"- Quá trình làm sạch: đã xóa {stats.get('duplicate_rows_removed', 0)} dòng trùng, xử lý {sum(stats.get('missing_filled', {}).values())} ô trống.\n"
+
         prompt = f"""Bạn là chuyên gia phân tích dữ liệu. Dựa vào metadata của bộ dữ liệu sau:
 - Tên file: {metadata.get('file_name', 'Unknown')}
 - Số dòng: {metadata.get('row_count', 0)}, Số cột: {metadata.get('col_count', 0)}
 - Một số cột chính: {schema_summary}
 - Các biểu đồ đáng chú ý được chọn: {chart_summary}
-{user_ctx_str}
-Hãy viết CHÍNH XÁC 4-5 câu súc tích để giới thiệu bộ dữ liệu này và nêu bật 1-2 điểm đáng chú ý nhất dựa trên các biểu đồ đã chọn. Đặc biệt cần liên kết với 'Ngữ cảnh từ người dùng' (nếu có).
+{user_ctx_str}{cleaner_ctx_str}
+Hãy viết CHÍNH XÁC 4-5 câu súc tích để giới thiệu bộ dữ liệu này và nêu bật 1-2 điểm đáng chú ý nhất dựa trên các biểu đồ đã chọn. Đặc biệt cần liên kết với 'Ngữ cảnh từ người dùng' (nếu có) và tóm tắt ngắn về 'Quá trình làm sạch'.
 KHÔNG giải thích dông dài, KHÔNG dùng markdown, KHÔNG liệt kê bullet points, chỉ viết một đoạn văn duy nhất."""
 
         response = await _call_gemini_with_retry(client, prompt)

@@ -26,6 +26,7 @@ export default function ManualCleanWorkspace({ columns, fileHash, onConfirm, onB
   const [errorCells, setErrorCells] = useState(initialErrorCells || []); // Array of ErrorCell
   const [isPreviewing, setIsPreviewing] = useState(false);
   const [pendingCellEdits, setPendingCellEdits] = useState([]); // Array of {row_id, column, new_value}
+  const pendingEditsRef = useRef([]);
   const [isFullEditMode, setIsFullEditMode] = useState(false);
   
   const debounceTimer = useRef(null);
@@ -76,6 +77,7 @@ export default function ManualCleanWorkspace({ columns, fileHash, onConfirm, onB
     if (success) {
       setActions(newActions);
       setPendingCellEdits([]); // Clear pending state only on success
+      pendingEditsRef.current = [];
       showToast("Đã lưu các thay đổi.", "success");
       return true;
     } else {
@@ -93,6 +95,7 @@ export default function ManualCleanWorkspace({ columns, fileHash, onConfirm, onB
       } else {
         newEdits.push(edit);
       }
+      pendingEditsRef.current = newEdits;
       return newEdits;
     });
   };
@@ -116,6 +119,7 @@ export default function ManualCleanWorkspace({ columns, fileHash, onConfirm, onB
       const confirmed = window.confirm("Có thay đổi chưa lưu. Bạn có muốn bỏ qua chúng để thực hiện thao tác mới không?");
       if (!confirmed) return;
       setPendingCellEdits([]); // Bỏ qua thay đổi cũ
+      pendingEditsRef.current = [];
     }
     
     const newActions = [...actions];
@@ -168,12 +172,20 @@ export default function ManualCleanWorkspace({ columns, fileHash, onConfirm, onB
 
           <button
             onClick={() => {
-              if (pendingCellEdits.length > 0) {
-                 if (!window.confirm("Có thay đổi chưa lưu. Bạn có muốn bỏ qua chúng để chốt file không?")) {
-                    return;
-                 }
-              }
-              onConfirm(actions);
+              // Dùng setTimeout để đảm bảo sự kiện onBlur (nếu user đang gõ) đã cập nhật xong pendingEditsRef
+              setTimeout(() => {
+                const currentPending = pendingEditsRef.current;
+                if (currentPending.length > 0) {
+                   const newAction = {
+                     action_type: "BATCH_EDIT_CELLS",
+                     column: "all",
+                     params: { edits: [...currentPending] }
+                   };
+                   onConfirm([...actions, newAction]);
+                } else {
+                   onConfirm(actions);
+                }
+              }, 50);
             }}
             className={`${BTN.primary} flex items-center gap-2`}
           >

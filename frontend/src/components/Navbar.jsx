@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
-import { Wallet, Settings, LogOut, LayoutDashboard, Sparkles, ChevronDown, Menu, X } from "lucide-react";
+import { Wallet, Settings, LogOut, LayoutDashboard, Sparkles, ChevronDown, Menu, X, Crown } from "lucide-react";
+import UpgradeModal from "./UpgradeModal";
 const NAV_LINKS = [
     { label: "Trang chủ", path: "/" },
     { label: "Giá cả", path: "/pricing" },
@@ -11,9 +12,10 @@ const NAV_LINKS = [
 export default function Navbar() {
     const navigate = useNavigate();
     const location = useLocation();
-    const { user, logout } = useAuth();
+    const { user, logout, subscription, reloadSubscription } = useAuth();
     const [showMenu, setShowMenu] = useState(false);
     const [showMobileMenu, setShowMobileMenu] = useState(false);
+    const [showUpgradeModal, setShowUpgradeModal] = useState(false);
     const menuRef = useRef(null);
 
     // Close menu when clicking outside
@@ -75,7 +77,7 @@ export default function Navbar() {
                 {user ? (
                     <div className="flex items-center gap-4 relative" ref={menuRef}>
                         <button
-                            onClick={() => navigate("/profiler")}
+                            onClick={() => navigate("/dashboard/profiler")}
                             className="text-sm bg-ink hover:bg-ink/80 text-white px-4 py-2 rounded-lg font-semibold transition-all hidden sm:block"
                         >
                             Vào Dashboard
@@ -89,6 +91,11 @@ export default function Navbar() {
                                 {user.full_name?.charAt(0) || user.email?.charAt(0) || "U"}
                             </div>
                             <span className="text-sm font-medium hidden lg:block text-ink max-w-[100px] truncate">{user.full_name || "User"}</span>
+                            {subscription?.plan === "pro" && (
+                                <span className="hidden sm:flex items-center gap-1 bg-amber-100 text-amber-700 text-xs px-2 py-0.5 rounded font-bold uppercase tracking-wider">
+                                    <Crown className="w-3 h-3" /> Pro
+                                </span>
+                            )}
                             <ChevronDown className={`w-4 h-4 text-muted transition-transform shrink-0 ${showMenu ? 'rotate-180' : ''}`} />
                         </div>
 
@@ -102,23 +109,25 @@ export default function Navbar() {
                                 
                                 <div className="p-1">
                                     <button
-                                        onClick={() => { setShowMenu(false); navigate("/profiler"); }}
+                                        onClick={() => { setShowMenu(false); navigate("/dashboard/profiler"); }}
                                         className="w-full text-left px-3 py-2 text-sm text-ink hover:bg-sage/40 transition-colors flex items-center gap-2 font-medium rounded-md"
                                     >
                                         <LayoutDashboard className="w-4 h-4 text-muted" /> Bảng điều khiển
                                     </button>
                                     <button
-                                        onClick={() => { setShowMenu(false); navigate("/wallet"); }}
+                                        onClick={() => { setShowMenu(false); navigate("/dashboard/subscription"); }}
                                         className="w-full text-left px-3 py-2 text-sm text-ink hover:bg-sage/40 transition-colors flex items-center gap-2 font-medium rounded-md"
                                     >
-                                        <Wallet className="w-4 h-4 text-muted" /> Ví của tôi
+                                        <Wallet className="w-4 h-4 text-muted" /> Tài khoản
                                     </button>
-                                    <button
-                                        onClick={() => { setShowMenu(false); navigate("/pricing"); }}
-                                        className="w-full text-left px-3 py-2 text-sm text-ink hover:bg-sage/40 transition-colors flex items-center gap-2 font-medium rounded-md"
-                                    >
-                                        <Sparkles className="w-4 h-4 text-forest" /> Nâng cấp tài khoản
-                                    </button>
+                                    {subscription?.plan !== "pro" && (
+                                        <button
+                                            onClick={() => { setShowMenu(false); setShowUpgradeModal(true); }}
+                                            className="w-full text-left px-3 py-2 text-sm text-ink hover:bg-sage/40 transition-colors flex items-center gap-2 font-medium rounded-md"
+                                        >
+                                            <Sparkles className="w-4 h-4 text-forest" /> Nâng cấp tài khoản
+                                        </button>
+                                    )}
                                 </div>
                                 
                                 <div className="h-px bg-border my-1"></div>
@@ -179,8 +188,24 @@ export default function Navbar() {
                             {link.label}
                         </button>
                     ))}
+                    {user && subscription?.plan !== "pro" && (
+                        <button
+                            onClick={() => { setShowMobileMenu(false); setShowUpgradeModal(true); }}
+                            className="px-4 py-3 rounded-lg text-sm font-bold text-left transition-colors text-forest hover:bg-sage/40 flex items-center gap-2"
+                        >
+                            <Sparkles className="w-4 h-4" /> Nâng cấp Pro
+                        </button>
+                    )}
                 </nav>
             )}
+
+            <UpgradeModal 
+                isOpen={showUpgradeModal} 
+                onClose={() => setShowUpgradeModal(false)} 
+                onSuccess={() => {
+                    reloadSubscription();
+                }}
+            />
         </header>
     );
 }

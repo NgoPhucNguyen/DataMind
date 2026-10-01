@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
-import { FileSearch, Wand2, PieChart, Workflow, ChevronLeft, ChevronRight, LogOut, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { FileSearch, Wand2, PieChart, Workflow, ChevronLeft, ChevronRight, LogOut, PanelLeftClose, PanelLeftOpen, FileText, Crown, Sparkles } from "lucide-react";
+import UpgradeModal from "./UpgradeModal";
 
 export default function Sidebar() {
   const [sidebarState, setSidebarState] = useState(() => {
@@ -10,7 +11,8 @@ export default function Sidebar() {
   
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, logout } = useAuth();
+  const { user, logout, subscription, reloadSubscription } = useAuth();
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
 
   const updateState = (newState) => {
     setSidebarState(newState);
@@ -18,10 +20,11 @@ export default function Sidebar() {
   };
 
   const menuItems = [
-    { path: "/profiler", label: "Phân tích", icon: <FileSearch className="w-5 h-5" /> },
-    { path: "/cleaner", label: "Làm sạch", icon: <Wand2 className="w-5 h-5" /> },
-    { path: "/visualize", label: "Trực quan hóa", icon: <PieChart className="w-5 h-5" /> },
-    { path: "/pipeline", label: "Tự động", icon: <Workflow className="w-5 h-5" /> },
+    { path: "/dashboard/profiler", label: "Phân tích", icon: <FileSearch className="w-5 h-5" /> },
+    { path: "/dashboard/cleaner", label: "Làm sạch", icon: <Wand2 className="w-5 h-5" /> },
+    { path: "/dashboard/visualize", label: "Trực quan hóa", icon: <PieChart className="w-5 h-5" /> },
+    { path: "/dashboard/report", label: "Báo cáo", icon: <FileText className="w-5 h-5" /> },
+    { path: "/dashboard/pipeline", label: "Tự động", icon: <Workflow className="w-5 h-5" /> },
   ];
 
   let widthClass = "md:w-64";
@@ -103,7 +106,14 @@ export default function Sidebar() {
                     {user.full_name?.charAt(0) || user.email?.charAt(0) || "U"}
                   </div>
                   <div className="flex-1 overflow-hidden">
-                    <p className="text-sm font-semibold text-ink truncate">{user.full_name || "User"}</p>
+                    <div className="flex items-center gap-1">
+                      <p className="text-sm font-semibold text-ink truncate">{user.full_name || "User"}</p>
+                      {subscription?.plan === "pro" && (
+                        <span className="flex items-center gap-1 bg-amber-100 text-amber-700 text-[10px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider">
+                          <Crown className="w-3 h-3" /> Pro
+                        </span>
+                      )}
+                    </div>
                     <p className="text-xs text-muted truncate">{user.email}</p>
                   </div>
                   <button
@@ -117,6 +127,14 @@ export default function Sidebar() {
                     <LogOut className="w-4 h-4" />
                   </button>
                 </div>
+                {subscription?.plan !== "pro" && (
+                  <button
+                    onClick={() => setShowUpgradeModal(true)}
+                    className="flex items-center justify-center gap-2 py-2 w-full text-xs font-semibold text-forest hover:bg-sage/40 rounded-lg transition-colors border border-transparent"
+                  >
+                    <Sparkles className="w-4 h-4" /> Nâng cấp Pro
+                  </button>
+                )}
                 <button
                   onClick={() => updateState("hidden")}
                   className="flex items-center justify-center gap-2 py-2 w-full text-xs text-muted hover:text-ink hover:bg-sage/40 rounded-lg transition-colors border border-transparent"
@@ -169,15 +187,23 @@ export default function Sidebar() {
       {sidebarState === "hidden" && (
         <button
           onClick={() => updateState("canva-collapsed")}
-          className="fixed left-0 top-4 z-50 p-2 bg-white border border-l-0 border-border rounded-r-xl shadow-sm text-muted hover:text-ink hover:bg-sage/40 transition-all max-md:hidden flex items-center gap-1 group"
+          className="fixed left-0 top-4 z-50 p-2 bg-white border border-l-0 border-border rounded-r-xl shadow-sm text-muted hover:text-ink hover:bg-sage/40 transition-all max-md:hidden flex items-center group"
           title="Hiện thanh bên"
         >
-          <PanelLeftOpen className="w-5 h-5" />
-          <span className="text-[10px] font-medium opacity-0 max-w-0 group-hover:opacity-100 group-hover:max-w-[100px] overflow-hidden transition-all duration-300">
+          <PanelLeftOpen className="w-5 h-5 shrink-0" />
+          <span className="text-[10px] font-medium opacity-0 max-w-0 group-hover:opacity-100 group-hover:max-w-[100px] group-hover:ml-1 overflow-hidden transition-all duration-300 whitespace-nowrap">
             Hiện thanh bên
           </span>
         </button>
       )}
+
+      <UpgradeModal 
+          isOpen={showUpgradeModal} 
+          onClose={() => setShowUpgradeModal(false)} 
+          onSuccess={() => {
+              reloadSubscription();
+          }}
+      />
     </>
   );
 }

@@ -15,6 +15,7 @@ from app.routers import packages as packages_router
 from app.routers import files as files_router
 from app.routers import visualize as visualize_router
 from app.routers import report as report_router
+from app.routers import payments as payments_router
 
 
 @asynccontextmanager
@@ -53,6 +54,7 @@ app.include_router(packages_router.router, prefix="/api/v1")
 app.include_router(files_router.router, prefix="/api/v1")
 app.include_router(visualize_router.router, prefix="/api/v1")
 app.include_router(report_router.router, prefix="/api/v1")
+app.include_router(payments_router.router, prefix="/api/v1")
 
 
 @app.get("/health")

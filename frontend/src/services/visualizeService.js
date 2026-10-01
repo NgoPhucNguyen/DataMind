@@ -10,7 +10,3 @@ export const saveExplanation = async (data) => {
     return response.data;
 };
 
-export const getCorrelationSuggestions = async (sessionId) => {
-    const response = await axiosClient.get(`/visualize/explain/suggestions?session_id=${sessionId}`);
-    return response.data;
-};

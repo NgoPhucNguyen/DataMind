@@ -100,26 +100,41 @@ export const CorrelationHeatmap = ({ matrix, topCorr, onCellClick, anchorPair })
             <thead>
               <tr>
                 <th className="p-2 border border-border bg-[#F9F9F8] sticky top-0 left-0 z-[60]"></th>
-                {cols.map(c => <th key={c} className="p-2 border border-border bg-[#F9F9F8] text-ink truncate max-w-[100px] sticky top-0 z-[50] shadow-[0_1px_0_#EAEAEA]" title={c}>{c}</th>)}
+                {cols.map(c => {
+                  const isColActive = anchorPair && (anchorPair.colA === c || anchorPair.colB === c);
+                  return (
+                    <th key={c} className={`p-2 border border-border text-ink truncate max-w-[100px] sticky top-0 z-[50] shadow-[0_1px_0_#EAEAEA] transition-colors ${isColActive ? "bg-[#EAF2EB] text-[#1B4324] font-bold" : "bg-[#F9F9F8]"}`} title={c}>{c}</th>
+                  );
+                })}
               </tr>
             </thead>
             <tbody>
               {cols.map(row => (
                 <tr key={row}>
-                  <th className="p-2 border border-border bg-[#F9F9F8] text-left text-ink truncate max-w-[100px] sticky left-0 z-[50] shadow-[1px_0_0_#EAEAEA]" title={row}>{row}</th>
+                  {(() => {
+                    const isRowActive = anchorPair && (anchorPair.colA === row || anchorPair.colB === row);
+                    return (
+                      <th className={`p-2 border border-border text-left text-ink truncate max-w-[100px] sticky left-0 z-[50] shadow-[1px_0_0_#EAEAEA] transition-colors ${isRowActive ? "bg-[#EAF2EB] text-[#1B4324] font-bold" : "bg-[#F9F9F8]"}`} title={row}>{row}</th>
+                    );
+                  })()}
                   {cols.map(col => {
                     const val = matrix[row][col];
                     const diagonal = isDiagonal(row, col);
                     const anchored = isAnchored(row, col);
+                    const isCrosshair = anchorPair && (anchorPair.colA === row || anchorPair.colB === row || anchorPair.colA === col || anchorPair.colB === col);
 
                     return (
                       <td
                         key={col}
-                        className={`p-2 border border-border transition-all duration-150 ${getColor(val)} ${
+                        className={`p-2 border border-border transition-all duration-150 relative ${getColor(val)} ${
                           diagonal
                             ? "opacity-50 cursor-default"
-                            : `cursor-pointer hover:ring-2 hover:ring-[#1B4324]/50 hover:z-30 relative ${
-                                anchored ? "ring-2 ring-[#1B4324] bg-[#1B4324]/10 z-30 font-bold" : ""
+                            : `cursor-pointer hover:ring-2 hover:ring-[#1B4324]/50 hover:z-40 ${
+                                anchored 
+                                  ? "outline outline-2 outline-[#1B4324] outline-offset-[-2px] z-40 font-bold shadow-lg" 
+                                  : isCrosshair 
+                                    ? "after:absolute after:inset-0 after:bg-[#1B4324]/5 z-10"
+                                    : ""
                               }`
                         }`}
                         onClick={diagonal ? undefined : () => onCellClick?.(row, col, val)}

@@ -1,94 +1,41 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { getPackages, purchasePackage, getWallet, getMySubscription } from "../services/paymentService";
-import { CheckCircle } from "lucide-react";
-
-const DURATION_LABEL = (days) => {
-    if (days >= 365) return `${Math.round(days / 365)} năm`;
-    if (days >= 30) return `${Math.round(days / 30)} tháng`;
-    return `${days} ngày`;
-};
-
-const formatCredits = (n) =>
-    Number(n).toLocaleString("vi-VN");
+import { useAuth } from "../contexts/AuthContext";
+import { CheckCircle, Sparkles } from "lucide-react";
+import UpgradeModal from "../components/UpgradeModal";
 
 export default function Pricing() {
     const navigate = useNavigate();
-    const [packages, setPackages] = useState([]);
-    const [wallet, setWallet] = useState(null);
-    const [subscription, setSubscription] = useState(null);
-    const [loading, setLoading] = useState(true);
-    const [purchasing, setPurchasing] = useState(null);
-    const [toast, setToast] = useState(null);
+    const { user, subscription, reloadSubscription } = useAuth();
+    const [showUpgradeModal, setShowUpgradeModal] = useState(false);
 
-    const token = localStorage.getItem("token");
+    const isPro = subscription?.plan === "pro";
 
-    useEffect(() => {
-        fetchAll();
-    }, []);
+    const featuresFree = [
+        "Phân tích dữ liệu cơ bản",
+        "2 lượt sử dụng AI Insights mỗi tháng",
+        "Trực quan hóa dữ liệu tiêu chuẩn",
+        "Hỗ trợ cộng đồng"
+    ];
 
-    const fetchAll = async () => {
-        setLoading(true);
-        try {
-            const pkgs = await getPackages();
-            setPackages(pkgs);
+    const featuresPro = [
+        "Mọi thứ trong gói Free",
+        "50 lượt sử dụng AI Insights",
+        "Làm sạch dữ liệu tự động với AI",
+        "Tạo báo cáo chi tiết",
+        "Hỗ trợ ưu tiên"
+    ];
 
-            if (token) {
-                const [w, sub] = await Promise.all([
-                    getWallet(),
-                    getMySubscription(),
-                ]);
-                setWallet(w);
-                setSubscription(Array.isArray(sub) ? sub : null);
-            }
-        } catch {
-            showToast("Không thể kết nối để lấy thông tin. Vui lòng thử lại sau.", "error");
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const showToast = (msg, type = "success") => {
-        setToast({ msg, type });
-        setTimeout(() => setToast(null), 3500);
-    };
-
-    const handlePurchase = async (pkg) => {
-        if (!token) {
+    const handleUpgradeClick = () => {
+        if (!user) {
             navigate("/login");
             return;
         }
-        if (!wallet) return;
-        if (wallet.balance < pkg.price) {
-            showToast("Số dư trong ví không đủ. Vui lòng nạp thêm để mua gói dịch vụ này.", "error");
-            return;
-        }
-        setPurchasing(pkg.id);
-        try {
-            const result = await purchasePackage(pkg.id);
-            showToast(`Tuyệt vời! Bạn đã mua gói "${pkg.name}" thành công. Số dư còn: ${formatCredits(result.remaining_credits)} credits`);
-            await fetchAll();
-        } catch (err) {
-            showToast(err.response?.data?.detail || "Giao dịch không thành công. Vui lòng thử lại sau.", "error");
-        } finally {
-            setPurchasing(null);
-        }
+        setShowUpgradeModal(true);
     };
-
-    const activePackageIds = subscription?.map((s) => s.package_id) ?? [];
 
     return (
         <div className="min-h-screen bg-canvas text-ink">
-            {/* Toast */}
-            {toast && (
-                <div
-                    className={`fixed top-5 left-1/2 -translate-x-1/2 z-50 px-6 py-3 rounded-xl shadow-2xl text-sm font-medium transition-all
-                    ${toast.type === "error" ? "bg-red-50 text-red-600 border border-red-200" : "bg-emerald-50 text-emerald-700 border border-emerald-200"}`}
-                >
-                    {toast.msg}
-                </div>
-            )}
-
             <main className="max-w-5xl mx-auto px-6 py-16">
                 {/* Hero */}
                 <div className="text-center mb-14">
@@ -99,133 +46,84 @@ export default function Pricing() {
                         Chọn gói phù hợp với bạn
                     </h1>
                     <p className="text-muted text-lg max-w-md mx-auto">
-                        Thanh toán bằng credits trong ví. Gói cùng loại sẽ được gia hạn tự động.
+                        Mở khóa toàn bộ tính năng phân tích dữ liệu thông minh và AI với gói Pro.
                     </p>
                 </div>
 
-                {/* Active subscription banner */}
-                {token && subscription && subscription.length > 0 && (
-                    <div className="mb-10 border border-forest/20 bg-sage/40 rounded-2xl px-6 py-4">
-                        <p className="text-sm text-forest font-semibold mb-2 flex items-center"><CheckCircle className="w-4 h-4 mr-1.5" /> Đăng ký đang hoạt động</p>
-                        <div className="flex flex-wrap gap-4">
-                            {subscription.map((sub) => {
-                                const pkg = packages.find(p => p.id === sub.package_id);
-                                return (
-                                    <div key={sub.package_id} className="text-xs text-muted font-medium">
-                                        <span className="text-ink font-bold">{pkg?.name ?? `Gói #${sub.package_id}`}</span>
-                                        {" · "}hết hạn{" "}
-                                        <span className="text-forest">
-                                            {new Date(sub.end_date).toLocaleDateString("vi-VN")}
-                                        </span>
-                                    </div>
-                                );
-                            })}
+                {/* Pricing Cards */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl mx-auto">
+                    {/* Free Plan */}
+                    <div className="rounded-2xl border border-border bg-white p-8 flex flex-col hover:border-forest/30 transition-all">
+                        <div className="mb-6">
+                            <h2 className="text-2xl font-serif font-bold mb-1 text-ink">Free</h2>
+                            <p className="text-muted text-sm">Trải nghiệm cơ bản</p>
                         </div>
-                    </div>
-                )}
-
-                {/* Package cards */}
-                {loading ? (
-                    <div className="flex justify-center items-center py-32">
-                        <div className="w-8 h-8 rounded-full border-2 border-forest border-t-transparent animate-spin" />
-                    </div>
-                ) : packages.length === 0 ? (
-                    <div className="text-center text-muted py-32">Không có gói nào đang hoạt động.</div>
-                ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                        {packages.map((pkg, i) => {
-                            const isActive = activePackageIds.includes(pkg.id);
-                            const canAfford = wallet && wallet.balance >= pkg.price;
-                            const isBuying = purchasing === pkg.id;
-                            const isPopular = i === 1;
-
-                            return (
-                                <div
-                                    key={pkg.id}
-                                    className={`relative rounded-2xl border p-8 flex flex-col transition-all duration-200
-                                    ${isPopular
-                                        ? "border-forest bg-white shadow-xl shadow-forest/5 scale-[1.02]"
-                                        : "border-border bg-white hover:border-forest/40 hover:shadow-lg"
-                                    }`}
-                                >
-                                    {isPopular && (
-                                        <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                                            <span className="bg-forest text-white text-[10px] font-bold uppercase tracking-widest px-4 py-1.5 rounded-full shadow-sm">
-                                                Phổ biến nhất
-                                            </span>
-                                        </div>
-                                    )}
-
-                                    {isActive && (
-                                        <div className="absolute top-4 right-4">
-                                            <span className="bg-sage text-forest text-[10px] font-bold uppercase tracking-wider px-3 py-1 rounded-full border border-forest/20">
-                                                Đang dùng
-                                            </span>
-                                        </div>
-                                    )}
-
-                                    <div className="mb-6">
-                                        <h2 className="text-xl font-serif font-bold mb-1 text-ink">{pkg.name}</h2>
-                                        <p className="text-muted text-sm">Thời hạn {DURATION_LABEL(pkg.duration_days)}</p>
-                                    </div>
-
-                                    <div className="mb-8">
-                                        <span className="text-4xl font-bold font-mono text-ink tracking-tight">
-                                            {formatCredits(pkg.price)}
-                                        </span>
-                                        <span className="text-muted text-sm ml-2 font-medium">credits</span>
-                                    </div>
-
-                                    <div className="mt-auto">
-                                        {token && !canAfford && !isActive && (
-                                            <p className="text-xs text-red-500 mb-3 text-center font-medium">
-                                                Số dư không đủ
-                                            </p>
-                                        )}
-                                        <button
-                                            onClick={() => handlePurchase(pkg)}
-                                            disabled={isBuying || (token && !canAfford && !isActive)}
-                                            className={`w-full py-3.5 rounded-xl text-sm font-bold transition-all shadow-sm
-                                            ${isPopular
-                                                ? "bg-ink hover:bg-ink/80 text-white disabled:opacity-40"
-                                                : "bg-sage hover:bg-forest text-forest hover:text-white disabled:opacity-40"
-                                            } disabled:cursor-not-allowed`}
-                                        >
-                                            {isBuying ? (
-                                                <span className="flex items-center justify-center gap-2">
-                                                    <span className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                                                    Đang xử lý…
-                                                </span>
-                                            ) : !token ? (
-                                                "Đăng nhập để mua"
-                                            ) : isActive ? (
-                                                "Gia hạn thêm"
-                                            ) : (
-                                                "Mua ngay"
-                                            )}
-                                        </button>
-                                    </div>
-                                </div>
-                            );
-                        })}
-                    </div>
-                )}
-
-                {/* Top-up hint */}
-                {token && (
-                    <div className="mt-16 text-center text-muted text-sm bg-white border border-border py-4 px-6 rounded-2xl max-w-sm mx-auto shadow-sm">
-                        Số dư ví của bạn:{" "}
-                        <span className="text-ink font-mono font-bold text-base ml-1">
-                            {wallet ? formatCredits(wallet.balance) : "---"} credits
-                        </span>
-                        <div className="mt-3">
-                            <button onClick={() => navigate("/wallet")} className="text-forest font-semibold hover:text-ink transition-colors underline-offset-4 hover:underline">
-                                Xem ví & lịch sử giao dịch
-                            </button>
+                        <div className="mb-8">
+                            <span className="text-4xl font-bold font-mono text-ink tracking-tight">0</span>
+                            <span className="text-muted text-sm ml-2 font-medium">VNĐ</span>
                         </div>
+                        <ul className="space-y-4 mb-8 flex-1">
+                            {featuresFree.map((feat, i) => (
+                                <li key={i} className="flex items-start gap-3 text-sm text-muted">
+                                    <CheckCircle className="w-5 h-5 text-forest shrink-0" />
+                                    <span>{feat}</span>
+                                </li>
+                            ))}
+                        </ul>
+                        <button
+                            disabled
+                            className="w-full py-3.5 rounded-xl text-sm font-bold bg-sage/50 text-ink/50 cursor-not-allowed"
+                        >
+                            Đang sử dụng
+                        </button>
                     </div>
-                )}
+
+                    {/* Pro Plan */}
+                    <div className="rounded-2xl border-2 border-forest bg-white p-8 flex flex-col shadow-xl shadow-forest/5 relative scale-100 md:scale-[1.02]">
+                        <div className="absolute -top-3 left-1/2 -translate-x-1/2">
+                            <span className="bg-forest text-white text-[10px] font-bold uppercase tracking-widest px-4 py-1.5 rounded-full shadow-sm flex items-center gap-1">
+                                <Sparkles className="w-3 h-3" /> Đề xuất
+                            </span>
+                        </div>
+                        <div className="mb-6">
+                            <h2 className="text-2xl font-serif font-bold mb-1 text-forest">Pro</h2>
+                            <p className="text-muted text-sm">Dành cho người dùng chuyên nghiệp</p>
+                        </div>
+                        <div className="mb-8 flex items-baseline">
+                            <span className="text-4xl font-bold font-mono text-ink tracking-tight">2.000</span>
+                            <span className="text-muted text-sm ml-2 font-medium">VNĐ / tháng</span>
+                        </div>
+                        <ul className="space-y-4 mb-8 flex-1">
+                            {featuresPro.map((feat, i) => (
+                                <li key={i} className="flex items-start gap-3 text-sm font-medium text-ink">
+                                    <CheckCircle className="w-5 h-5 text-forest shrink-0" />
+                                    <span>{feat}</span>
+                                </li>
+                            ))}
+                        </ul>
+                        <button
+                            onClick={handleUpgradeClick}
+                            disabled={isPro}
+                            className={`w-full py-3.5 rounded-xl text-sm font-bold transition-all shadow-sm
+                                ${isPro 
+                                    ? "bg-forest/10 text-forest cursor-not-allowed" 
+                                    : "bg-ink hover:bg-ink/90 text-white"
+                                }
+                            `}
+                        >
+                            {isPro ? "Đang sử dụng" : "Nâng cấp ngay"}
+                        </button>
+                    </div>
+                </div>
             </main>
+
+            <UpgradeModal 
+                isOpen={showUpgradeModal} 
+                onClose={() => setShowUpgradeModal(false)} 
+                onSuccess={() => {
+                    reloadSubscription();
+                }}
+            />
         </div>
     );
 }

@@ -12,7 +12,7 @@ export default function Login() {
   const { login: authLogin } = useAuth();
 
   // After login, go back to the page the user tried to visit
-  const from = location.state?.from?.pathname || "/profiler";
+  const from = location.state?.from?.pathname || "/dashboard/profiler";
 
   const [formData, setFormData] = useState({ email: "", password: "" });
   const [loading, setLoading] = useState(false);
