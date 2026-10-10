@@ -1,23 +1,26 @@
 import api from "./axiosClient";
+import { track } from "../lib/analytics";          // (1) thêm dòng import này
 
 /**
  * Upload file CSV/Excel để profile.
- * Dùng FormData vì multipart/form-data (không phải JSON).
- * Axios tự set Content-Type boundary khi nhận FormData.
- *
- * @param {File} file - File object từ input hoặc drag-drop
- * @returns {Promise} ProfileResponse từ backend
+ * ... (giữ nguyên chú thích cũ)
  */
-export const profileFile = (file, forceRefresh = false) => {
+export const profileFile = async (file, forceRefresh = false) => {   // (2) thêm chữ async
   const formData = new FormData();
   formData.append("file", file);
 
-  return api.post(`/files/profile${forceRefresh ? '?force_refresh=true' : ''}`, formData, {
+  const res = await api.post(`/files/profile${forceRefresh ? '?force_refresh=true' : ''}`, formData, {   // (3) "return" đổi thành "const res ="
     headers: {
-      // Override Content-Type để Axios tự set multipart boundary
       "Content-Type": "multipart/form-data",
     },
   });
+
+  // Bắn 1 lần duy nhất cho mỗi tài khoản, dù upload từ trang nào
+  if (res.data?.is_first_upload) {
+    const dot = file.name.lastIndexOf(".");
+    track("first_file_upload", { file_type: dot >= 0 ? file.name.slice(dot + 1).toLowerCase() : "unknown" });
+  }
+  return res;
 };
 
 /**

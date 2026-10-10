@@ -12,6 +12,7 @@ import hashlib
 import logging
 import uuid
 from datetime import datetime, timezone
+from app.models import User
 
 import pandas as pd
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
@@ -35,6 +36,16 @@ from app.services import profiler_service, llm_service, cleaner_service
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/files", tags=["Files"])
+
+def _mark_first_upload(db: Session, user_id: int) -> bool:
+    """Trả True đúng 1 lần cho mỗi user (lần upload đầu tiên)."""
+    updated = (
+        db.query(User)
+        .filter(User.id == user_id, User.first_upload_at.is_(None))
+        .update({"first_upload_at": datetime.utcnow()}, synchronize_session=False)
+    )
+    db.commit()
+    return updated == 1
 
 # Các đuôi file được chấp nhận
 ALLOWED_EXTENSIONS = {".csv", ".xlsx", ".xls"}
@@ -127,6 +138,7 @@ async def profile_file(
     file: UploadFile = File(..., description="File CSV hoặc Excel cần phân tích"),
     force_refresh: bool = False,
     current_user: dict = Depends(get_current_user_with_tier),
+    db: Session = Depends(get_db),
 ):
     # 1. Validate extension
     ext = _validate_extension(file.filename)
@@ -184,7 +196,11 @@ async def profile_file(
             # FIX: Mặc dù profile cache hit (TTL 24h), file bytes có thể đã hết hạn (TTL 1h).
             # Ta cần đảm bảo file bytes được lưu lại vào cache.
             cache.set_file_bytes(current_user["user_id"], file_hash, content, file.filename, ext)
-            return ProfileResponse(**cached_data, cached=True)
+            cached_data.pop("is_first_upload", None)
+            return ProfileResponse(
+      **cached_data, cached=True,
+      is_first_upload=_mark_first_upload(db, current_user["user_id"]),
+  )
     # 5. Parse DataFrame từ memory buffer
     file_bytes = io.BytesIO(content)
     df = _read_dataframe(file_bytes, ext)
@@ -219,11 +235,13 @@ async def profile_file(
         columns=columns,
         semantic_context=semantic,
         cached=False,
+        is_first_upload=_mark_first_upload(db, current_user["user_id"]),
     )
 
     # 9. Lưu vào Redis cache (bỏ qua nếu Redis lỗi)
     cache_data = result.model_dump()
     cache_data.pop("cached", None)  # Không lưu field cached vào Redis
+    cache_data.pop("is_first_upload", None) 
     cache.set_profile(current_user["user_id"], file_hash, cache_data)
 
     # 10. Lưu file bytes vào Redis để Cleaner endpoints tái dùng (TTL 1h)

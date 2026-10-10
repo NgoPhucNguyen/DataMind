@@ -67,6 +67,12 @@ export default function UpgradeModal({ isOpen, onClose, onSuccess }) {
                 const res = await getOrderStatus(order.order_ref);
                 if (res.status === "completed" && isMounted) {
                     setStatus("completed");
+                    trackOnce(`purchase_${order.order_ref}`, "purchase", {
+  transaction_id: order.order_ref,
+  value: Number(order.amount),
+  currency: "VND",
+  items: [{ item_id: "pro", item_name: "DataMind Pro", price: Number(order.amount), quantity: 1 }],
+});
                     if (onSuccess) onSuccess();
                     return; // Stop polling
                 }

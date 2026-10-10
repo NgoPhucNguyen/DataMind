@@ -133,7 +133,7 @@ def login_with_google(request: Request, body: GoogleLoginRequest, db: Session = 
                             detail="Email Google chưa được xác minh.")
 
     user = db.query(User).filter(User.google_id == google_id).first()
-
+    is_new_user = False
     if not user:
         user = db.query(User).filter(User.email == email).first()
         if user:
@@ -142,6 +142,7 @@ def login_with_google(request: Request, body: GoogleLoginRequest, db: Session = 
             user.avatar_url = user.avatar_url or avatar_url
         else:
             # Tạo user mới
+            is_new_user = True
             user = User(full_name=full_name, email=email, password=None,
                         google_id=google_id, avatar_url=avatar_url)
             db.add(user)
@@ -157,7 +158,9 @@ def login_with_google(request: Request, body: GoogleLoginRequest, db: Session = 
     access_token = create_access_token(data={"sub": str(user.id), "email": user.email})
     return LoginResponse(message="Đăng nhập bằng Google thành công!",
                          user=_user_to_response(user),
-                         token=TokenResponse(access_token=access_token))
+                         token=TokenResponse(access_token=access_token),
+                         is_new_user=is_new_user)
+                        
 
 @router.get("/me/subscription", status_code=status.HTTP_200_OK)
 def get_my_subscription(
