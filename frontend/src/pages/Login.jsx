@@ -26,6 +26,7 @@ export default function Login() {
     setGoogleLoading(true);
     try {
       const response = await loginWithGoogle(credential);
+      if (response.is_new_user) track("sign_up", { method: "google" });
       authLogin(response.user, response.token.access_token);
       showToast("Đăng nhập thành công! Chào mừng bạn quay trở lại.", "success");
       navigate(from, { replace: true });

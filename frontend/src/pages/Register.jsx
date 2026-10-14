@@ -2,7 +2,7 @@ import { useState } from "react";
 import { register } from "../services/authService";
 import { Link, useNavigate } from "react-router-dom";
 import { useToast } from "../contexts/ToastContext";
-
+import { track } from "../lib/analytics";
 export default function Register() {
   const navigate = useNavigate();
   const { showToast } = useToast();
@@ -23,6 +23,7 @@ export default function Register() {
     setLoading(true);
     try {
       await register(formData);
+      track("sign_up", { method: "email" });
       showToast("Đăng ký tài khoản thành công! Vui lòng đăng nhập để bắt đầu.", "success");
       navigate("/login");
     } catch (error) {

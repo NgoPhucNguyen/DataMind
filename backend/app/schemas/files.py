@@ -46,3 +46,4 @@ class ProfileResponse(BaseModel):
     columns: list[ColumnProfile]
     semantic_context: SemanticContext
     cached: bool            # True nếu kết quả lấy từ Redis cache
+    is_first_upload: bool = False

@@ -158,6 +158,7 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
     try {
       const res = await profileFile(file, forceRefresh);
       setResult(res.data, true); // mark as fresh upload to reset countdown
+      
       showToast(forceRefresh ? "Analysis refreshed!" : "File analyzed successfully!", "success");
     } catch (err) {
       const detail = err?.response?.data?.detail;

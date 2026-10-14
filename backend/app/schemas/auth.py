@@ -65,6 +65,7 @@ class RegisterResponse(BaseModel):
 
 
 class LoginResponse(BaseModel):
+    is_new_user: bool = False
     message: str
     user: UserResponse
     token: TokenResponse

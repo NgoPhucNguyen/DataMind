@@ -1,6 +1,6 @@
 // @refresh reset
-import { createContext, useContext, useState } from "react";
-
+import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { useAuth } from "./AuthContext";
 
 const FileSessionContext = createContext(null);
 
@@ -45,6 +45,17 @@ export function FileSessionProvider({ children }) {
     setFileSession(defaultSession);
     window.dispatchEvent(new Event("datamind:session-cleared"));
   };
+
+    // Xóa phiên file khi đăng xuất hoặc đổi sang tài khoản khác
+  const { user } = useAuth();
+  const prevOwnerRef = useRef(user?.id ?? user?.email ?? null);
+  useEffect(() => {
+    const currentOwner = user?.id ?? user?.email ?? null;
+    if (prevOwnerRef.current !== currentOwner) {
+      clearFileSession();
+    }
+    prevOwnerRef.current = currentOwner;
+  }, [user]);
 
   return (
     <FileSessionContext.Provider value={{ fileSession, updateFileSession, clearFileSession }}>

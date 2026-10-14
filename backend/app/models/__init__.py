@@ -31,7 +31,7 @@ class TransactionType(str, enum.Enum):
 
 class User(Base):
     __tablename__ = "users"
-
+    first_upload_at = Column(DateTime, nullable=True)
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     full_name = Column(String, nullable=False)
     email = Column(String, unique=True, nullable=False, index=True)
