@@ -10,8 +10,6 @@ from dotenv import load_dotenv
 load_dotenv(override=True)
 
 from app.routers import auth as auth_router
-from app.routers import credits as credits_router
-from app.routers import packages as packages_router
 from app.routers import files as files_router
 from app.routers import visualize as visualize_router
 from app.routers import report as report_router
@@ -49,8 +47,6 @@ app.add_middleware(
 )
 
 app.include_router(auth_router.router, prefix="/api/v1")
-app.include_router(credits_router.router, prefix="/api/v1")
-app.include_router(packages_router.router, prefix="/api/v1")
 app.include_router(files_router.router, prefix="/api/v1")
 app.include_router(visualize_router.router, prefix="/api/v1")
 app.include_router(report_router.router, prefix="/api/v1")

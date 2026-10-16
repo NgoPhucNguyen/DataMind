@@ -1,3 +1,4 @@
+from datetime import datetime
 import hmac
 import hashlib
 import time
@@ -95,7 +96,19 @@ def process_sepay_webhook(db: Session, raw_body: bytes):
     except IntegrityError:
         # Transaction already exists
         db.rollback()
-        return {"success": True}
+        event = db.query(PaymentEvent).filter(PaymentEvent.transaction_id == transaction_id).first()
+        if not event:
+            return {"success": True}
+        if event.status in (
+            PaymentEventStatus.MATCHED_SUCCESS,
+            PaymentEventStatus.UNMATCHED,
+            PaymentEventStatus.AMOUNT_MISMATCH,
+        ):
+            return {"success": True}
+        if event.status == PaymentEventStatus.RECEIVED:
+            pass
+        else:
+            return {"success": True}
         
     # Order Matching
     content = payload.get("content", "")
@@ -132,11 +145,9 @@ def process_sepay_webhook(db: Session, raw_body: bytes):
         db.commit()
         return {"success": True}
         
-    # If matched and amount is sufficient
-    event.status = PaymentEventStatus.MATCHED_SUCCESS
-    
     # Database Transaction for business update
     try:
+        event.status = PaymentEventStatus.MATCHED_SUCCESS
         matched_order.status = PaymentStatus.COMPLETED
         
         # Update UserAIUsage
@@ -148,7 +159,6 @@ def process_sepay_webhook(db: Session, raw_body: bytes):
         ai_usage.plan = "pro"
         ai_usage.runs_limit = 50
         ai_usage.runs_used = 0
-        from datetime import datetime
         ai_usage.period_start = datetime.utcnow()
         
         db.commit()

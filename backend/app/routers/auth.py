@@ -4,12 +4,7 @@ from fastapi import Request   # thêm Request vào import fastapi có sẵn
 from app.core.limiter import limiter
 from app.core.database import get_db
 from app.core.security import hash_password, verify_password, create_access_token, verify_google_id_token
-from app.models import (
-    User,
-    CreditsWallet,
-    CreditTransaction,
-    TransactionType
-)
+from app.models import User
 from app.schemas.auth import (
     RegisterRequest,
     LoginRequest,
@@ -65,25 +60,6 @@ def register(request: Request, body: RegisterRequest, db: Session = Depends(get_
     db.commit()
     db.refresh(new_user)
 
-    # Tạo ví credits
-    wallet = CreditsWallet(
-        user_id=new_user.id,
-        balance=100000
-    )
-
-    db.add(wallet)
-
-    # Lịch sử credits
-    transaction = CreditTransaction(
-        user_id=new_user.id,
-        amount=100000,
-        type=TransactionType.CREDIT,
-        description="Welcome bonus"
-    )
-
-    db.add(transaction)
-
-    db.commit()
 
     return RegisterResponse(
         message="Đăng ký thành công!",
@@ -148,9 +124,6 @@ def login_with_google(request: Request, body: GoogleLoginRequest, db: Session = 
             db.add(user)
             db.commit()
             db.refresh(user)
-            db.add(CreditsWallet(user_id=user.id, balance=100000))
-            db.add(CreditTransaction(user_id=user.id, amount=100000,
-                                     type=TransactionType.CREDIT, description="Welcome bonus"))
 
     db.commit()
     db.refresh(user)

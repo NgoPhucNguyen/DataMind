@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { CheckCircle2, Copy, Loader2, Sparkles, X } from "lucide-react";
 import { createOrder, getOrderStatus } from "../services/paymentService";
+import { trackOnce } from "../lib/analytics";
 
 export default function UpgradeModal({ isOpen, onClose, onSuccess }) {
     const [order, setOrder] = useState(null);
@@ -20,12 +21,17 @@ export default function UpgradeModal({ isOpen, onClose, onSuccess }) {
         }
 
         let isMounted = true;
-        
+
         const initOrder = async () => {
             setLoading(true);
             try {
                 const data = await createOrder();
                 if (isMounted) {
+                    trackOnce(`begin_checkout_${data.order_ref}`, "begin_checkout", {
+                        currency: "VND",
+                        value: Number(data.amount),
+                        items: [{ item_id: "pro", item_name: "DataMind Pro", price: Number(data.amount), quantity: 1 }],
+                    });
                     setOrder(data);
                     setStatus("pending");
                 }
@@ -68,11 +74,11 @@ export default function UpgradeModal({ isOpen, onClose, onSuccess }) {
                 if (res.status === "completed" && isMounted) {
                     setStatus("completed");
                     trackOnce(`purchase_${order.order_ref}`, "purchase", {
-  transaction_id: order.order_ref,
-  value: Number(order.amount),
-  currency: "VND",
-  items: [{ item_id: "pro", item_name: "DataMind Pro", price: Number(order.amount), quantity: 1 }],
-});
+                        transaction_id: order.order_ref,
+                        value: Number(order.amount),
+                        currency: "VND",
+                        items: [{ item_id: "pro", item_name: "DataMind Pro", price: Number(order.amount), quantity: 1 }],
+                    });
                     if (onSuccess) onSuccess();
                     return; // Stop polling
                 }
@@ -112,7 +118,7 @@ export default function UpgradeModal({ isOpen, onClose, onSuccess }) {
                         <Sparkles className="w-5 h-5" />
                         <h2 className="text-lg font-bold">Nâng cấp Pro Plan</h2>
                     </div>
-                    <button 
+                    <button
                         onClick={onClose}
                         className="text-muted hover:text-ink transition-colors p-1 rounded-md hover:bg-black/5"
                     >
@@ -132,7 +138,7 @@ export default function UpgradeModal({ isOpen, onClose, onSuccess }) {
                     {status === "error" && !loading && (
                         <div className="text-center py-8 text-red-600">
                             <p>{error}</p>
-                            <button 
+                            <button
                                 onClick={onClose}
                                 className="mt-4 px-4 py-2 bg-red-50 hover:bg-red-100 rounded-lg font-medium transition-colors"
                             >
@@ -150,7 +156,7 @@ export default function UpgradeModal({ isOpen, onClose, onSuccess }) {
                                 <h3 className="text-xl font-bold text-ink mb-1">Thanh toán thành công!</h3>
                                 <p className="text-muted">Cảm ơn bạn. Tài khoản của bạn đã được nâng cấp lên Pro.</p>
                             </div>
-                            <button 
+                            <button
                                 onClick={onClose}
                                 className="mt-2 w-full py-2.5 bg-forest hover:bg-forest/90 text-white rounded-lg font-semibold transition-colors"
                             >
@@ -164,10 +170,10 @@ export default function UpgradeModal({ isOpen, onClose, onSuccess }) {
                             <p className="text-sm text-center text-muted px-4">
                                 Vui lòng quét mã QR hoặc chuyển khoản theo thông tin bên dưới. Hệ thống sẽ tự động cập nhật ngay sau khi nhận được.
                             </p>
-                            
+
                             {/* QR Code */}
                             <div className="p-2 bg-white border border-border shadow-sm rounded-xl inline-block">
-                                <img 
+                                <img
                                     src={`https://img.vietqr.io/image/${order.transfer_info.bank_name}-${order.transfer_info.account_number}-compact2.jpg?amount=${order.amount}&addInfo=${order.order_ref}&accountName=${encodeURIComponent(order.transfer_info.account_name)}`}
                                     alt="QR Code"
                                     className="w-48 h-48 object-contain"
@@ -198,7 +204,7 @@ export default function UpgradeModal({ isOpen, onClose, onSuccess }) {
                                         <span className="font-bold text-ink bg-white px-2 py-1 rounded border border-border font-mono text-base">
                                             {order.order_ref}
                                         </span>
-                                        <button 
+                                        <button
                                             onClick={() => handleCopy(order.order_ref)}
                                             className="p-1.5 bg-white border border-border rounded hover:bg-gray-50 transition-colors text-ink relative"
                                             title="Copy nội dung"
@@ -213,7 +219,7 @@ export default function UpgradeModal({ isOpen, onClose, onSuccess }) {
                                     </div>
                                 </div>
                             </div>
-                            
+
                             <div className="flex items-center gap-2 text-sm text-forest bg-green-50 px-4 py-2 rounded-lg w-full justify-center">
                                 <Loader2 className="w-4 h-4 animate-spin" />
                                 <span>Đang chờ thanh toán...</span>
@@ -230,7 +236,7 @@ export default function UpgradeModal({ isOpen, onClose, onSuccess }) {
                             <p className="text-sm text-muted mb-4">
                                 Vui lòng kiểm tra lại nếu bạn đã chuyển khoản. Bạn có thể đóng cửa sổ này và quay lại sau, trạng thái đơn hàng vẫn được lưu.
                             </p>
-                            <button 
+                            <button
                                 onClick={onClose}
                                 className="px-4 py-2 border border-border hover:bg-sage/40 rounded-lg font-medium transition-colors"
                             >

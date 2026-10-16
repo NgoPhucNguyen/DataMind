@@ -6,11 +6,8 @@ import pandas as pd
 import numpy as np
 import scipy.stats as stats
 from fastapi import HTTPException, status
-from app.models import User, CreditsWallet, CreditTransaction, TransactionType
 
 logger = logging.getLogger(__name__)
-
-
 
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
