@@ -218,51 +218,102 @@ def get_session_metadata(user_id: int,session_id: str) -> dict[str, Any] | None:
     except Exception as e:
         logger.warning("Redis GET session metadata lỗi: %s", e)
 
-# --- AI Explain Cache (2 Tiers) ---
+# --- AI Explain Cache (2 Tiers) with Multilingual & Context Hash Support ---
 
 _AI_EXPLAIN_TTL = 2592000  # 30 ngày
 
-def get_ai_explain_original(file_hash: str, chart_type: str, col_x: str, col_y: str, tier: str) -> str | None:
+def get_ai_explain_original(file_hash: str, chart_type: str, col_x: str, col_y: str, tier: str, lang: str = "vi", context_hash: str = "") -> str | None:
     client = _get_client()
     if client is None: return None
     try:
         col_y_key = col_y if col_y else "none"
-        key = f"ai_explain:original:{file_hash}:{chart_type}:{col_x}:{col_y_key}:{tier}"
+        norm_lang = lang if lang in ("vi", "en") else "vi"
+        ctx_suffix = f":{context_hash}" if context_hash else ""
+        key = f"ai_explain:original:{norm_lang}:{file_hash}:{chart_type}:{col_x}:{col_y_key}:{tier}{ctx_suffix}"
         return client.get(key)
     except Exception as e:
         logger.warning("Redis GET ai_explain_original lỗi: %s", e)
         return None
 
-def set_ai_explain_original(file_hash: str, chart_type: str, col_x: str, col_y: str, tier: str, content: str) -> None:
+def set_ai_explain_original(file_hash: str, chart_type: str, col_x: str, col_y: str, tier: str, content: str, lang: str = "vi", context_hash: str = "") -> None:
     client = _get_client()
     if client is None: return
     try:
         col_y_key = col_y if col_y else "none"
-        key = f"ai_explain:original:{file_hash}:{chart_type}:{col_x}:{col_y_key}:{tier}"
+        norm_lang = lang if lang in ("vi", "en") else "vi"
+        ctx_suffix = f":{context_hash}" if context_hash else ""
+        key = f"ai_explain:original:{norm_lang}:{file_hash}:{chart_type}:{col_x}:{col_y_key}:{tier}{ctx_suffix}"
         client.set(key, content, ex=_AI_EXPLAIN_TTL)
     except Exception as e:
         logger.warning("Redis SET ai_explain_original lỗi: %s", e)
 
-def get_ai_explain_edited(user_id: int, file_hash: str, chart_type: str, col_x: str, col_y: str, tier: str) -> str | None:
+def get_ai_explain_edited(user_id: int, file_hash: str, chart_type: str, col_x: str, col_y: str, tier: str, lang: str = "vi", context_hash: str = "") -> dict | str | None:
+    """
+    Returns dict {"content": str, "context_hash": str} or string if stored simply.
+    """
     client = _get_client()
     if client is None: return None
     try:
         col_y_key = col_y if col_y else "none"
-        key = f"ai_explain:edited:{user_id}:{file_hash}:{chart_type}:{col_x}:{col_y_key}:{tier}"
-        return client.get(key)
+        norm_lang = lang if lang in ("vi", "en") else "vi"
+        key = f"ai_explain:edited:{norm_lang}:{user_id}:{file_hash}:{chart_type}:{col_x}:{col_y_key}:{tier}"
+        raw = client.get(key)
+        if raw is None:
+            return None
+        # Attempt JSON decode
+        try:
+            data = json.loads(raw) if isinstance(raw, str) else json.loads(raw.decode())
+            if isinstance(data, dict) and "content" in data:
+                return data
+        except Exception:
+            pass
+        # Fallback to plain string
+        return {"content": raw, "context_hash": ""}
     except Exception as e:
         logger.warning("Redis GET ai_explain_edited lỗi: %s", e)
         return None
 
-def set_ai_explain_edited(user_id: int, file_hash: str, chart_type: str, col_x: str, col_y: str, tier: str, content: str) -> None:
+def set_ai_explain_edited(user_id: int, file_hash: str, chart_type: str, col_x: str, col_y: str, tier: str, content: str, lang: str = "vi", context_hash: str = "") -> None:
     client = _get_client()
     if client is None: return
     try:
         col_y_key = col_y if col_y else "none"
-        key = f"ai_explain:edited:{user_id}:{file_hash}:{chart_type}:{col_x}:{col_y_key}:{tier}"
-        client.set(key, content, ex=_AI_EXPLAIN_TTL)
+        norm_lang = lang if lang in ("vi", "en") else "vi"
+        key = f"ai_explain:edited:{norm_lang}:{user_id}:{file_hash}:{chart_type}:{col_x}:{col_y_key}:{tier}"
+        payload = json.dumps({"content": content, "context_hash": context_hash})
+        client.set(key, payload, ex=_AI_EXPLAIN_TTL)
     except Exception as e:
         logger.warning("Redis SET ai_explain_edited lỗi: %s", e)
+
+# --- Profiler Context Persistence (24h TTL) ---
+
+def set_profiler_context(user_id: int, file_hash: str, data: dict[str, Any], ttl: int = 86400) -> None:
+    """
+    Lưu context của Profiler (description, description_source, semantic_context, column_semantics, updated_at).
+    TTL 24 giờ — cùng vòng đời với profile.
+    """
+    client = _get_client()
+    if client is None: return
+    try:
+        key = f"profiler_ctx:{user_id}:{file_hash}"
+        client.set(key, json.dumps(data), ex=ttl)
+    except Exception as e:
+        logger.warning("Redis SET profiler_context lỗi: %s", e)
+
+def get_profiler_context(user_id: int, file_hash: str) -> dict[str, Any] | None:
+    """
+    Lấy context của Profiler từ Redis (description, description_source, semantic_context, etc.).
+    """
+    client = _get_client()
+    if client is None: return None
+    try:
+        key = f"profiler_ctx:{user_id}:{file_hash}"
+        raw = client.get(key)
+        if raw is None: return None
+        return json.loads(raw) if isinstance(raw, str) else json.loads(raw.decode())
+    except Exception as e:
+        logger.warning("Redis GET profiler_context lỗi: %s", e)
+        return None
 
 def set_dataset_context_md(user_id: int, file_hash: str, md_text: str, ttl: int = 86400) -> None:
     """Cache Part 1 markdown, cùng vòng đời với profile."""

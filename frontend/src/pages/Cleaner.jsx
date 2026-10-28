@@ -12,10 +12,12 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { useTranslation, Trans } from "react-i18next";
 import { useFileSession } from "../contexts/FileSessionContext";
 import { detectIssues, autoClean, confirmClean } from "../services/cleanerService";
 import { profileFile } from "../services/profilerService";
 import { useToast } from "../contexts/ToastContext";
+import { translateError, getCurrentLang } from "../i18n";
 import { ArrowRight, ArrowLeft, Info, CheckCircle, AlertTriangle, Upload, RefreshCw, Eye, MousePointerClick, ShieldCheck, Save, Clock, FolderUp, Download, Lock, Zap, PenTool, Compass, Wand2 } from "lucide-react";
 import PageHeader from "../components/PageHeader";
 import PageHelpDocs from "../components/PageHelpDocs";
@@ -60,19 +62,20 @@ function Card({ children, className = "" }) {
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
 function IssuesSummary({ issues }) {
+  const { t } = useTranslation();
   const missingCount = issues.missing_values?.length ?? 0;
   const wrongTypeCount = issues.wrong_types?.length ?? 0;
   const encodingCount = issues.encoding_errors?.length ?? 0;
   const dupCount = issues.duplicates?.duplicate_count ?? 0;
   const semanticCount = issues.semantic_errors?.length ?? 0;
-  
+
   const structuralCount = missingCount + wrongTypeCount + encodingCount + (dupCount > 0 ? 1 : 0);
 
   if (!issues.has_issues) {
     return (
       <div className="bg-sage/30 border border-[#c8e0cb] rounded-lg p-3 text-sm text-forest flex items-center gap-2">
         <CheckCircle className="w-5 h-5 shrink-0" />
-        Dữ liệu sạch! Không phát hiện vấn đề cấu trúc hay ngữ nghĩa nào.
+        {t("cleaner.data_clean_desc")}
       </div>
     );
   }
@@ -81,36 +84,83 @@ function IssuesSummary({ issues }) {
     <div className="bg-[#FBF3DB] border border-[#f0dda0] rounded-lg p-3 text-sm text-[#956400] flex items-center gap-2">
       <AlertTriangle className="w-5 h-5 shrink-0" />
       <span>
-        Phát hiện <strong>{structuralCount}</strong> lỗi cấu trúc
+        <Trans
+          i18nKey="cleaner.issues_detected"
+          values={{ structuralCount }}
+          components={{ 1: <strong /> }}
+        />
         {semanticCount > 0 ? (
-          <> và <strong>{semanticCount}</strong> lỗi ngữ nghĩa</>
-        ) : ""} cần xem xét.
+          <Trans
+            i18nKey="cleaner.semantic_issues_detected"
+            values={{ semanticCount }}
+            components={{ 1: <strong /> }}
+          />
+        ) : ""}
+        {t("cleaner.issues_need_review")}
       </span>
     </div>
   );
 }
 
-function CleanerActionBar({ onAutoClean, onManualClean }) {
+function CleanerActionBar({ onAutoClean, onManualClean, onSkip, hasIssues }) {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-col sm:flex-row items-center gap-3 mt-4">
-      <button
-        id="clean-mode-auto-btn"
-        onClick={onAutoClean}
-        className={`${BTN.primary} flex-1 justify-center py-3 text-base flex items-center gap-2`}
-      >
-        <Zap className="w-5 h-5" /> Tự động sửa
-      </button>
-      <button
-        id="clean-mode-manual-btn"
-        onClick={onManualClean}
-        className={`${BTN.secondary} flex-1 justify-center py-3 text-base flex items-center gap-2`}
-      >
-        <PenTool className="w-5 h-5" /> Sửa thủ công
-      </button>
+      {hasIssues ? (
+        <>
+          <button
+            id="clean-mode-auto-btn"
+            onClick={onAutoClean}
+            className={`${BTN.primary} flex-1 justify-center py-3 text-base flex items-center gap-2`}
+          >
+            <Zap className="w-5 h-5" /> {t("cleaner.btn_auto_clean")}
+          </button>
+          <button
+            id="clean-mode-manual-btn"
+            onClick={onManualClean}
+            className={`${BTN.secondary} flex-1 justify-center py-3 text-base flex items-center gap-2`}
+          >
+            <PenTool className="w-5 h-5" /> {t("cleaner.btn_manual_clean")}
+          </button>
+          <button
+            id="clean-mode-skip-btn"
+            onClick={onSkip}
+            className={`${BTN.secondary} flex-1 justify-center py-3 text-base flex items-center gap-2 text-muted`}
+          >
+            {t("cleaner.btn_skip_cleaning")}
+          </button>
+        </>
+      ) : (
+        <>
+          <button
+            id="clean-mode-skip-btn-primary"
+            onClick={onSkip}
+            className={`${BTN.primary} flex-1 justify-center py-3 text-base flex items-center gap-2`}
+          >
+            <CheckCircle className="w-5 h-5" /> {t("cleaner.btn_skip_cleaning_clean")}
+          </button>
+          <button
+            id="clean-mode-auto-btn"
+            onClick={onAutoClean}
+            className={`${BTN.secondary} flex-1 justify-center py-3 text-base flex items-center gap-2`}
+          >
+            <Zap className="w-5 h-5" /> {t("cleaner.btn_auto_clean")}
+          </button>
+          <button
+            id="clean-mode-manual-btn"
+            onClick={onManualClean}
+            className={`${BTN.secondary} flex-1 justify-center py-3 text-base flex items-center gap-2`}
+          >
+            <PenTool className="w-5 h-5" /> {t("cleaner.btn_manual_clean")}
+          </button>
+        </>
+      )}
     </div>
   );
 }
-function PreviewTable({ data, errorCells = [], title = "Bảng dữ liệu xem trước" }) {
+
+function PreviewTable({ data, errorCells = [], title }) {
+  const { t } = useTranslation();
   const [page, setPage] = useState(1);
   const rowsPerPage = 10;
   if (!data || data.length === 0) return null;
@@ -122,7 +172,7 @@ function PreviewTable({ data, errorCells = [], title = "Bảng dữ liệu xem t
 
   return (
     <Card className="mt-4">
-      <SectionTitle>{title}</SectionTitle>
+      <SectionTitle>{title || t("cleaner.preview_table_title")}</SectionTitle>
       <div className="overflow-x-auto border border-border rounded-lg mt-3 bg-white">
         <table className="w-full text-left text-sm whitespace-nowrap">
           <thead className="bg-[#F9F9F8] border-b border-border">
@@ -142,7 +192,7 @@ function PreviewTable({ data, errorCells = [], title = "Bảng dữ liệu xem t
                 {columns.map(col => {
                   let cellClasses = "px-4 py-2 truncate max-w-[200px] text-muted";
                   const rowId = row.original_index;
-                  
+
                   if (rowId !== undefined) {
                     const cellError = errorCells.find(e => e.row_id === rowId && e.column === col);
                     if (cellError) {
@@ -167,21 +217,23 @@ function PreviewTable({ data, errorCells = [], title = "Bảng dữ liệu xem t
       </div>
       {totalPages > 1 && (
         <div className="flex items-center justify-between mt-4">
-          <span className="text-xs text-muted">Trang {page} / {totalPages} (Mẫu {data.length} dòng)</span>
+          <span className="text-xs text-muted">
+            {t("cleaner.pagination_info", { page, totalPages, total: data.length })}
+          </span>
           <div className="flex gap-2">
             <button
               onClick={() => setPage(p => Math.max(1, p - 1))}
               disabled={page === 1}
               className="px-3 py-1 bg-white border border-border rounded text-sm disabled:opacity-50 hover:bg-sage/20 transition-all text-ink font-medium"
             >
-              Trang trước
+              {t("cleaner.prev_page")}
             </button>
             <button
               onClick={() => setPage(p => Math.min(totalPages, p + 1))}
               disabled={page === totalPages}
               className="px-3 py-1 bg-white border border-border rounded text-sm disabled:opacity-50 hover:bg-sage/20 transition-all text-ink font-medium"
             >
-              Trang sau
+              {t("cleaner.next_page")}
             </button>
           </div>
         </div>
@@ -191,10 +243,11 @@ function PreviewTable({ data, errorCells = [], title = "Bảng dữ liệu xem t
 }
 
 function DiffReportView({ diff, validationState, filename, previewData, errorCells = [], onConfirm, onBack, confirming, onManualClean }) {
+  const { t } = useTranslation();
   const rows = [
-    { label: "Dòng trùng bị xóa", value: diff.duplicate_rows_removed, warn: diff.duplicate_rows_removed > 0 },
-    { label: "Dòng còn lại", value: `${diff.original_rows} → ${diff.clean_rows}` },
-    { label: "Cột còn lại", value: `${diff.original_cols} → ${diff.clean_cols}` },
+    { label: t("cleaner.diff_dup_rows"), value: diff.duplicate_rows_removed, warn: diff.duplicate_rows_removed > 0 },
+    { label: t("cleaner.diff_remaining_rows"), value: `${diff.original_rows} → ${diff.clean_rows}` },
+    { label: t("cleaner.diff_remaining_cols"), value: `${diff.original_cols} → ${diff.clean_cols}` },
   ];
 
   const missingEntries = Object.entries(diff.missing_filled || {});
@@ -205,11 +258,11 @@ function DiffReportView({ diff, validationState, filename, previewData, errorCel
   const semanticErrorsCount = errorCells.filter(e => e.severity === "error").length;
   const semanticHintsCount = errorCells.filter(e => e.severity === "hint").length;
   const hasSemanticIssues = semanticErrorsCount > 0 || semanticHintsCount > 0;
-  
-  const structuralFixedCount = Object.values(diff.missing_filled || {}).reduce((a,b)=>a+b,0) + 
-                               Object.keys(diff.types_converted || {}).length + 
-                               Object.values(diff.encoding_fixed || {}).reduce((a,b)=>a+b,0) + 
-                               diff.duplicate_rows_removed;
+
+  const structuralFixedCount = Object.values(diff.missing_filled || {}).reduce((a, b) => a + b, 0) +
+    Object.keys(diff.types_converted || {}).length +
+    Object.values(diff.encoding_fixed || {}).reduce((a, b) => a + b, 0) +
+    diff.duplicate_rows_removed;
 
   return (
     <div className="space-y-4">
@@ -220,10 +273,14 @@ function DiffReportView({ diff, validationState, filename, previewData, errorCel
             <AlertTriangle className="w-5 h-5 shrink-0 text-[#A84300] mt-0.5" />
             <div>
               <p className="font-semibold text-[#A84300] text-sm">
-                Auto-clean đã xử lý {structuralFixedCount} lỗi cấu trúc.
+                {t("cleaner.auto_clean_semantic_banner_title", { count: structuralFixedCount })}
               </p>
               <p className="text-xs text-[#A84300]/80 mt-0.5">
-                Phát hiện thêm {hasSemanticIssues} lỗi ngữ nghĩa ({semanticErrorsCount} lỗi, {semanticHintsCount} cảnh báo) cần xem xét thủ công.
+                {t("cleaner.auto_clean_semantic_banner_desc", {
+                  total: semanticErrorsCount + semanticHintsCount,
+                  errors: semanticErrorsCount,
+                  hints: semanticHintsCount,
+                })}
               </p>
             </div>
           </div>
@@ -231,7 +288,7 @@ function DiffReportView({ diff, validationState, filename, previewData, errorCel
       )}
 
       <Card>
-        <SectionTitle>Báo cáo thay đổi (Diff Report)</SectionTitle>
+        <SectionTitle>{t("cleaner.diff_report_title")}</SectionTitle>
 
         {/* Tóm tắt chính */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
@@ -248,7 +305,7 @@ function DiffReportView({ diff, validationState, filename, previewData, errorCel
         {/* Dropped columns */}
         {droppedColumns.length > 0 && (
           <div className="mb-3">
-            <p className="text-xs font-medium text-ink mb-1.5">Cột đã xóa (do rỗng trên 90%):</p>
+            <p className="text-xs font-medium text-ink mb-1.5">{t("cleaner.diff_dropped_cols")}</p>
             <div className="flex flex-wrap gap-1.5">
               {droppedColumns.map((col) => (
                 <span key={col} className="text-xs px-2 py-0.5 rounded-full bg-[#FDEBEC] text-[#9F2F2D] border border-[#f5c6cb]">
@@ -262,11 +319,11 @@ function DiffReportView({ diff, validationState, filename, previewData, errorCel
         {/* Missing filled */}
         {missingEntries.length > 0 && (
           <div className="mb-3">
-            <p className="text-xs font-medium text-ink mb-1.5">Giá trị thiếu đã điền:</p>
+            <p className="text-xs font-medium text-ink mb-1.5">{t("cleaner.diff_missing_filled")}</p>
             <div className="flex flex-wrap gap-1.5">
               {missingEntries.map(([col, cnt]) => (
                 <span key={col} className="text-xs px-2 py-0.5 rounded-full bg-sage text-forest border border-[#c8e0cb]">
-                  {col}: {cnt} ô
+                  {col}: {t("cleaner.diff_cells_count", { count: cnt })}
                 </span>
               ))}
             </div>
@@ -276,7 +333,7 @@ function DiffReportView({ diff, validationState, filename, previewData, errorCel
         {/* Types converted */}
         {typeEntries.length > 0 && (
           <div className="mb-3">
-            <p className="text-xs font-medium text-ink mb-1.5">Kiểu dữ liệu đã chuyển đổi:</p>
+            <p className="text-xs font-medium text-ink mb-1.5">{t("cleaner.diff_types_converted")}</p>
             <div className="flex flex-wrap gap-1.5">
               {typeEntries.map(([col, change]) => (
                 <span key={col} className="text-xs px-2 py-0.5 rounded-full bg-[#FBF3DB] text-[#956400] border border-[#f0dda0]">
@@ -290,11 +347,11 @@ function DiffReportView({ diff, validationState, filename, previewData, errorCel
         {/* Encoding fixed */}
         {encodingEntries.length > 0 && (
           <div>
-            <p className="text-xs font-medium text-ink mb-1.5">Ký tự lỗi đã xử lý:</p>
+            <p className="text-xs font-medium text-ink mb-1.5">{t("cleaner.diff_encoding_fixed")}</p>
             <div className="flex flex-wrap gap-1.5">
               {encodingEntries.map(([col, cnt]) => (
                 <span key={col} className="text-xs px-2 py-0.5 rounded-full bg-[#FFF0E6] text-[#A84300] border border-[#ffd0aa]">
-                  {col}: {cnt} ô
+                  {col}: {t("cleaner.diff_cells_count", { count: cnt })}
                 </span>
               ))}
             </div>
@@ -302,7 +359,7 @@ function DiffReportView({ diff, validationState, filename, previewData, errorCel
         )}
 
         {missingEntries.length === 0 && typeEntries.length === 0 && encodingEntries.length === 0 && diff.duplicate_rows_removed === 0 && droppedColumns.length === 0 && (
-          <p className="text-sm text-muted">Không có thay đổi nào được thực hiện.</p>
+          <p className="text-sm text-muted">{t("cleaner.diff_no_changes")}</p>
         )}
       </Card>
 
@@ -312,12 +369,12 @@ function DiffReportView({ diff, validationState, filename, previewData, errorCel
           <div className="flex items-start gap-3">
             <AlertTriangle className="w-6 h-6 shrink-0 text-amber-600 mt-0.5" />
             <div>
-              <p className="font-semibold text-[#956400] text-sm mb-1">Cảnh báo về chất lượng dữ liệu</p>
+              <p className="font-semibold text-[#956400] text-sm mb-1">{t("cleaner.quality_warnings_title")}</p>
               <ul className="space-y-1">
                 {validationState.warnings.map(w => (
                   <li key={w.code} className="text-xs text-[#956400]/80">
                     <span className="font-medium">• {w.message}</span>
-                    {w.impact && <span className="block ml-2 opacity-80 mt-0.5">↳ Ảnh hưởng: {w.impact}</span>}
+                    {w.impact && <span className="block ml-2 opacity-80 mt-0.5">{t("cleaner.impact_label", { impact: w.impact })}</span>}
                   </li>
                 ))}
               </ul>
@@ -327,7 +384,7 @@ function DiffReportView({ diff, validationState, filename, previewData, errorCel
       )}
 
       {/* Preview Table */}
-      <PreviewTable data={previewData} errorCells={errorCells} title="Bảng dữ liệu đã xử lý (Auto-Clean)" />
+      <PreviewTable data={previewData} errorCells={errorCells} title={t("cleaner.cleaned_preview_title")} />
 
       {/* Action buttons */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
@@ -336,15 +393,15 @@ function DiffReportView({ diff, validationState, filename, previewData, errorCel
           onClick={onBack}
           className={`${BTN.secondary} flex items-center gap-2 max-sm:w-full justify-center`}
         >
-          <ArrowLeft className="w-4 h-4 inline-block mr-1" /> Chọn lại chế độ
+          <ArrowLeft className="w-4 h-4 inline-block mr-1" /> {t("cleaner.nav.back_to_original")}
         </button>
-        
+
         <div className="flex items-center gap-3 w-full sm:w-auto">
           <button
             onClick={onManualClean}
             className={`${BTN.secondary} flex items-center gap-2 max-sm:w-full justify-center`}
           >
-            <Wand2 className="w-4 h-4 inline-block mr-1" /> Sửa thủ công tiếp
+            <Wand2 className="w-4 h-4 inline-block mr-1" /> {t("cleaner.btn_manual_clean_more")}
           </button>
           <button
             id="cleaner-confirm-btn"
@@ -358,10 +415,10 @@ function DiffReportView({ diff, validationState, filename, previewData, errorCel
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
                 </svg>
-                Đang lưu...
+                {t("cleaner.loading_saving")}
               </>
             ) : (
-              <>Xác nhận dùng bản này <CheckCircle className="w-4 h-4" /></>
+              <>{t("cleaner.btn_confirm_use_this")} <CheckCircle className="w-4 h-4" /></>
             )}
           </button>
         </div>
@@ -370,8 +427,12 @@ function DiffReportView({ diff, validationState, filename, previewData, errorCel
   );
 }
 
-function ConfirmedView({ result, previewData, onGoHome, onGoVisualize, onBackToEdit }) {
+function ConfirmedView({ result, previewData, onGoHome, onGoVisualize, onBackToEdit, isSkip }) {
+  const { t } = useTranslation();
   const summary = result.summary_for_module3;
+  const currentLang = getCurrentLang();
+  const localeStr = currentLang === "vi" ? "vi-VN" : "en-US";
+
   return (
     <div className="space-y-4">
       {/* Success banner */}
@@ -379,9 +440,11 @@ function ConfirmedView({ result, previewData, onGoHome, onGoVisualize, onBackToE
         <div className="flex items-center gap-3">
           <CheckCircle className="w-8 h-8 text-forest" />
           <div>
-            <p className="font-medium text-forest">Clean Dataset đã được chốt!</p>
+            <p className="font-medium text-forest">
+              {isSkip ? t("cleaner.skip_banner_title") : t("cleaner.confirmed_banner_title")}
+            </p>
             <p className="text-sm text-forest/70 mt-0.5">
-              File đã được làm sạch và lưu thành công. Sẵn sàng cho Module 3.
+              {isSkip ? t("cleaner.skip_banner_desc") : t("cleaner.confirmed_banner_desc")}
             </p>
           </div>
         </div>
@@ -389,13 +452,13 @@ function ConfirmedView({ result, previewData, onGoHome, onGoVisualize, onBackToE
 
       {/* Summary for Module 3 */}
       <Card>
-        <SectionTitle>Tóm tắt chuyển sang Module 3</SectionTitle>
+        <SectionTitle>{t("cleaner.summary_module3_title")}</SectionTitle>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
           {[
-            { label: "Dòng dữ liệu", value: summary?.shape?.[0]?.toLocaleString() ?? "—" },
-            { label: "Cột dữ liệu", value: summary?.shape?.[1] ?? "—" },
-            { label: "Cột số", value: summary?.numeric_columns?.length ?? "—" },
-            { label: "Cột phân loại", value: summary?.categorical_columns?.length ?? "—" },
+            { label: t("cleaner.summary_rows"), value: summary?.shape?.[0]?.toLocaleString(localeStr) ?? "—" },
+            { label: t("cleaner.summary_cols"), value: summary?.shape?.[1]?.toLocaleString(localeStr) ?? "—" },
+            { label: t("cleaner.summary_numeric_cols"), value: summary?.numeric_columns?.length ?? "—" },
+            { label: t("cleaner.summary_categorical_cols"), value: summary?.categorical_columns?.length ?? "—" },
           ].map((s) => (
             <div key={s.label} className="text-center py-3 rounded-lg bg-[#F9F9F8] border border-border">
               <p className="text-lg font-semibold font-mono text-ink">{s.value}</p>
@@ -406,9 +469,9 @@ function ConfirmedView({ result, previewData, onGoHome, onGoVisualize, onBackToE
 
         {/* Session info */}
         <div className="text-xs text-muted space-y-0.5 pt-3 border-t border-border">
-          <p>Session ID: <code className="font-mono bg-[#F9F9F8] px-1 rounded">{result.session_id.slice(0, 12)}...</code></p>
-          <p>Chế độ: <span className="font-medium text-ink">{result.clean_mode === "auto" ? "Làm sạch tự động" : "Chỉnh sửa thủ công"}</span></p>
-          <p>Xác nhận lúc: <span className="font-medium text-ink">{new Date(result.confirmed_at).toLocaleString("vi-VN")}</span></p>
+          <p>{t("cleaner.session_info_session")} <code className="font-mono bg-[#F9F9F8] px-1 rounded">{result.session_id.slice(0, 12)}...</code></p>
+          <p>{t("cleaner.session_info_mode")} <span className="font-medium text-ink">{result.clean_mode === "auto" ? t("cleaner.session_info_mode_auto") : t("cleaner.session_info_mode_manual")}</span></p>
+          <p>{t("cleaner.session_info_confirmed_at")} <span className="font-medium text-ink">{new Date(result.confirmed_at).toLocaleString(localeStr)}</span></p>
         </div>
       </Card>
 
@@ -423,14 +486,14 @@ function ConfirmedView({ result, previewData, onGoHome, onGoVisualize, onBackToE
             onClick={onGoHome}
             className={`${BTN.secondary} flex items-center gap-2`}
           >
-            <ArrowLeft className="w-4 h-4 inline-block mr-1" /> Về trang chủ
+            <ArrowLeft className="w-4 h-4 inline-block mr-1" /> {t("cleaner.btn_go_home")}
           </button>
           {onBackToEdit && (
             <button
               onClick={onBackToEdit}
               className={`${BTN.secondary} flex items-center gap-2`}
             >
-              <ArrowLeft className="w-4 h-4 inline-block mr-1" /> Quay lại sửa tiếp
+              <ArrowLeft className="w-4 h-4 inline-block mr-1" /> {t("cleaner.btn_back_to_edit")}
             </button>
           )}
         </div>
@@ -439,7 +502,7 @@ function ConfirmedView({ result, previewData, onGoHome, onGoVisualize, onBackToE
           onClick={onGoVisualize}
           className={`${BTN.primary} flex items-center gap-2`}
         >
-          Trực quan hóa dữ liệu <ArrowRight className="w-4 h-4 inline-block ml-1" />
+          {t("cleaner.btn_visualize")} <ArrowRight className="w-4 h-4 inline-block ml-1" />
         </button>
       </div>
     </div>
@@ -468,10 +531,17 @@ function LoadingStep({ message }) {
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function Cleaner({ pipelineMode, onComplete, onError }) {
+  const { t } = useTranslation();
   const location = useLocation();
   const navigate = useNavigate();
   const { showToast } = useToast();
   const fileInputRef = useRef(null);
+  const manualWorkspaceDirtyRef = useRef(false);
+
+  // Guards for duplicate calls and in-flight abort
+  const isDetectingRef = useRef(false);
+  const isAutoCleaningRef = useRef(false);
+  const abortControllerRef = useRef(null);
 
   const { fileSession, updateFileSession, clearFileSession } = useFileSession();
 
@@ -496,18 +566,34 @@ export default function Cleaner({ pipelineMode, onComplete, onError }) {
   const [autoCleanErrorCells, setAutoCleanErrorCells] = useState([]);
   const [confirmedResult, setConfirmedResult] = useState(null);
   const [previewData, setPreviewData] = useState([]);
-  const [loadingMsg, setLoadingMsg] = useState("Đang quét vấn đề dữ liệu...");
+  const [loadingMsg, setLoadingMsg] = useState(t("cleaner.loading_scanning"));
   const [error, setError] = useState(null);
   const [confirming, setConfirming] = useState(false);
+  const [isSkip, setIsSkip] = useState(false);
+
+  // Cleanup abort controller on unmount
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, []);
 
   const handleFile = async (file) => {
     if (!file) return;
     const allowed = [".csv", ".xlsx", ".xls"];
     const ext = file.name.toLowerCase().slice(file.name.lastIndexOf("."));
     if (!allowed.includes(ext)) {
-      showToast("Định dạng file không hợp lệ. Vui lòng tải lên file Excel (.xlsx, .xls) hoặc CSV.", "error");
+      showToast(t("cleaner.toast_upload_invalid_format"), "error");
       return;
     }
+
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    abortControllerRef.current = new AbortController();
+
     setIsUploading(true);
     setError(null);
     try {
@@ -515,11 +601,11 @@ export default function Cleaner({ pipelineMode, onComplete, onError }) {
       setFileHash(res.data.file_hash);
       setFileName(file.name);
       setProfileData(res.data);
-      setOverrides({});
-      showToast("Tải file lên thành công! Hệ thống đang tiến hành kiểm tra...", "success");
+      updateFileSession({ overrides: {} });
+      showToast(t("cleaner.toast_upload_success"), "success");
     } catch (err) {
-      showToast("Không thể tải file lên. Vui lòng kiểm tra lại kết nối mạng hoặc thử file khác.", "error");
-      setError("Không thể upload file. Vui lòng thử lại.");
+      showToast(t("cleaner.toast_upload_failed"), "error");
+      setError(t("cleaner.toast_upload_failed"));
     } finally {
       setIsUploading(false);
     }
@@ -545,16 +631,30 @@ export default function Cleaner({ pipelineMode, onComplete, onError }) {
   }, [fileHash, step]);
 
   const runDetection = async () => {
+    if (isDetectingRef.current) return;
+    isDetectingRef.current = true;
+
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    abortControllerRef.current = new AbortController();
+
     try {
+      setLoadingMsg(t("cleaner.loading_scanning"));
       const res = await detectIssues(fileHash, overrides);
       setIssues(res.data);
       setPreviewData(res.data.preview_data || []);
+      setError(null);
       setStep("previewing_issues");
     } catch (err) {
-      const msg = err?.response?.data?.detail || "Không thể quét dữ liệu. Vui lòng thử lại sau.";
+      if (err.name === "CanceledError" || err.code === "ERR_CANCELED") return;
+      const detail = err?.response?.data?.detail;
+      const msg = typeof detail === "string" ? translateError(detail, detail) : t("cleaner.toast_detect_failed");
       setError(msg);
       showToast(msg, "error");
       setStep("error");
+    } finally {
+      isDetectingRef.current = false;
     }
   };
 
@@ -565,35 +665,43 @@ export default function Cleaner({ pipelineMode, onComplete, onError }) {
       return;
     }
 
+    if (isAutoCleaningRef.current) return;
+    isAutoCleaningRef.current = true;
+
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    abortControllerRef.current = new AbortController();
+
     try {
-      setLoadingMsg("Đang tự động làm sạch dữ liệu...");
+      setLoadingMsg(t("cleaner.loading_auto_cleaning"));
       setStep("cleaning");
       const finalOverrides = Object.fromEntries(Object.entries(overrides).filter(([_, v]) => v !== "auto"));
-      console.log("auto-clean payload:", JSON.stringify({ file_hash: fileHash, overridden_types: finalOverrides }));
       const res = await autoClean(fileHash, finalOverrides);
       setDiffReport(res.data.diff_report);
       setPreviewData(res.data.preview_data || []);
       setAutoCleanErrorCells(res.data.error_cells || []);
-      // Nếu có lỗi cứng, server đã quăng 422, hoặc trả về validation=False (tùy cài đặt)
+      setError(null);
+
       if (res.data.validation && !res.data.validation.can_proceed) {
-        const err = res.data.validation.hard_blocks[0]?.message || "Dữ liệu gặp sự cố nghiêm trọng không thể tự động khắc phục.";
+        const err = res.data.validation.hard_blocks[0]?.message || t("cleaner.error_clean_failed");
         setError(err);
         showToast(err, "error");
         setStep("error");
         return;
       }
 
-      // Update session with validation capabilities/warnings early or wait for confirm
       setValidationState(res.data.validation);
-      
-      // Chuyển sang reviewing_diff, UI hiển thị PreviewTable của dữ liệu ĐÃ CLEAN (previewData)
-      // kèm DiffReportView. Nếu errorCells còn semantic error, DiffReportView sẽ hiển thị banner.
       setStep("reviewing_diff");
     } catch (err) {
-      const msg = err?.response?.data?.detail || "Không thể tự động làm sạch dữ liệu. Vui lòng thử lại sau.";
+      if (err.name === "CanceledError" || err.code === "ERR_CANCELED") return;
+      const detail = err?.response?.data?.detail;
+      const msg = typeof detail === "string" ? translateError(detail, detail) : t("cleaner.toast_auto_clean_failed");
       setError(msg);
       showToast(msg, "error");
       setStep("error");
+    } finally {
+      isAutoCleaningRef.current = false;
     }
   };
 
@@ -601,11 +709,13 @@ export default function Cleaner({ pipelineMode, onComplete, onError }) {
     setConfirming(true);
     try {
       const res = await confirmClean(fileHash, selectedMode || "auto", overrides, manualActions);
+      manualWorkspaceDirtyRef.current = false; // Rule 1: clear unsaved-changes flag on Confirm
       setConfirmedResult(res.data);
       setStep("confirmed");
-      showToast("Đã hoàn tất làm sạch dữ liệu! Bạn có thể tiếp tục bước tiếp theo.", "success");
+      showToast(t("cleaner.toast_confirm_success"), "success");
     } catch (err) {
-      const msg = err?.response?.data?.detail || "Không thể lưu dữ liệu đã làm sạch. Vui lòng thử lại.";
+      const detail = err?.response?.data?.detail;
+      const msg = typeof detail === "string" ? translateError(detail, detail) : t("cleaner.toast_confirm_failed");
       setError(msg);
       showToast(msg, "error");
     } finally {
@@ -613,12 +723,88 @@ export default function Cleaner({ pipelineMode, onComplete, onError }) {
     }
   };
 
+  const handleSkipCleaning = async () => {
+    const totalIssues = (issues?.missing_values?.length ?? 0) +
+      (issues?.wrong_types?.length ?? 0) +
+      (issues?.encoding_errors?.length ?? 0) +
+      (issues?.duplicates?.duplicate_count ?? 0) +
+      (issues?.semantic_errors?.length ?? 0);
+    if (totalIssues > 0) {
+      if (!window.confirm(t("cleaner.confirm_skip_with_issues", { count: totalIssues }))) return;
+    }
+    // Confirm with manual mode + empty actions = skip (no changes)
+    setIsSkip(true);
+    setConfirming(true);
+    try {
+      const res = await confirmClean(fileHash, "manual", overrides, []);
+      manualWorkspaceDirtyRef.current = false;
+      setConfirmedResult(res.data);
+      setSelectedMode("manual");
+      setStep("confirmed");
+      showToast(t("cleaner.toast_confirm_success"), "success");
+    } catch (err) {
+      setIsSkip(false);
+      const detail = err?.response?.data?.detail;
+      const msg = typeof detail === "string" ? translateError(detail, detail) : t("cleaner.toast_confirm_failed");
+      setError(msg);
+      showToast(msg, "error");
+    } finally {
+      setConfirming(false);
+    }
+  };
+
+  const handleBackToOriginal = () => {
+    if (manualWorkspaceDirtyRef.current) {
+      if (!window.confirm(t("cleaner.nav.confirm_back_to_original"))) {
+        return;
+      }
+    }
+    manualWorkspaceDirtyRef.current = false;
+    setConfirmedResult(null);
+    setDiffReport(null);
+    setValidationState(null);
+    setStep("previewing_issues");
+  };
+
+  const handleStartOver = () => {
+    if (manualWorkspaceDirtyRef.current) {
+      if (!window.confirm(t("cleaner.nav.confirm_start_over"))) {
+        return;
+      }
+    }
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    manualWorkspaceDirtyRef.current = false;
+    clearFileSession();
+    setStep("detecting");
+    setIssues(null);
+    setDiffReport(null);
+    setConfirmedResult(null);
+    setPreviewData([]);
+    setAutoCleanErrorCells([]);
+    setSelectedMode(null);
+    setError(null);
+  };
+
+  const handleRetry = () => {
+    setError(null);
+    if (!issues) {
+      setStep("detecting");
+      runDetection();
+    } else if (selectedMode === "auto") {
+      handleModeSelect("auto");
+    } else {
+      setStep("previewing_issues");
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#FBFBFA]">
       <div className={PAGE.wrapper}>
         <PageHeader
-          title="Làm sạch dữ liệu"
-          subtitle={fileName ? `Đang làm sạch: ${fileName}` : "Sửa lỗi dữ liệu tự động"}
+          title={t("cleaner.title")}
+          subtitle={fileName ? t("cleaner.subtitle_cleaning", { fileName }) : t("cleaner.subtitle_auto")}
           actions={
             <div className="flex items-center gap-3">
               <PageHelpDocs pageId="cleaner" />
@@ -628,17 +814,14 @@ export default function Cleaner({ pipelineMode, onComplete, onError }) {
                     onClick={() => navigate(fileHash ? "/dashboard/profiler" : "/dashboard/profiler")}
                     className={`${BTN.secondary} flex items-center gap-1.5`}
                   >
-                    <ArrowLeft className="w-4 h-4" /> Quay lại
+                    <ArrowLeft className="w-4 h-4" /> {t("cleaner.back_to_profiler")}
                   </button>
                   {fileHash && (
                     <button
-                      onClick={() => {
-                        clearFileSession();
-                        setStep("detecting");
-                      }}
+                      onClick={handleStartOver}
                       className={`${BTN.secondary} flex items-center gap-1.5`}
                     >
-                      <FolderUp className="w-4 h-4" /> Tải file khác
+                      <FolderUp className="w-4 h-4" /> {t("cleaner.upload_different_file")}
                     </button>
                   )}
                 </>
@@ -647,12 +830,42 @@ export default function Cleaner({ pipelineMode, onComplete, onError }) {
           }
         />
 
+        {/* Persistent Navigation Bar (after upload) */}
+        {fileHash && step !== "detecting" && (
+          <div className="mb-4 bg-white border border-border rounded-xl px-4 py-2.5 flex items-center justify-between gap-3 shadow-sm">
+            <div>
+              {step !== "previewing_issues" ? (
+                <button
+                  id="cleaner-persistent-back-btn"
+                  onClick={handleBackToOriginal}
+                  className="inline-flex items-center gap-1.5 text-sm font-medium text-forest hover:underline"
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                  {t("cleaner.nav.back_to_original")}
+                </button>
+              ) : (
+                <span className="text-xs text-muted font-medium">
+                  {fileName}
+                </span>
+              )}
+            </div>
+            <button
+              id="cleaner-persistent-start-over-btn"
+              onClick={handleStartOver}
+              className="inline-flex items-center gap-1.5 text-xs text-muted hover:text-[#9F2F2D] transition-colors"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              {t("cleaner.nav.start_over")}
+            </button>
+          </div>
+        )}
+
         {/* Upload Zone (Nếu chưa có fileHash) */}
         {!fileHash ? (
           <div className="max-w-3xl mx-auto py-8">
-            <h2 className="text-xl font-semibold text-ink mb-2">Bắt đầu làm sạch dữ liệu</h2>
+            <h2 className="text-xl font-semibold text-ink mb-2">{t("cleaner.start_cleaning_title")}</h2>
             <p className="text-sm text-muted mb-6">
-              Tải lên dữ liệu của bạn để hệ thống tự động quét và phân loại các vấn đề như dữ liệu bị thiếu, sai kiểu định dạng, hoặc các dòng trùng lặp.
+              {t("cleaner.start_cleaning_desc")}
             </p>
 
             <div
@@ -680,20 +893,20 @@ export default function Cleaner({ pipelineMode, onComplete, onError }) {
               />
               <div className="text-muted text-sm">
                 <Upload size={48} strokeWidth={1.5} className="mx-auto mb-4 text-[#1B4324]" />
-                <span className="block mb-1.5 text-ink font-medium text-lg">Kéo thả file dữ liệu vào đây</span>
-                hoặc click để duyệt file &mdash; hỗ trợ CSV, XLSX, XLS (tối đa 10MB)
+                <span className="block mb-1.5 text-ink font-medium text-lg">{t("cleaner.drag_drop_prompt")}</span>
+                {t("cleaner.file_support_hint")}
               </div>
             </div>
 
             <div className="mt-8 bg-white border border-border rounded-xl p-6 shadow-sm">
               <h3 className="font-medium text-ink flex items-center gap-2 mb-4">
                 <Info className="w-5 h-5 text-[#1B4324]" />
-                Lưu ý quá trình làm sạch
+                {t("cleaner.cleaning_notes_title")}
               </h3>
               <ul className="text-sm text-muted space-y-3 list-disc pl-5">
-                <li><strong className="text-ink font-medium">Bảo toàn dữ liệu gốc:</strong> Quá trình làm sạch sẽ không bao giờ ghi đè lên file gốc của bạn. Dữ liệu đã làm sạch sẽ được lưu thành một phiên bản mới.</li>
-                <li><strong className="text-ink font-medium">Làm sạch tự động (Auto-clean):</strong> Hệ thống sử dụng các chiến lược thông minh để điền dữ liệu thiếu, xóa các dòng trùng lặp hoàn toàn, và chuẩn hóa kiểu dữ liệu.</li>
-                <li><strong className="text-ink font-medium">Kiểm soát hoàn toàn:</strong> Bạn luôn có thể xem lại "Diff Report" (Báo cáo thay đổi) chi tiết trước khi xác nhận lưu kết quả làm sạch.</li>
+                <li><strong className="text-ink font-medium">{t("cleaner.note_preserve_original")}</strong> {t("cleaner.note_preserve_original_desc")}</li>
+                <li><strong className="text-ink font-medium">{t("cleaner.note_auto_clean")}</strong> {t("cleaner.note_auto_clean_desc")}</li>
+                <li><strong className="text-ink font-medium">{t("cleaner.note_full_control")}</strong> {t("cleaner.note_full_control_desc")}</li>
               </ul>
             </div>
           </div>
@@ -701,40 +914,53 @@ export default function Cleaner({ pipelineMode, onComplete, onError }) {
           <>
             {/* Error inline */}
             {error && (
-              <div className="mb-6 px-4 py-3 rounded-lg bg-[#FDEBEC] text-[#9F2F2D] text-sm border border-[#f5c6cb] flex items-start gap-2">
-                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-                <span>{error}</span>
+              <div className="mb-6 px-4 py-3 rounded-lg bg-[#FDEBEC] text-[#9F2F2D] text-sm border border-[#f5c6cb] flex items-start justify-between gap-3">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>{error}</span>
+                </div>
+                <button
+                  onClick={handleRetry}
+                  className="text-xs font-semibold underline hover:no-underline shrink-0"
+                >
+                  {t("cleaner.retry")}
+                </button>
               </div>
             )}
 
             {/* ── Step: detecting ── */}
             {step === "detecting" && (
-              <LoadingStep message="Đang quét và phân loại vấn đề dữ liệu..." />
+              <LoadingStep message={loadingMsg || t("cleaner.loading_scanning")} />
             )}
 
             {/* ── Step: error ── */}
             {step === "error" && (
               <div className="text-center py-10 bg-white border border-[#f5c6cb] rounded-xl shadow-sm">
                 <AlertTriangle className="w-12 h-12 mx-auto mb-4 text-[#9F2F2D]" />
-                <h2 className="text-lg font-semibold text-[#9F2F2D] mb-2">Làm sạch dữ liệu thất bại</h2>
+                <h2 className="text-lg font-semibold text-[#9F2F2D] mb-2">{t("cleaner.error_clean_failed")}</h2>
                 <p className="text-sm text-muted whitespace-pre-line mb-6 max-w-md mx-auto leading-relaxed">{error}</p>
                 <div className="flex items-center justify-center gap-3">
                   <button
+                    onClick={handleRetry}
+                    className={BTN.primary}
+                  >
+                    {t("cleaner.retry")}
+                  </button>
+                  <button
                     onClick={() => {
                       updateFileSession({ fileHash: null, fileName: null, profileData: null, overrides: null, sessionId: null });
-                      // Reset local states to prepare for a new upload
                       setStep("detecting");
                       setError(null);
                     }}
                     className={BTN.secondary}
                   >
-                    Upload file khác
+                    {t("cleaner.upload_different")}
                   </button>
                   <button
                     onClick={() => navigate("/dashboard/profiler")}
-                    className={BTN.primary}
+                    className={BTN.secondary}
                   >
-                    Xem lại dữ liệu gốc
+                    {t("cleaner.view_original_data")}
                   </button>
                 </div>
               </div>
@@ -742,21 +968,23 @@ export default function Cleaner({ pipelineMode, onComplete, onError }) {
 
             {/* ── Step: cleaning ── */}
             {step === "cleaning" && (
-              <LoadingStep message="Đang áp dụng rule làm sạch..." />
+              <LoadingStep message={loadingMsg || t("cleaner.loading_rules")} />
             )}
 
             {/* ── Step: previewing_issues ── */}
             {step === "previewing_issues" && issues && (
               <div className="space-y-4">
                 <IssuesSummary issues={issues} />
-                <PreviewTable 
-                  data={previewData} 
-                  errorCells={issues.error_cells || []} 
-                  title="Bảng dữ liệu xem trước (Tô màu các vấn đề)"
+                <PreviewTable
+                  data={previewData}
+                  errorCells={issues.error_cells || []}
+                  title={t("cleaner.preview_table_title")}
                 />
-                <CleanerActionBar 
-                  onAutoClean={() => handleModeSelect("auto")} 
-                  onManualClean={() => handleModeSelect("manual")} 
+                <CleanerActionBar
+                  onAutoClean={() => handleModeSelect("auto")}
+                  onManualClean={() => handleModeSelect("manual")}
+                  onSkip={handleSkipCleaning}
+                  hasIssues={issues.has_issues}
                 />
               </div>
             )}
@@ -768,9 +996,12 @@ export default function Cleaner({ pipelineMode, onComplete, onError }) {
                   columns={profileData?.columns?.map(c => c.name) || []}
                   fileHash={fileHash}
                   onConfirm={(actions) => handleConfirmClean(actions)}
-                  onBack={() => setStep("previewing_issues")}
+                  onBack={handleBackToOriginal}
                   initialPreviewData={previewData}
                   initialErrorCells={selectedMode === "auto" ? autoCleanErrorCells : (issues?.error_cells || [])}
+                  onDirtyChange={(isDirty) => {
+                    manualWorkspaceDirtyRef.current = isDirty;
+                  }}
                 />
               </div>
             )}
@@ -790,10 +1021,12 @@ export default function Cleaner({ pipelineMode, onComplete, onError }) {
               />
             )}
 
+            {/* ── Step: confirmed ── */}
             {step === "confirmed" && confirmedResult && (
               <ConfirmedView
                 result={confirmedResult}
                 previewData={confirmedResult.preview_data && confirmedResult.preview_data.length > 0 ? confirmedResult.preview_data : previewData}
+                isSkip={isSkip}
                 onGoHome={() => navigate("/dashboard/profiler")}
                 onGoVisualize={() => {
                   updateFileSession({
@@ -805,11 +1038,10 @@ export default function Cleaner({ pipelineMode, onComplete, onError }) {
                   else navigate("/dashboard/visualize");
                 }}
                 onBackToEdit={() => {
-                  if (confirmedResult.clean_mode === "manual") {
-                    setStep("manual_workspace");
-                  } else {
-                    setStep("choosing_mode");
-                  }
+                  // Rule 1: No confirm dialog when clicking "Quay lại sửa tiếp" on confirmed screen
+                  manualWorkspaceDirtyRef.current = false;
+                  setIsSkip(false);
+                  setStep("previewing_issues");
                   setConfirmedResult(null);
                 }}
               />

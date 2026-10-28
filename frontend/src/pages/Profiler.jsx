@@ -1,10 +1,18 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useFileSession } from "../contexts/FileSessionContext";
 import { useAuth } from "../contexts/AuthContext";
-import { profileFile, requestAIContext } from "../services/profilerService";
+import {
+  profileFile,
+  requestAIContext,
+  getProfilerState,
+  saveProfilerState,
+  getAIUsage,
+} from "../services/profilerService";
 import api from "../services/axiosClient";
 import { useToast } from "../contexts/ToastContext";
+import { useTranslation } from "react-i18next";
+import { getCurrentLang, translateError } from "../i18n";
 import { AlertTriangle, ArrowLeft, ArrowRight, RotateCcw, RotateCw, Zap, Clock } from "lucide-react";
 import PageHeader from "../components/PageHeader";
 import PageHelpDocs from "../components/PageHelpDocs";
@@ -14,8 +22,8 @@ import { PAGE, BTN } from "../constants/ui";
 import { UploadZone } from "../components/Profiler/UploadZone";
 import { LoadingOverlay } from "../components/Profiler/LoadingOverlay";
 import { ColumnTable } from "../components/Profiler/ColumnTable";
-import { DatasetContext } from "../components/Profiler/DatasetContext";
-import { SemanticContext } from "../components/Profiler/SemanticContext";
+import MergedDescriptionBox from "../components/Profiler/MergedDescriptionBox";
+import UpgradeModal from "../components/UpgradeModal";
 
 // ── Expiry Banner ── slim countdown strip shown below the table ──
 const SESSION_TTL_MS = 3600 * 1000;
@@ -41,6 +49,7 @@ function ExpiryBanner({ uploadedAt, filename }) {
   const s = secondsLeft % 60;
   const formatted = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   const isUrgent = secondsLeft > 0 && secondsLeft < 300;
+  const { t } = useTranslation();
 
   return (
     <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs border transition-colors ${
@@ -50,10 +59,10 @@ function ExpiryBanner({ uploadedAt, filename }) {
     }`}>
       <Clock className="w-3.5 h-3.5 shrink-0" />
       <span>
-        File <strong className={isUrgent ? "text-[#9F2F2D]" : "text-ink"}>{filename}</strong>{" "}
+        {t("profiler.expiry_file")} <strong className={isUrgent ? "text-[#9F2F2D]" : "text-ink"}>{filename}</strong>{" "}
         {isUrgent
-          ? <><span className="font-semibold">auto-deletes in <span className="font-mono">{formatted}</span> — save your work!</span></>  
-          : <>auto-deletes in <span className="font-mono font-medium">{formatted}</span> for security.</>}
+          ? <span className="font-semibold">{t("profiler.expiry_urgent", { time: formatted })}</span>
+          : <span>{t("profiler.expiry_normal", { time: formatted })}</span>}
       </span>
     </div>
   );
@@ -72,6 +81,7 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [lastFile, setLastFile] = useState(null);
+  const { t, i18n } = useTranslation();
   const [aiLoading, setAiLoading] = useState(false);
   const [aiAnalyzed, setAiAnalyzed] = useState(false);
   // Timestamp (ms) of when the file was uploaded — drives the 1-hour countdown
@@ -82,19 +92,77 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
   const result = fileSession.profileData;
   const overrides = fileSession.overrides || {};
 
-  const [contextDescription, setContextDescription] = useState(fileSession?.userContext?.description || "");
+  const [description, setDescription] = useState(fileSession?.userContext?.description || "");
+  const [descriptionSource, setDescriptionSource] = useState(fileSession?.userContext?.description_source || "user");
   const [contextPurpose, setContextPurpose] = useState(fileSession?.userContext?.purpose || "");
+  const [savedAt, setSavedAt] = useState(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [aiUsage, setAiUsage] = useState(null);
+  const [isFromCache, setIsFromCache] = useState(false);
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const debounceTimerRef = useRef(null);
+
+  // Load server persisted profiler context & shared AI usage (survives reload/logout within 24h)
+  useEffect(() => {
+    if (!result?.file_hash) return;
+
+    getProfilerState(result.file_hash)
+      .then((res) => {
+        if (res.data) {
+          if (res.data.description !== undefined && res.data.description !== "") {
+            setDescription(res.data.description);
+            setDescriptionSource(res.data.description_source || "user");
+          }
+          if (res.data.saved_at) {
+            setSavedAt(res.data.saved_at);
+          }
+          if (res.data.semantic_context?.domain && res.data.semantic_context.domain !== "Chưa phân tích") {
+            setAiAnalyzed(true);
+            updateFileSession({
+              profileData: {
+                ...result,
+                semantic_context: res.data.semantic_context,
+              },
+            });
+          }
+        }
+      })
+      .catch((e) => console.warn("Failed to load persisted profiler state:", e));
+
+    getAIUsage()
+      .then((res) => setAiUsage(res.data))
+      .catch((e) => console.warn("Failed to load AI usage:", e));
+  }, [result?.file_hash]);
+
+  const handleDescriptionChange = (newVal) => {
+    setDescription(newVal);
+    const newSource = descriptionSource === "ai_draft" ? "ai_edited" : descriptionSource || "user";
+    setDescriptionSource(newSource);
+
+    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+    debounceTimerRef.current = setTimeout(async () => {
+      if (!result?.file_hash) return;
+      setIsSaving(true);
+      try {
+        const res = await saveProfilerState(result.file_hash, newVal, newSource);
+        setSavedAt(res.data?.saved_at || new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+        updateFileSession({
+          userContext: { description: newVal, purpose: contextPurpose, description_source: newSource },
+        });
+      } catch (err) {
+        console.warn("Auto-save profiler state failed:", err);
+      } finally {
+        setIsSaving(false);
+      }
+    }, 800);
+  };
 
   const handleSaveContext = async () => {
-    if (contextDescription || contextPurpose) {
+    if (result?.file_hash) {
       try {
-        await api.post("/session/context", {
-          session_id: fileSession.sessionId || fileSession.fileHash,
-          description: contextDescription,
-          purpose: contextPurpose
-        });
+        await saveProfilerState(result.file_hash, description, descriptionSource);
         updateFileSession({
-          userContext: { description: contextDescription, purpose: contextPurpose }
+          userContext: { description, purpose: contextPurpose, description_source: descriptionSource }
         });
       } catch (e) {
         console.error(e);
@@ -135,14 +203,14 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
 
     // Gate: must be logged in to upload
     if (!user) {
-      showToast("Vui lòng đăng nhập để tải file lên và phân tích.", "warning");
+      showToast(t("profiler.login_required"), "warning");
       navigate("/login", { state: { from: location } });
       return;
     }
     const allowed = [".csv", ".xlsx", ".xls"];
     const ext = file.name.toLowerCase().slice(file.name.lastIndexOf("."));
     if (!allowed.includes(ext)) {
-      const msg = "Định dạng file không được hỗ trợ. Vui lòng chọn file Excel (.xlsx, .xls) hoặc CSV.";
+      const msg = translateError("ERR_FILE_EXT_INVALID");
       setError(msg);
       showToast(msg, "error");
       return;
@@ -159,18 +227,20 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
       const res = await profileFile(file, forceRefresh);
       setResult(res.data, true); // mark as fresh upload to reset countdown
       
-      showToast(forceRefresh ? "Analysis refreshed!" : "File analyzed successfully!", "success");
+      showToast(forceRefresh ? t("profiler.toast_refreshed") : t("profiler.toast_analyzed"), "success");
     } catch (err) {
-      const detail = err?.response?.data?.detail;
+      const errCode = err?.response?.data?.detail?.code || err?.response?.data?.code;
       let msg;
       if (err?.response?.status === 413) {
-        msg = "File exceeds the 10MB size limit. Please choose a smaller file.";
+        msg = translateError("ERR_FILE_TOO_LARGE");
       } else if (err?.response?.status === 422) {
-        msg = "File is corrupted or has an invalid format. Please check the file and try again.";
+        msg = translateError("ERR_FILE_CORRUPTED");
       } else if (err?.code === "ECONNABORTED" || !err?.response) {
-        msg = "Cannot reach server. Please check your connection and retry.";
+        msg = translateError("network");
+      } else if (errCode) {
+        msg = translateError(errCode);
       } else {
-        msg = typeof detail === "string" ? detail : "Unable to analyze file right now. Please try again later.";
+        msg = translateError("generic");
       }
       setError(msg);
       showToast(msg, "error");
@@ -202,43 +272,160 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
     setOverrides({});
     setError(null);
     setAiAnalyzed(false);
+    setDescription("");
+    setDescriptionSource("user");
+    setSavedAt(null);
+    setIsFromCache(false);
   };
 
-  const handleRequestAI = async () => {
+  const handleAnalyzeAI = async (replace = true) => {
     if (!result?.file_hash || aiLoading) return;
     setAiLoading(true);
+    setIsFromCache(false);
     try {
-      const res = await requestAIContext(result.file_hash);
-      const { semantic_context } = res.data;
-      // Update the semantic context in the result
+      const res = await requestAIContext(
+        result.file_hash,
+        getCurrentLang(),
+        replace ? null : description,
+        false
+      );
+      const data = res.data;
       setResult({
         ...result,
-        semantic_context: semantic_context,
+        semantic_context: data.semantic_context,
       });
       setAiAnalyzed(true);
-      showToast("AI analysis complete!", "success");
+      if (replace) {
+        setDescription(data.draft_summary || data.description || "");
+        setDescriptionSource("ai_draft");
+      }
+      if (data.saved_at) {
+        setSavedAt(data.saved_at);
+      }
+      if (data.usage) {
+        setAiUsage(data.usage);
+      }
+      setIsFromCache(Boolean(data.from_cache));
+      updateFileSession({
+        userContext: {
+          description: replace ? (data.draft_summary || data.description || "") : description,
+          purpose: contextPurpose,
+          description_source: replace ? "ai_draft" : descriptionSource,
+        },
+      });
+      showToast(t("profiler.saved_status", { time: formatSavedTime(data.saved_at) }), "success");
     } catch (err) {
-      const detail = err?.response?.data?.detail;
-      showToast(
-        typeof detail === "string" ? detail : "AI analysis failed. Please try again later.",
-        "error"
-      );
+      const errCode = err?.response?.data?.detail?.code || err?.response?.data?.code;
+      if (errCode === "ERR_AI_QUOTA_EXCEEDED" || err?.response?.status === 429 || err?.response?.status === 402) {
+        if (!user?.is_pro && aiUsage?.is_pro !== true) {
+          setShowUpgradeModal(true);
+        }
+        showToast(translateError("ERR_AI_QUOTA_EXCEEDED"), "error");
+      } else {
+        showToast(translateError(errCode), "error");
+      }
     } finally {
       setAiLoading(false);
     }
   };
 
+  const handleReanalyzeWithCorrection = async () => {
+    if (!result?.file_hash || aiLoading) return;
+    setAiLoading(true);
+    setIsFromCache(false);
+    try {
+      const res = await requestAIContext(
+        result.file_hash,
+        getCurrentLang(),
+        description,
+        true
+      );
+      const data = res.data;
+      setResult({
+        ...result,
+        semantic_context: data.semantic_context,
+      });
+      setAiAnalyzed(true);
+      setDescriptionSource("ai_edited");
+      if (data.saved_at) {
+        setSavedAt(data.saved_at);
+      }
+      if (data.usage) {
+        setAiUsage(data.usage);
+      }
+      setIsFromCache(Boolean(data.from_cache));
+      updateFileSession({
+        userContext: {
+          description,
+          purpose: contextPurpose,
+          description_source: "ai_edited",
+        },
+      });
+      showToast(t("profiler.saved_status", { time: formatSavedTime(data.saved_at) }), "success");
+    } catch (err) {
+      const errCode = err?.response?.data?.detail?.code || err?.response?.data?.code;
+      if (errCode === "ERR_AI_QUOTA_EXCEEDED" || err?.response?.status === 429 || err?.response?.status === 402) {
+        if (!user?.is_pro && aiUsage?.is_pro !== true) {
+          setShowUpgradeModal(true);
+        }
+        showToast(translateError("ERR_AI_QUOTA_EXCEEDED"), "error");
+      } else {
+        showToast(translateError(errCode), "error");
+      }
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const formatSavedTime = (timeStr) => {
+    if (!timeStr) return "";
+    try {
+      if (/^\d{1,2}:\d{2}$/.test(timeStr)) {
+        const [h, m] = timeStr.split(":").map(Number);
+        const d = new Date();
+        d.setUTCHours(h, m, 0, 0);
+        return new Intl.DateTimeFormat(i18n.language === "vi" ? "vi-VN" : "en-US", {
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: false,
+          timeZone: "Asia/Ho_Chi_Minh",
+        }).format(d);
+      }
+      const d = new Date(timeStr);
+      if (!isNaN(d.getTime())) {
+        return new Intl.DateTimeFormat(i18n.language === "vi" ? "vi-VN" : "en-US", {
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: false,
+          timeZone: "Asia/Ho_Chi_Minh",
+        }).format(d);
+      }
+      return timeStr;
+    } catch {
+      return timeStr;
+    }
+  };
+
   const getEffectiveType = (col) => overrides[col.name] || col.detected_type;
+
+  const lang = getCurrentLang();
+  const numberLocale = lang === "vi" ? "vi-VN" : "en-US";
+  const displayDomain = result?.semantic_context?.domain === "Chưa phân tích"
+    ? t("profiler.domain_not_analyzed")
+    : result?.semantic_context?.domain;
 
   return (
     <div className="min-h-screen bg-[#FBFBFA]">
       <div className={PAGE.wrapper}>
         {/* ── Header ─────────────────────────────────────────────── */}
         <PageHeader
-          title="Data Profiler"
+          title={t("profiler.title")}
           subtitle={result
-            ? `${result.total_columns} columns · ${result.total_rows.toLocaleString()} rows${aiAnalyzed ? ` · ${result.semantic_context.domain}` : ""}`
-            : "Structural overview and data quality analysis"
+            ? `${t("profiler.subtitle_with_result", {
+                cols: result.total_columns.toLocaleString(numberLocale),
+                rows: result.total_rows.toLocaleString(numberLocale),
+              })}${aiAnalyzed ? ` · ${displayDomain}` : ""}`
+            : t("profiler.subtitle_default")
           }
           actions={
             <div className="flex flex-wrap items-center gap-2">
@@ -249,7 +436,7 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
                   onClick={() => navigate("/")}
                   className={`${BTN.secondary} flex items-center gap-1.5`}
                 >
-                  <ArrowLeft className="w-4 h-4" /> Home
+                  <ArrowLeft className="w-4 h-4" /> {t("profiler.btn_home")}
                 </button>
               )}
 
@@ -261,21 +448,21 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
                     onClick={handleReset}
                     className={`${BTN.secondary} flex items-center gap-1.5 text-xs`}
                   >
-                    <RotateCcw size={13} /> Upload New File
+                    <RotateCcw size={13} /> {t("profiler.btn_upload_new")}
                   </button>
 
                   {/* Cache badge + re-analyze — only when result came from cache */}
                   {result.cached && (
                     <div className="flex items-center gap-1.5">
                       <span className="px-2 py-0.5 rounded-full border border-[#EAF2EB] bg-sage text-forest text-[10px] font-medium flex items-center gap-1">
-                        <Zap className="w-3 h-3" /> Cached
+                        <Zap className="w-3 h-3" /> {t("profiler.badge_cached")}
                       </span>
                       <button
                         onClick={() => handleFile(lastFile, true)}
                         disabled={!lastFile}
                         className="flex items-center gap-1 text-[10px] font-medium text-forest hover:text-ink underline transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        <RotateCw className="w-3 h-3" /> Re-analyze
+                        <RotateCw className="w-3 h-3" /> {t("profiler.btn_reanalyze")}
                       </button>
                     </div>
                   )}
@@ -284,14 +471,14 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
                   <div className="w-px h-5 bg-border hidden sm:block" />
 
                   <button onClick={handleSkipContext} className={`${BTN.secondary} text-xs`}>
-                    Skip
+                    {t("profiler.btn_skip")}
                   </button>
                   <button
                     id="profiler-next-btn"
                     onClick={handleSaveContext}
                     className={`${BTN.primary} flex items-center gap-1.5 text-xs`}
                   >
-                    {pipelineMode ? "Save & Continue" : "Save & Clean"} <ArrowRight size={14} />
+                    {pipelineMode ? t("profiler.btn_save_continue") : t("profiler.btn_save_clean")} <ArrowRight size={14} />
                   </button>
                 </>
               )}
@@ -336,28 +523,37 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
             {/* 2. Auto-delete countdown — slim strip below the table */}
             <ExpiryBanner uploadedAt={uploadedAt} filename={result.filename} />
 
-            {/* 3. Context panels — side-by-side on desktop */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-              <div className="lg:col-span-2">
-                <DatasetContext
-                  contextDescription={contextDescription}
-                  setContextDescription={setContextDescription}
-                  contextPurpose={contextPurpose}
-                  setContextPurpose={setContextPurpose}
-                />
-              </div>
-              <div className="lg:col-span-1">
-                <SemanticContext
-                  aiAnalyzed={aiAnalyzed}
-                  aiLoading={aiLoading}
-                  result={result}
-                  handleRequestAI={handleRequestAI}
-                />
-              </div>
-            </div>
+            {/* 3. Merged Description & Context panel */}
+            <MergedDescriptionBox
+              fileHash={result.file_hash}
+              description={description}
+              setDescription={handleDescriptionChange}
+              descriptionSource={descriptionSource}
+              setDescriptionSource={setDescriptionSource}
+              savedAt={savedAt}
+              isSaving={isSaving}
+              aiAnalyzed={aiAnalyzed}
+              aiLoading={aiLoading}
+              semanticContext={result.semantic_context}
+              handleAnalyzeAI={handleAnalyzeAI}
+              handleReanalyzeWithCorrection={handleReanalyzeWithCorrection}
+              contextPurpose={contextPurpose}
+              setContextPurpose={setContextPurpose}
+              usage={aiUsage}
+              isFromCache={isFromCache}
+              onUpgradeClick={() => setShowUpgradeModal(true)}
+            />
           </div>
         )}
       </div>
+
+      <UpgradeModal
+        isOpen={showUpgradeModal}
+        onClose={() => setShowUpgradeModal(false)}
+        onSuccess={() => {
+          getAIUsage().then((r) => setAiUsage(r.data)).catch(console.error);
+        }}
+      />
     </div>
   );
 }

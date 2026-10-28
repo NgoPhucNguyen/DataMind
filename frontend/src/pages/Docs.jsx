@@ -19,17 +19,17 @@ const SECTIONS = [
     },
     {
         id: "pricing_calc",
-        title: "Giá cả tính toán",
+        title: "Gói dịch vụ",
         content: [
             {
-                heading: "Cơ chế Credits",
-                body: "Mỗi thao tác xử lý dữ liệu (Phân tích, Làm sạch tự động, Sử dụng AI) sẽ tiêu tốn một số lượng credits nhất định trong ví của bạn. Bạn có thể mua thêm credits thông qua trang Giá cả.",
+                heading: "Gói Free — Miễn phí",
+                body: "Mỗi ngày, tài khoản Free nhận được 3 lượt AI Insights. Lượt sử dụng được tự động làm mới vào 00:00 (giờ Việt Nam). Các tính năng phân tích dữ liệu, làm sạch thủ công và trực quan hóa hoạt động bình thường không giới hạn.",
                 code: false,
             },
             {
-                heading: "Chi phí ước tính",
-                body: `Phân tích dữ liệu: 50 - 200 credits / file (tùy dung lượng)\nPhân tích AI (Ngữ cảnh): 100 credits / lần gọi\nLàm sạch dữ liệu tự động: 150 credits / lần chạy`,
-                code: true,
+                heading: "Gói Pro — 50.000đ / 30 ngày",
+                body: "Nhận 20 lượt AI Insights mỗi ngày trong thời hạn 30 ngày. Lượt sử dụng reset vào 00:00 hàng ngày (giờ VN). Phù hợp cho người dùng cần phân tích chuyên sâu, làm sạch dữ liệu tự động bằng AI và xuất báo cáo chi tiết. Bạn có thể gia hạn bất kỳ lúc nào để cộng dồn thêm 30 ngày.",
+                code: false,
             },
         ],
     },
@@ -64,8 +64,8 @@ const SECTIONS = [
                 code: false,
             },
             {
-                heading: "Làm sao để tôi lấy thêm Credits?",
-                body: "Bạn được cấp sẵn 100.000 credits khi tạo tài khoản. Sau khi dùng hết, bạn có thể vào mục Giá cả để mua các gói gia hạn.",
+                heading: "Cơ chế hạn mức AI Insights hoạt động như thế nào?",
+                body: "Gói Free được cấp 3 lượt AI mỗi ngày. Gói Pro được cấp 20 lượt AI mỗi ngày trong thời hạn 30 ngày. Hệ thống tự động làm mới số lượt dùng vào 00:00 hàng ngày theo giờ Việt Nam (UTC+7). Khi gói Pro hết hạn sau 30 ngày, tài khoản sẽ tự động chuyển về gói Free (3 lượt/ngày).",
                 code: false,
             },
         ],
@@ -87,11 +87,10 @@ export default function Docs() {
                         <button
                             key={s.id}
                             onClick={() => setActiveSection(s.id)}
-                            className={`text-left px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                                activeSection === s.id
-                                    ? "bg-sage text-forest"
-                                    : "text-muted hover:text-ink hover:bg-sage/40"
-                            }`}
+                            className={`text-left px-3 py-2 rounded-lg text-sm font-medium transition-colors ${activeSection === s.id
+                                ? "bg-sage text-forest"
+                                : "text-muted hover:text-ink hover:bg-sage/40"
+                                }`}
                         >
                             {s.title}
                         </button>
@@ -105,9 +104,8 @@ export default function Docs() {
                     <button
                         key={s.id}
                         onClick={() => setActiveSection(s.id)}
-                        className={`flex-1 py-3 text-xs font-medium transition-colors ${
-                            activeSection === s.id ? "text-forest font-bold" : "text-muted"
-                        }`}
+                        className={`flex-1 py-3 text-xs font-medium transition-colors ${activeSection === s.id ? "text-forest font-bold" : "text-muted"
+                            }`}
                     >
                         {s.title}
                     </button>
@@ -123,7 +121,7 @@ export default function Docs() {
 
                 {current && (
                     <div className="animate-fade-in-up">
-                        <h2 className="text-2xl font-serif font-bold text-ink mb-6 pb-2 border-b border-border">{current.title}</h2>
+                        <h2 className="text-2xl font-bold text-ink mb-6 pb-2 border-b border-border">{current.title}</h2>
                         <div className="space-y-8">
                             {current.content.map((item, i) => (
                                 <div key={i}>

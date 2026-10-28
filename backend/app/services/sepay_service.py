@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 import hmac
 import hashlib
 import time
@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from app.models import PaymentEvent, PendingOrder, UserAIUsage, PaymentEventStatus, PaymentStatus
+from app.services.ai_usage_service import PRO_DAILY_RUNS, PRO_DURATION_DAYS, today_vn
 
 # Helper function to get secrets securely
 def get_sepay_secret():
@@ -151,15 +152,18 @@ def process_sepay_webhook(db: Session, raw_body: bytes):
         matched_order.status = PaymentStatus.COMPLETED
         
         # Update UserAIUsage
-        ai_usage = db.query(UserAIUsage).filter(UserAIUsage.user_id == matched_order.user_id).first()
+        ai_usage = db.query(UserAIUsage).filter(UserAIUsage.user_id == matched_order.user_id).with_for_update().first()
         if not ai_usage:
             ai_usage = UserAIUsage(user_id=matched_order.user_id)
             db.add(ai_usage)
             
+        now = datetime.utcnow()
+        base = ai_usage.pro_expires_at if (ai_usage.plan == "pro" and ai_usage.pro_expires_at and ai_usage.pro_expires_at > now) else now
+        ai_usage.pro_expires_at = base + timedelta(days=PRO_DURATION_DAYS)
         ai_usage.plan = "pro"
-        ai_usage.runs_limit = 50
+        ai_usage.runs_limit = PRO_DAILY_RUNS
         ai_usage.runs_used = 0
-        ai_usage.period_start = datetime.utcnow()
+        ai_usage.runs_reset_date = today_vn()
         
         db.commit()
     except SQLAlchemyError as e:

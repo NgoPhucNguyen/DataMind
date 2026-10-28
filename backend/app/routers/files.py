@@ -20,7 +20,12 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from app.core.dependencies import get_current_user, get_current_user_with_tier
 from app.core.database import get_db
 from sqlalchemy.orm import Session
-from app.services.ai_usage_service import check_ai_quota, record_ai_usage
+from app.services.ai_usage_service import (
+    check_ai_quota,
+    record_ai_usage,
+    record_ai_feature_usage,
+    get_user_ai_usage_summary,
+)
 from app.core import cache
 from app.core.errors import DataMindException, ErrorSeverity
 from app.schemas.files import ProfileResponse, SemanticContext, ColumnProfile
@@ -176,14 +181,6 @@ async def profile_file(
     CACHE_VERSION = "v4"
     file_hash = f"{CACHE_VERSION}:{hashlib.md5(content).hexdigest()}"
 
-    if current_user.get("tier") == "free":
-        if not cache.check_active_session(current_user["user_id"], file_hash):
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="Bạn đang xử lý file khác, vui lòng đợi hoàn tất hoặc nâng cấp Pro để xử lý nhiều file cùng lúc."
-            )
-    cache.set_active_session(current_user["user_id"], file_hash)
-
     # 4. Kiểm tra Redis cache
     if force_refresh:
         # User bấm "Phân tích lại" → xóa cache cũ trước, rồi chạy lại từ đầu
@@ -271,25 +268,29 @@ async def profile_file(
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Endpoint: POST /files/ai-context
-# Gọi Gemini theo yêu cầu (không tự động) để phân tích ngữ cảnh dataset
+# Gọi Gemini theo yêu cầu để phân tích hoặc phân tích lại ngữ cảnh dataset
 # ─────────────────────────────────────────────────────────────────────────────
 
 class AIContextRequest(BaseModel):
     file_hash: str
+    lang: str = "vi"
+    description: str | None = None
+    is_reanalyze: bool = False
 
 @router.post(
     "/ai-context",
     summary="Phân tích ngữ cảnh AI theo yêu cầu",
-    description="Gọi Gemini để nhận diện lĩnh vực dataset. Yêu cầu file đã được profile trước đó.",
+    description="Gọi Gemini để nhận diện lĩnh vực dataset và phân loại cột. Hỗ trợ tái phân tích với chỉnh sửa.",
 )
 async def analyze_ai_context(
     body: AIContextRequest,
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    # 1. Kiểm tra quota dùng chung
     check_ai_quota(current_user["user_id"], db)
 
-    # 1. Lấy profile từ cache
+    # 2. Lấy profile từ cache
     profile_data = cache.get_profile(current_user["user_id"], body.file_hash)
     if not profile_data:
         raise HTTPException(
@@ -299,17 +300,17 @@ async def analyze_ai_context(
 
     columns_raw = profile_data.get("columns", [])
 
-    # 2. Gọi Gemini
-    semantic_raw = await llm_service.get_semantic_context(columns_raw)
-    
-    if semantic_raw.get("domain") == "Unknown" and semantic_raw.get("confidence") == 0.0:
-        record_ai_usage(db, current_user["user_id"], "ai-context", "fallback_used")
-    else:
-        record_ai_usage(db, current_user["user_id"], "ai-context", "success")
+    # 3. Gọi Gemini với lang và user_correction (nếu là re-analyze)
+    user_correction = body.description if body.is_reanalyze else None
+    semantic_raw = await llm_service.get_semantic_context(
+        columns_raw,
+        lang=body.lang,
+        user_correction=user_correction
+    )
 
     column_semantics = semantic_raw.pop("column_semantics", {})
 
-    # 3. Cập nhật profile trong cache với kết quả AI
+    # 4. Cập nhật profile trong cache với kết quả AI
     profile_data["semantic_context"] = {
         "domain": semantic_raw["domain"],
         "confidence": semantic_raw["confidence"],
@@ -322,25 +323,119 @@ async def analyze_ai_context(
 
     cache.set_profile(current_user["user_id"], body.file_hash, profile_data)
 
-    # 4. Re-build và cache lại Markdown Dataset Context (Part 1) vì có domain mới
+    # 5. Ghi nhận quota tiêu thụ
+    feature_name = "reanalyze" if body.is_reanalyze else "profiler"
+    usage_summary = record_ai_feature_usage(db, current_user["user_id"], feature_name)
+
+    # 6. Re-build và cache lại Markdown Dataset Context (Part 1)
     from app.services.context_builder import build_dataset_context
     dataset_md = build_dataset_context(profile_data)
     cache.set_dataset_context_md(current_user["user_id"], body.file_hash, dataset_md)
 
+    # 7. Lưu profiler_context vào Redis với cùng 24h TTL
+    now_saved_at = datetime.utcnow().strftime("%H:%M")
+    draft_summary = semantic_raw.get("draft_summary", "")
+    profiler_ctx_payload = {
+        "description": draft_summary,
+        "description_source": "ai_draft",
+        "semantic_context": profile_data["semantic_context"],
+        "column_semantics": column_semantics,
+        "saved_at": now_saved_at,
+    }
+    cache.set_profiler_context(current_user["user_id"], body.file_hash, profiler_ctx_payload)
+    cache.set_user_context(current_user["user_id"], body.file_hash, draft_summary, "")
+
     logger.info(
-        "AI Context: file_hash=%s domain=%s confidence=%.2f user=%s",
-        body.file_hash, semantic_raw["domain"], semantic_raw["confidence"],
+        "AI Context (%s): file_hash=%s domain=%s confidence=%.2f user=%s",
+        feature_name, body.file_hash, semantic_raw["domain"], semantic_raw["confidence"],
         current_user["user_id"],
     )
 
     return {
         "semantic_context": profile_data["semantic_context"],
         "column_semantics": column_semantics,
+        "draft_summary": draft_summary,
+        "description": draft_summary,
+        "description_source": "ai_draft",
+        "saved_at": now_saved_at,
+        "usage": usage_summary,
     }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Endpoint: POST /files/session/context
+# Endpoints: Profiler State Persistence (Không gọi Gemini)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/profiler-state", summary="Lấy trạng thái Profiler đã lưu (không gọi AI)")
+async def get_profiler_state(
+    file_hash: str,
+    current_user: dict = Depends(get_current_user),
+):
+    ctx = cache.get_profiler_context(current_user["user_id"], file_hash)
+    if ctx:
+        return ctx
+
+    # Fallback kiểm tra profile cache
+    profile_data = cache.get_profile(current_user["user_id"], file_hash)
+    if profile_data and profile_data.get("semantic_context"):
+        sem = profile_data.get("semantic_context")
+        if sem.get("domain") and sem.get("domain") != "Chưa phân tích":
+            col_sem = {
+                c.get("name"): c.get("semantic_type", "GENERAL_TEXT")
+                for c in profile_data.get("columns", [])
+            }
+            return {
+                "description": "",
+                "description_source": "user",
+                "semantic_context": sem,
+                "column_semantics": col_sem,
+                "saved_at": None,
+            }
+
+    return {
+        "description": "",
+        "description_source": "user",
+        "semantic_context": None,
+        "column_semantics": {},
+        "saved_at": None,
+    }
+
+
+class SaveProfilerStateRequest(BaseModel):
+    file_hash: str
+    description: str
+    description_source: str = "user"  # "user" | "ai_draft" | "ai_edited"
+
+
+@router.post("/profiler-state", summary="Lưu nội dung chỉnh sửa Profiler mà không tốn quota")
+async def save_profiler_state(
+    body: SaveProfilerStateRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    existing = cache.get_profiler_context(current_user["user_id"], body.file_hash) or {}
+    saved_at = datetime.utcnow().strftime("%H:%M")
+    data = {
+        "description": body.description,
+        "description_source": body.description_source,
+        "semantic_context": existing.get("semantic_context"),
+        "column_semantics": existing.get("column_semantics", {}),
+        "saved_at": saved_at,
+    }
+    cache.set_profiler_context(current_user["user_id"], body.file_hash, data)
+    cache.set_user_context(current_user["user_id"], body.file_hash, body.description, "")
+    return {"status": "ok", "saved_at": saved_at}
+
+
+@router.get("/ai-usage", summary="Lấy thống kê định mức AI dùng chung")
+async def get_ai_usage_status(
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return get_user_ai_usage_summary(db, current_user["user_id"])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Endpoint: POST /files/session/context (Legacy compatibility)
 # ─────────────────────────────────────────────────────────────────────────────
 
 class SessionContextRequest(BaseModel):
@@ -451,14 +546,6 @@ async def auto_clean(
     body: AutoCleanRequest,
     current_user: dict = Depends(get_current_user_with_tier),
 ):
-    if current_user.get("tier") == "free":
-        if not cache.check_active_session(current_user["user_id"], body.file_hash):
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="Bạn đang xử lý file khác, vui lòng đợi hoàn tất hoặc nâng cấp Pro để xử lý nhiều file cùng lúc."
-            )
-    cache.set_active_session(current_user["user_id"], body.file_hash)
-
     df, filename, _ = _load_df_from_cache(current_user["user_id"], body.file_hash)
 
     cleaned_df, diff_raw, cleaning_log = cleaner_service.auto_clean(
@@ -529,14 +616,6 @@ async def manual_clean_preview(
     body: ManualCleanPreviewRequest,
     current_user: dict = Depends(get_current_user_with_tier),
 ):
-    if current_user.get("tier") == "free":
-        if not cache.check_active_session(current_user["user_id"], body.file_hash):
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="Bạn đang xử lý file khác, vui lòng đợi hoàn tất hoặc nâng cấp Pro để xử lý nhiều file cùng lúc."
-            )
-    cache.set_active_session(current_user["user_id"], body.file_hash)
-
     try:
         df, filename, _ = _load_df_from_cache(current_user["user_id"], body.file_hash)
     except DataMindException as dme:
@@ -600,14 +679,6 @@ async def confirm_clean(
     body: ConfirmCleanRequest,
     current_user: dict = Depends(get_current_user_with_tier),
 ):
-    if current_user.get("tier") == "free":
-        if not cache.check_active_session(current_user["user_id"], body.file_hash):
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="Bạn đang xử lý file khác, vui lòng đợi hoàn tất hoặc nâng cấp Pro để xử lý nhiều file cùng lúc."
-            )
-    cache.set_active_session(current_user["user_id"], body.file_hash)
-
     df, filename, _ = _load_df_from_cache(current_user["user_id"], body.file_hash)
 
     if body.clean_mode == "manual":
@@ -683,7 +754,8 @@ async def confirm_clean(
     cache.set_report_section(current_user["user_id"], body.file_hash, "cleaner", {
         "actions_taken": cleaning_log,
         "clean_mode": body.clean_mode,
-        "stats": diff_raw
+        "stats": diff_raw,
+        "ignored_cells_count": body.ignored_cells_count
     })
     cache.invalidate_downstream_state(current_user["user_id"], body.file_hash)
 
@@ -773,11 +845,11 @@ def _upload_to_supabase(csv_bytes: bytes, original_filename: str, user_id: int) 
 
 @router.delete(
     "/session/active",
-    summary="Hủy session hiện tại",
-    description="Cho phép user hủy tiến trình để xử lý file khác."
+    summary="Hủy session hiện tại (no-op)",
+    description="Kept for frontend compatibility. The per-file lock has been removed; this endpoint now always returns 200."
 )
 async def clear_active_session_endpoint(
-    current_user: dict = Depends(get_current_user_with_tier),
+    current_user: dict = Depends(get_current_user),
 ):
-    cache.clear_active_session(current_user["user_id"])
-    return {"message": "Session đã được hủy thành công."}
+    # No-op: the one-file-at-a-time lock has been removed.
+    return {"message": "ok"}

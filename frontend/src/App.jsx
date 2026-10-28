@@ -25,6 +25,8 @@ import Pipeline from "./pages/Pipeline";
 
 import Navbar from "./components/Navbar";
 import Sidebar from "./components/Sidebar";
+import ExpiredProBanner from "./components/ExpiredProBanner";
+import ErrorBoundary from "./components/ErrorBoundary";
 
 // ===================== Protected Route =====================
 function RequireAuth({ children }) {
@@ -83,8 +85,13 @@ function DashboardLayout() {
           <Navbar />
         </div>
 
+        {/* Expired Pro Banner */}
+        <ExpiredProBanner />
+
         <main className="flex-1 relative overflow-y-auto">
-          <Outlet />
+          <ErrorBoundary>
+            <Outlet />
+          </ErrorBoundary>
         </main>
       </div>
     </div>
@@ -128,7 +135,6 @@ function AppRoutes() {
       <Route path="/report" element={<Navigate to="/dashboard/report" replace />} />
       <Route path="/pipeline" element={<Navigate to="/dashboard/pipeline" replace />} />
       <Route path="/pipeline/:step" element={<Navigate to="/dashboard/pipeline" replace />} />
-      <Route path="/wallet" element={<Navigate to="/dashboard/subscription" replace />} />
       <Route path="/home" element={<Navigate to="/dashboard/profiler" replace />} />
       <Route path="/ua_profiler" element={<Navigate to="/dashboard/profiler" replace />} />
       <Route path="/ua_cleaner" element={<Navigate to="/dashboard/cleaner" replace />} />

@@ -113,6 +113,8 @@ class ConfirmCleanRequest(BaseModel):
     clean_mode: str                          # "auto" | "manual"
     overridden_types: dict[str, str] = {}
     actions: list[CleanAction] = []          # Dành cho chế độ manual
+    ignored_cells_count: int = 0
+
 
 
 class ManualCleanPreviewRequest(BaseModel):

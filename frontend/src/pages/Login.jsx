@@ -4,9 +4,10 @@ import { Link, useNavigate, useLocation } from "react-router-dom";
 import { useToast } from "../contexts/ToastContext";
 import { useAuth } from "../contexts/AuthContext";
 import GoogleSignInButton from "../components/GoogleSignInButton";
+import { track } from "../lib/analytics";
 
 export default function Login() {
-  const navigate = useNavigate();
+const navigate = useNavigate();
   const location = useLocation();
   const { showToast } = useToast();
   const { login: authLogin } = useAuth();

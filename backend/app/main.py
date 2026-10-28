@@ -52,6 +52,19 @@ app.include_router(visualize_router.router, prefix="/api/v1")
 app.include_router(report_router.router, prefix="/api/v1")
 app.include_router(payments_router.router, prefix="/api/v1")
 
+from app.core.dependencies import get_current_user
+from app.core.database import get_db
+from fastapi import Depends
+from sqlalchemy.orm import Session
+from app.services.ai_usage_service import get_user_ai_usage_summary
+
+@app.get("/api/v1/ai/usage", summary="Lấy thống kê định mức AI dùng chung")
+def get_shared_ai_usage(
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    return get_user_ai_usage_summary(db, current_user["user_id"])
+
 
 @app.get("/health")
 async def health():

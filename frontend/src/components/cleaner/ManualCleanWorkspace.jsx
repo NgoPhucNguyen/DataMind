@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Plus, Trash2, CheckCircle2, ChevronRight, PlayCircle, ArrowLeft, MousePointerClick, ChevronDown, Edit2, AlignLeft, Save } from "lucide-react";
+import { Plus, Trash2, CheckCircle2, ChevronRight, PlayCircle, ArrowLeft, MousePointerClick, ChevronDown, Edit2, AlignLeft, Save, X, AlertTriangle, Check, EyeOff } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { TEXT, BTN, CARD } from "../../constants/ui";
 import { manualCleanPreview } from "../../services/cleanerService";
 import { useToast } from "../../contexts/ToastContext";
@@ -20,17 +21,50 @@ const ACTION_LABELS = {
   BATCH_EDIT_CELLS: "Sửa ô thủ công"
 };
 
-export default function ManualCleanWorkspace({ columns, fileHash, onConfirm, onBack, initialPreviewData = null, initialErrorCells = null }) {
+export default function ManualCleanWorkspace({ columns, fileHash, onConfirm, onBack, initialPreviewData = null, initialErrorCells = null, onDirtyChange = null }) {
+  const { t } = useTranslation();
   const [actions, setActions] = useState([]);
   const [previewData, setPreviewData] = useState(initialPreviewData || []);
-  const [errorCells, setErrorCells] = useState(initialErrorCells || []); // Array of ErrorCell
-  const [isPreviewing, setIsPreviewing] = useState(false);
+  const [errorCells, setErrorCells] = useState(initialErrorCells || []); // Array of ErrorCell from backend preview
+  
+  // Rule 4: Keep the cell highlighted by state, using the ORIGINAL error_cells list (do not drop once fixed)
+  const originalErrorCellsRef = useRef(initialErrorCells || []);
   const [pendingCellEdits, setPendingCellEdits] = useState([]); // Array of {row_id, column, new_value}
   const pendingEditsRef = useRef([]);
   const [isFullEditMode, setIsFullEditMode] = useState(false);
+  const [isPreviewing, setIsPreviewing] = useState(false);
   
+  // cellReviewStates: { [ "row_id:col" ]: "fixed" | "ignored" } (default for any error cell is "pending")
+  const [cellReviewStates, setCellReviewStates] = useState({});
+
   const debounceTimer = useRef(null);
   const { showToast } = useToast();
+
+  // Reset all state when fileHash changes
+  useEffect(() => {
+    setActions([]);
+    setPendingCellEdits([]);
+    pendingEditsRef.current = [];
+    setCellReviewStates({});
+    originalErrorCellsRef.current = initialErrorCells || [];
+    setPreviewData(initialPreviewData || []);
+    setErrorCells(initialErrorCells || []);
+  }, [fileHash, initialErrorCells, initialPreviewData]);
+
+  // Keep originalErrorCellsRef populated if initialErrorCells is passed later
+  useEffect(() => {
+    if (initialErrorCells && initialErrorCells.length > 0 && originalErrorCellsRef.current.length === 0) {
+      originalErrorCellsRef.current = initialErrorCells;
+    }
+  }, [initialErrorCells]);
+
+  // Notify parent about dirty state
+  useEffect(() => {
+    const isDirty = pendingCellEdits.length > 0 || actions.length > 0;
+    if (onDirtyChange) {
+      onDirtyChange(isDirty);
+    }
+  }, [pendingCellEdits, actions, onDirtyChange]);
 
   // Load ban đầu
   useEffect(() => {
@@ -55,7 +89,8 @@ export default function ManualCleanWorkspace({ columns, fileHash, onConfirm, onB
       setErrorCells(res.data.error_cells || []);
       return true;
     } catch (err) {
-      showToast(err.response?.data?.detail || "Không thể xem trước dữ liệu.", "error");
+      const detail = err?.response?.data?.detail;
+      showToast(typeof detail === "string" ? detail : t("cleaner.workspace.empty_data"), "error");
       return false;
     } finally {
       setIsPreviewing(false);
@@ -78,7 +113,7 @@ export default function ManualCleanWorkspace({ columns, fileHash, onConfirm, onB
       setActions(newActions);
       setPendingCellEdits([]); // Clear pending state only on success
       pendingEditsRef.current = [];
-      showToast("Đã lưu các thay đổi.", "success");
+      showToast(t("cleaner.workspace.toast_changes_saved"), "success");
       return true;
     } else {
       // Failed to sync (e.g. 400 error). Do not clear pendingCellEdits.
@@ -98,13 +133,26 @@ export default function ManualCleanWorkspace({ columns, fileHash, onConfirm, onB
       pendingEditsRef.current = newEdits;
       return newEdits;
     });
+
+    // Mark cell as fixed in review state
+    const cellKey = `${edit.row_id}:${edit.column}`;
+    setCellReviewStates(prev => ({ ...prev, [cellKey]: "fixed" }));
+  };
+
+  const handleSetCellIgnored = (rowId, col) => {
+    const cellKey = `${rowId}:${col}`;
+    setCellReviewStates(prev => ({
+      ...prev,
+      [cellKey]: prev[cellKey] === "ignored" ? "pending" : "ignored"
+    }));
   };
   
   const executeAction = async (newAction) => {
     if (pendingCellEdits.length > 0) {
-      const confirmed = window.confirm("Có thay đổi chưa lưu. Bạn có muốn bỏ qua chúng để thực hiện thao tác mới không?");
+      const confirmed = window.confirm(t("cleaner.workspace.unsaved_confirm_action"));
       if (!confirmed) return;
       setPendingCellEdits([]); // Bỏ qua thay đổi cũ
+      pendingEditsRef.current = [];
     }
     
     const newActions = [...actions, newAction];
@@ -116,7 +164,7 @@ export default function ManualCleanWorkspace({ columns, fileHash, onConfirm, onB
 
   const handleRemoveAction = async (index) => {
     if (pendingCellEdits.length > 0) {
-      const confirmed = window.confirm("Có thay đổi chưa lưu. Bạn có muốn bỏ qua chúng để thực hiện thao tác mới không?");
+      const confirmed = window.confirm(t("cleaner.workspace.unsaved_confirm_action"));
       if (!confirmed) return;
       setPendingCellEdits([]); // Bỏ qua thay đổi cũ
       pendingEditsRef.current = [];
@@ -129,26 +177,46 @@ export default function ManualCleanWorkspace({ columns, fileHash, onConfirm, onB
       setActions(newActions);
     }
   };
-  
-  const handleBack = () => {
-    if (pendingCellEdits.length > 0) {
-      if (!window.confirm("Có thay đổi chưa lưu được. Bạn có chắc muốn rời khỏi màn hình này không? Dữ liệu chưa lưu sẽ bị mất.")) {
-         return;
-      }
+
+  // Rule 4: Error cells review progress calculation using original error cells
+  const originalErrorList = originalErrorCellsRef.current && originalErrorCellsRef.current.length > 0
+    ? originalErrorCellsRef.current
+    : errorCells;
+
+  const totalErrorCells = originalErrorList.length;
+  const reviewedCount = originalErrorList.filter(ec => {
+    const key = `${ec.row_id}:${ec.column}`;
+    const state = cellReviewStates[key];
+    return state === "fixed" || state === "ignored";
+  }).length;
+  const pendingCount = Math.max(0, totalErrorCells - reviewedCount);
+  const ignoredCount = originalErrorList.filter(ec => cellReviewStates[`${ec.row_id}:${ec.column}`] === "ignored").length;
+
+  const handleFinalConfirm = () => {
+    if (pendingCount > 0) {
+      const proceed = window.confirm(t("cleaner.guided.warn_pending_cells", { count: pendingCount }));
+      if (!proceed) return;
     }
-    onBack();
+
+    setTimeout(() => {
+      const currentPending = pendingEditsRef.current;
+      let finalActions = [...actions];
+      if (currentPending.length > 0) {
+        finalActions.push({
+          action_type: "BATCH_EDIT_CELLS",
+          column: "all",
+          params: { edits: [...currentPending] }
+        });
+      }
+      onConfirm(finalActions);
+    }, 50);
   };
 
   return (
     <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-2">
         <div className="flex items-center gap-4">
-          <button onClick={handleBack} className="text-muted hover:text-ink flex items-center text-sm font-medium transition-colors">
-            <ArrowLeft className="w-4 h-4 mr-1" /> Quay lại
-          </button>
-          
-          <div className="h-6 w-px bg-border" />
-          
+          {/* Rule 2: Removed duplicate "Back to original data" button here, keeping the persistent nav bar one */}
           <label className="flex items-center gap-2 text-sm font-medium text-ink cursor-pointer">
             <input 
               type="checkbox" 
@@ -156,40 +224,38 @@ export default function ManualCleanWorkspace({ columns, fileHash, onConfirm, onB
               onChange={(e) => setIsFullEditMode(e.target.checked)}
               className="rounded border-border text-forest focus:ring-forest/30"
             />
-            Chế độ Full-Edit (Sửa mọi ô)
+            {t("cleaner.workspace.full_edit_mode")}
           </label>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          {totalErrorCells > 0 && (
+            <div className="flex items-center gap-2 bg-white border border-border px-3 py-1.5 rounded-lg text-xs">
+              <span className="font-medium text-ink">
+                {t("cleaner.guided.reviewed_progress", { reviewed: reviewedCount, total: totalErrorCells })}
+              </span>
+              {ignoredCount > 0 && (
+                <span className="text-muted bg-gray-100 px-1.5 py-0.5 rounded">
+                  {t("cleaner.guided.ignored_count", { count: ignoredCount })}
+                </span>
+              )}
+            </div>
+          )}
+
           <button
             onClick={handleSavePendingEdits}
             disabled={pendingCellEdits.length === 0 || isPreviewing}
             className={`${pendingCellEdits.length > 0 ? BTN.secondary : "rounded-md px-4 py-2 text-sm font-medium bg-[#EAEAEA] text-[#626C65] cursor-not-allowed"} flex items-center gap-2`}
           >
             <Save className="w-4 h-4" /> 
-            Lưu thay đổi {pendingCellEdits.length > 0 && `(${pendingCellEdits.length})`}
+            {t("cleaner.workspace.save_changes")} {pendingCellEdits.length > 0 && `(${pendingCellEdits.length})`}
           </button>
 
           <button
-            onClick={() => {
-              // Dùng setTimeout để đảm bảo sự kiện onBlur (nếu user đang gõ) đã cập nhật xong pendingEditsRef
-              setTimeout(() => {
-                const currentPending = pendingEditsRef.current;
-                if (currentPending.length > 0) {
-                   const newAction = {
-                     action_type: "BATCH_EDIT_CELLS",
-                     column: "all",
-                     params: { edits: [...currentPending] }
-                   };
-                   onConfirm([...actions, newAction]);
-                } else {
-                   onConfirm(actions);
-                }
-              }, 50);
-            }}
+            onClick={handleFinalConfirm}
             className={`${BTN.primary} flex items-center gap-2`}
           >
-            Chốt File (Manual) <ChevronRight className="w-4 h-4" />
+            {t("cleaner.workspace.finalize_manual")} <ChevronRight className="w-4 h-4" />
           </button>
         </div>
       </div>
@@ -204,12 +270,16 @@ export default function ManualCleanWorkspace({ columns, fileHash, onConfirm, onB
             isLoading={isPreviewing}
             pendingCellEdits={pendingCellEdits}
             errorCells={errorCells}
+            originalErrorCells={originalErrorList}
+            cellReviewStates={cellReviewStates}
+            onSetCellIgnored={handleSetCellIgnored}
             isFullEditMode={isFullEditMode}
             onAddPendingEdit={handleAddPendingEdit}
             onExecuteAction={executeAction}
             onFlushPendingEdits={async () => {
-              if (window.confirm("Có thay đổi chưa lưu. Bạn có muốn bỏ qua chúng để tiếp tục thao tác không?")) {
+              if (window.confirm(t("cleaner.workspace.unsaved_confirm_action"))) {
                 setPendingCellEdits([]);
+                pendingEditsRef.current = [];
                 return true;
               }
               return false;
@@ -222,18 +292,25 @@ export default function ManualCleanWorkspace({ columns, fileHash, onConfirm, onB
           <div className={CARD + " h-full max-h-[600px] flex flex-col sticky top-4"}>
             <div className="flex items-center justify-between mb-4 pb-3 border-b border-border">
               <h3 className={`${TEXT.sectionTitle} flex items-center gap-2 mb-0`}>
-                <CheckCircle2 className="w-5 h-5 text-forest" /> Nhật ký thao tác
+                <CheckCircle2 className="w-5 h-5 text-forest" /> {t("cleaner.workspace.action_log_title")}
               </h3>
-              <span className="text-xs font-medium bg-sage/30 text-forest px-2 py-0.5 rounded-full">
-                {actions.length}
-              </span>
+              <div className="flex items-center gap-1.5">
+                {ignoredCount > 0 && (
+                  <span className="text-xs font-medium bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full" title={t("cleaner.guided.ignored")}>
+                    {t("cleaner.guided.ignored")}: {ignoredCount}
+                  </span>
+                )}
+                <span className="text-xs font-medium bg-sage/30 text-forest px-2 py-0.5 rounded-full">
+                  {actions.length}
+                </span>
+              </div>
             </div>
             
             <div className="flex-1 overflow-y-auto pr-2">
               {actions.length === 0 ? (
                 <div className="flex flex-col items-center justify-center text-muted py-10 opacity-60">
                   <PlayCircle className="w-8 h-8 mb-2" />
-                  <p className="text-sm text-center">Chưa có thao tác nào.<br/>Hãy thao tác trực tiếp trên bảng.</p>
+                  <p className="text-sm text-center" dangerouslySetInnerHTML={{ __html: t("cleaner.workspace.no_actions") }} />
                 </div>
               ) : (
                 <div className="space-y-3 relative before:absolute before:inset-0 before:ml-3 before:-translate-x-px before:h-full before:w-0.5 before:bg-gradient-to-b before:from-transparent before:via-slate-300 before:to-transparent">
@@ -244,18 +321,20 @@ export default function ManualCleanWorkspace({ columns, fileHash, onConfirm, onB
                             {idx + 1}
                          </div>
                          <div className="flex-1 min-w-0">
-                           <p className="text-sm font-medium text-ink truncate">{ACTION_LABELS[act.action_type] || act.action_type}</p>
+                           <p className="text-sm font-medium text-ink truncate">
+                             {t(`cleaner.workspace.actions.${act.action_type}`, { defaultValue: ACTION_LABELS[act.action_type] || act.action_type })}
+                           </p>
                            <p className="text-xs text-muted truncate mt-0.5">
-                             Cột: <span className="font-mono bg-sage/30 px-1 rounded text-ink">{act.column}</span>
+                             {t("cleaner.workspace.col_label")} <span className="font-mono bg-sage/30 px-1 rounded text-ink">{act.column}</span>
                              {act.params?.new_name && ` ➔ ${act.params.new_name}`}
                              {act.params?.value !== undefined && ` ➔ "${act.params.value}"`}
-                             {act.params?.edits && ` ➔ ${act.params.edits.length} ô`}
+                             {act.params?.edits && ` ➔ ${t("cleaner.workspace.cells_count", { count: act.params.edits.length })}`}
                            </p>
                          </div>
                          <button 
                            onClick={() => handleRemoveAction(idx)}
                            className="p-1.5 text-muted hover:text-[#9F2F2D] hover:bg-[#FDEBEC] rounded transition-colors opacity-0 group-hover:opacity-100 shrink-0"
-                           title="Xóa thao tác này (Undo)"
+                           title={t("cleaner.workspace.undo_title")}
                          >
                            <Trash2 className="w-4 h-4" />
                          </button>
@@ -279,6 +358,7 @@ export default function ManualCleanWorkspace({ columns, fileHash, onConfirm, onB
 
 // ─── Form Thêm Action Cũ (Thu gọn) ───────────────────────────────────────────
 function AdvancedActionForm({ columns, onExecuteAction }) {
+  const { t } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
   const [selectedColumn, setSelectedColumn] = useState("");
   const [selectedAction, setSelectedAction] = useState("");
@@ -309,7 +389,7 @@ function AdvancedActionForm({ columns, onExecuteAction }) {
         className="w-full flex items-center justify-between p-3 text-sm font-medium text-ink hover:bg-sage/20 transition-colors"
       >
         <div className="flex items-center gap-2">
-           <Plus className="w-4 h-4 text-forest" /> Thao tác nâng cao
+           <Plus className="w-4 h-4 text-forest" /> {t("cleaner.workspace.advanced_options")}
         </div>
         <ChevronDown className={`w-4 h-4 transition-transform ${isOpen ? "rotate-180" : ""}`} />
       </button>
@@ -317,34 +397,36 @@ function AdvancedActionForm({ columns, onExecuteAction }) {
       {isOpen && (
         <div className="p-3 pt-0 space-y-3 border-t border-border mt-2 bg-white">
           <div className="mt-2">
-            <label className="block text-[11px] font-medium text-muted uppercase tracking-wider mb-1">Cột áp dụng</label>
+            <label className="block text-[11px] font-medium text-muted uppercase tracking-wider mb-1">{t("cleaner.workspace.target_col")}</label>
             <select
               value={selectedColumn}
               onChange={(e) => setSelectedColumn(e.target.value)}
               className="w-full text-sm border border-border rounded p-1.5 focus:outline-none focus:border-forest"
               disabled={selectedAction === "DROP_DUPLICATES"}
             >
-              <option value="">-- Chọn cột --</option>
+              <option value="">{t("cleaner.workspace.select_col")}</option>
               {columns.map(col => <option key={col} value={col}>{col}</option>)}
             </select>
           </div>
           <div>
-            <label className="block text-[11px] font-medium text-muted uppercase tracking-wider mb-1">Thao tác</label>
+            <label className="block text-[11px] font-medium text-muted uppercase tracking-wider mb-1">{t("cleaner.workspace.operation")}</label>
             <select
               value={selectedAction}
               onChange={(e) => setSelectedAction(e.target.value)}
               className="w-full text-sm border border-border rounded p-1.5 focus:outline-none focus:border-forest"
             >
-              <option value="">-- Chọn --</option>
+              <option value="">{t("cleaner.workspace.select_op")}</option>
               {Object.entries(ACTION_LABELS).filter(([k])=>k!=="BATCH_EDIT_CELLS").map(([key, label]) => (
-                <option key={key} value={key}>{label}</option>
+                <option key={key} value={key}>
+                  {t(`cleaner.workspace.actions.${key}`, { defaultValue: label })}
+                </option>
               ))}
             </select>
           </div>
           {needsParam && (
             <div>
               <label className="block text-[11px] font-medium text-muted uppercase tracking-wider mb-1">
-                {selectedAction === "RENAME_COLUMN" ? "Tên cột mới" : "Giá trị điền vào"}
+                {selectedAction === "RENAME_COLUMN" ? t("cleaner.workspace.new_col_name") : t("cleaner.workspace.fill_value")}
               </label>
               <input
                 type="text"
@@ -359,7 +441,7 @@ function AdvancedActionForm({ columns, onExecuteAction }) {
             disabled={isAddDisabled}
             className={`w-full ${BTN.secondary} text-xs py-1.5 flex justify-center`}
           >
-            Thêm thao tác
+            {t("cleaner.workspace.add_action")}
           </button>
         </div>
       )}
@@ -369,16 +451,26 @@ function AdvancedActionForm({ columns, onExecuteAction }) {
 
 // ─── Sub-component: PreviewTable ──────────────────────────────────────────────
 
-const ISSUE_TOOLTIPS = {
-  missing: "Thiếu dữ liệu (missing)",
-  type_mismatch: "Sai kiểu dữ liệu (type mismatch)",
-  encoding: "Lỗi ký tự (encoding)"
-};
-
-function PreviewTable({ data, actions, originalColumns, isLoading, pendingCellEdits, errorCells, isFullEditMode, onAddPendingEdit, onExecuteAction, onFlushPendingEdits }) {
+function PreviewTable({
+  data,
+  actions,
+  originalColumns,
+  isLoading,
+  pendingCellEdits,
+  errorCells,
+  originalErrorCells,
+  cellReviewStates,
+  onSetCellIgnored,
+  isFullEditMode,
+  onAddPendingEdit,
+  onExecuteAction,
+  onFlushPendingEdits
+}) {
+  const { t } = useTranslation();
   const [page, setPage] = useState(1);
-  const [editingCell, setEditingCell] = useState(null); // { rowIdx, col }
+  const [editingCell, setEditingCell] = useState(null); // { rowIdx, col, isDirectEdit: boolean }
   const [editValue, setEditValue] = useState("");
+  const [activeErrorPanel, setActiveErrorPanel] = useState(null); // { rowIdx, col, errorCell, currentValue }
   const [openHeaderMenu, setOpenHeaderMenu] = useState(null); // column name
   const [renamingCol, setRenamingCol] = useState(null); // column name
   const [renameValue, setRenameValue] = useState("");
@@ -389,10 +481,10 @@ function PreviewTable({ data, actions, originalColumns, isLoading, pendingCellEd
        {isLoading ? (
           <div className="flex flex-col items-center text-muted animate-pulse">
             <div className="w-8 h-8 rounded-full border-2 border-forest border-t-transparent animate-spin mb-3" />
-            <p className="text-sm">Đang tải dữ liệu...</p>
+            <p className="text-sm">{t("cleaner.workspace.loading_data")}</p>
           </div>
        ) : (
-          <p className="text-muted text-sm">Không có dữ liệu hiển thị.</p>
+          <p className="text-muted text-sm">{t("cleaner.workspace.empty_data")}</p>
        )}
      </div>
   );
@@ -417,47 +509,116 @@ function PreviewTable({ data, actions, originalColumns, isLoading, pendingCellEd
     if (!displayCols.includes(col)) displayCols.push(col);
   });
 
+  const errorList = originalErrorCells && originalErrorCells.length > 0 ? originalErrorCells : errorCells;
+
+  // Rule 4: Compute cell status using ORIGINAL error_cells list
   const getCellStatus = (rowId, col) => {
-    // 1. Check if pending
+    const cellKey = `${rowId}:${col}`;
+    const reviewState = cellReviewStates?.[cellKey];
+
+    // Check if user set it to ignored
+    if (reviewState === "ignored") {
+      return { type: "ignored", reviewState: "ignored" };
+    }
+
+    // Check if pending edit in local memory
     const pending = pendingCellEdits.find(e => e.row_id === rowId && e.column === col);
-    if (pending) return { type: "pending", value: pending.new_value };
-    
-    // 2. Check if confirmed edit (in BATCH_EDIT_CELLS actions)
+
+    // Check if confirmed in BATCH_EDIT_CELLS action history
     const confirmed = BATCHED_EDITS.find(e => e.row_id === rowId && e.column === col);
-    if (confirmed) return { type: "confirmed", value: confirmed.new_value }; // wait, the backend actually returns the updated value in `data`. But we can mark it as confirmed.
-    
-    // 3. Check if error
-    const err = errorCells.find(e => e.row_id === rowId && e.column === col);
-    if (err) return { type: "error", issue: err.issue_type };
-    
+
+    // Original error cell entry
+    const err = errorList.find(e => e.row_id === rowId && e.column === col);
+
+    if (pending) {
+      return {
+        type: "pending_edit",
+        value: pending.new_value,
+        originalValue: err?.original_value !== undefined ? err.original_value : null,
+        reviewState: "fixed"
+      };
+    }
+
+    if (confirmed || reviewState === "fixed") {
+      return {
+        type: "fixed",
+        value: confirmed ? confirmed.new_value : undefined,
+        originalValue: err?.original_value !== undefined ? err.original_value : null,
+        reviewState: "fixed"
+      };
+    }
+
+    if (err) {
+      return {
+        type: "error",
+        issue: err.issue_type,
+        errorCell: err,
+        originalValue: err.original_value,
+        reviewState: reviewState || "pending"
+      };
+    }
+
     return { type: "normal" };
   };
 
   const handleCellClick = (idx, col, status, isDropped) => {
     if (isDropped) return;
     
-    // Guided mode: only error cells can be clicked. Full mode: all can be clicked
-    const canEdit = isFullEditMode || status.type === "error" || status.type === "pending" || status.type === "confirmed";
+    const rowId = currentData[idx].original_index;
+    const cellError = errorList.find(e => e.row_id === rowId && e.column === col);
+
+    // In Guided Mode (not full edit mode), if it was an error cell
+    if (!isFullEditMode && (cellError || status.reviewState === "fixed" || status.reviewState === "ignored")) {
+      const pending = pendingCellEdits.find(e => e.row_id === rowId && e.column === col);
+      const val = pending ? pending.new_value : currentData[idx][col];
+      setActiveErrorPanel({
+        rowIdx: idx,
+        rowId,
+        col,
+        errorCell: cellError || { issue_type: "manual", original_value: currentData[idx][col] },
+        currentValue: val
+      });
+      return;
+    }
+
+    // Full edit mode or non-error cells in full edit mode: allow inline editing
+    const canEdit = isFullEditMode || status.type === "error" || status.type === "fixed" || status.type === "pending_edit";
     if (!canEdit) return;
 
-    setEditingCell({ rowIdx: idx, col });
+    setEditingCell({ rowIdx: idx, col, isDirectEdit: true });
     
-    // Initialize edit value
-    const rowId = currentData[idx].original_index;
     const pending = pendingCellEdits.find(e => e.row_id === rowId && e.column === col);
     setEditValue(pending ? pending.new_value : (currentData[idx][col] === null ? "" : currentData[idx][col]));
   };
 
-  const handleCellSave = () => {
-    if (!editingCell) return;
-    const { rowIdx, col } = editingCell;
-    const rowId = currentData[rowIdx].original_index;
-    
-    if (rowId !== undefined) {
-       // Validate on client simply (no need for complex validation, just pass to backend, 
-       // but we could prevent empty string for numbers etc. Here we just let backend catch it 
-       // or we just save it)
-       onAddPendingEdit({ row_id: rowId, column: col, new_value: editValue });
+  // Rule 3: Null editing: empty input = real null, send JSON null, not string "null"
+  const handleCellSave = (directVal = undefined, targetRowIdx = null, targetCol = null) => {
+    const rIdx = targetRowIdx !== null ? targetRowIdx : editingCell?.rowIdx;
+    const cCol = targetCol !== null ? targetCol : editingCell?.col;
+    if (rIdx === null || rIdx === undefined || !cCol) return;
+
+    const rowId = currentData[rIdx].original_index;
+    const originalVal = currentData[rIdx][cCol];
+
+    let valToSave;
+    if (directVal !== undefined) {
+      valToSave = directVal; // Can explicitly be null or string or number
+    } else {
+      // Direct text editing:
+      // Empty input = real JSON null
+      // User typed "null" = keep string "null"
+      if (editValue.trim() === "") {
+        valToSave = null;
+      } else {
+        valToSave = editValue;
+      }
+    }
+
+    // Rule: A cell counts as "edited" ONLY if its value actually changed.
+    const isValChanged = valToSave !== originalVal;
+
+    if (rowId !== undefined && isValChanged) {
+      onAddPendingEdit({ row_id: rowId, column: cCol, new_value: valToSave });
     }
     setEditingCell(null);
   };
@@ -482,7 +643,7 @@ function PreviewTable({ data, actions, originalColumns, isLoading, pendingCellEd
   const handlePageChange = async (newPage) => {
      if (pendingCellEdits.length > 0) {
         const flushed = await onFlushPendingEdits();
-        if (!flushed) return; // Nếu flush thất bại thì không chuyển trang để user sửa
+        if (!flushed) return;
      }
      setPage(newPage);
   };
@@ -493,23 +654,46 @@ function PreviewTable({ data, actions, originalColumns, isLoading, pendingCellEd
          <div className="absolute inset-0 bg-white/50 z-50 flex items-center justify-center backdrop-blur-[1px] rounded-2xl">
             <div className="bg-white p-3 rounded-lg shadow-lg flex items-center gap-3 border border-border">
                <div className="w-5 h-5 rounded-full border-2 border-forest border-t-transparent animate-spin" />
-               <span className="text-sm font-medium text-ink">Đang tải...</span>
+               <span className="text-sm font-medium text-ink">{t("cleaner.workspace.loading_data")}</span>
             </div>
          </div>
       )}
 
-      <div className="flex items-center justify-between mb-3">
-        <h3 className={`${TEXT.sectionTitle} flex items-center gap-2 mb-0`}>
-          Bảng dữ liệu
-          <span className="text-xs font-normal text-muted bg-gray-100 px-2 py-0.5 rounded-full">
-            {isFullEditMode ? "Chế độ Full-Edit" : "Guided Mode (Chỉ sửa ô lỗi)"}
-          </span>
-        </h3>
+      {/* Header and Legend above table */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <h3 className={`${TEXT.sectionTitle} flex items-center gap-2 mb-0`}>
+            {t("cleaner.preview_table_title")}
+            <span className="text-xs font-normal text-muted bg-gray-100 px-2 py-0.5 rounded-full">
+              {isFullEditMode ? t("cleaner.workspace.full_edit_badge") : t("cleaner.workspace.guided_badge")}
+            </span>
+          </h3>
+        </div>
+
         {pendingCellEdits.length > 0 && (
            <span className="text-xs font-medium text-blue-600 bg-blue-50 border border-blue-200 px-2 py-1 rounded-full animate-pulse">
-              Đang chờ đồng bộ {pendingCellEdits.length} ô...
+              {t("cleaner.workspace.syncing_badge", { count: pendingCellEdits.length })}
            </span>
         )}
+      </div>
+
+      {/* Rule 4: Small Legend above table with the three states */}
+      <div className="flex flex-wrap items-center gap-4 py-2 px-3 mb-2 bg-[#F9F9F8] border border-border rounded-lg text-xs text-ink">
+        <span className="font-semibold text-muted uppercase tracking-wider text-[10px]">
+          {t("cleaner.guided.legend_title")}
+        </span>
+        <div className="flex items-center gap-1.5">
+          <span className="w-3 h-3 rounded bg-red-100 border border-red-300 inline-block" />
+          <span>{t("cleaner.guided.legend_pending")}</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="w-3 h-3 rounded bg-emerald-100 border border-emerald-300 inline-flex items-center justify-center text-[9px] text-emerald-800 font-bold">✓</span>
+          <span>{t("cleaner.guided.legend_fixed")}</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="w-3 h-3 rounded bg-gray-200 border border-gray-300 inline-block" />
+          <span className="text-gray-500 line-through">{t("cleaner.guided.legend_ignored")}</span>
+        </div>
       </div>
 
       <div className="overflow-x-auto border border-border rounded-lg bg-white min-h-[400px] max-h-[600px] overflow-y-auto relative flex-1">
@@ -537,8 +721,8 @@ function PreviewTable({ data, actions, originalColumns, isLoading, pendingCellEd
                       ) : (
                          <div className="flex items-center gap-1">
                            <span className={isDropped ? "line-through" : ""}>{col}</span>
-                           {isDropped && <span className="text-[10px] text-red-500 font-normal border border-red-200 bg-red-50 px-1 py-0.5 rounded">Đã xóa</span>}
-                           {isRenamed && <span className="text-[10px] text-blue-600 font-normal border border-blue-200 bg-blue-50 px-1 py-0.5 rounded" title={`Tên cũ: ${isRenamed}`}>Đã đổi tên</span>}
+                           {isDropped && <span className="text-[10px] text-red-500 font-normal border border-red-200 bg-red-50 px-1 py-0.5 rounded">{t("cleaner.workspace.dropped_badge")}</span>}
+                           {isRenamed && <span className="text-[10px] text-blue-600 font-normal border border-blue-200 bg-blue-50 px-1 py-0.5 rounded" title={t("cleaner.workspace.old_name_tooltip", { name: isRenamed })}>{t("cleaner.workspace.renamed_badge")}</span>}
                          </div>
                       )}
                       
@@ -555,18 +739,18 @@ function PreviewTable({ data, actions, originalColumns, isLoading, pendingCellEd
                                  <div className="fixed inset-0 z-40" onClick={() => setOpenHeaderMenu(null)} />
                                  <div className="absolute top-full right-0 mt-1 w-48 bg-white border border-border rounded-lg shadow-xl py-1 z-50 animate-in fade-in zoom-in-95 font-normal">
                                     <button onClick={() => { setRenamingCol(col); setRenameValue(col); setOpenHeaderMenu(null); }} className="w-full text-left px-3 py-2 text-xs hover:bg-sage/20 text-ink flex items-center gap-2">
-                                       <Edit2 className="w-3.5 h-3.5 text-muted" /> Đổi tên cột
+                                       <Edit2 className="w-3.5 h-3.5 text-muted" /> {t("cleaner.workspace.menu_rename_col")}
                                     </button>
                                     <div className="h-px bg-border my-1" />
                                     <button onClick={() => handleHeaderAction(col, "FILL_MISSING_MEAN")} className="w-full text-left px-3 py-2 text-xs hover:bg-sage/20 text-ink flex items-center gap-2">
-                                       <AlignLeft className="w-3.5 h-3.5 text-muted" /> Điền rỗng (Trung bình)
+                                       <AlignLeft className="w-3.5 h-3.5 text-muted" /> {t("cleaner.workspace.menu_fill_mean")}
                                     </button>
                                     <button onClick={() => handleHeaderAction(col, "FILL_MISSING_UNKNOWN")} className="w-full text-left px-3 py-2 text-xs hover:bg-sage/20 text-ink flex items-center gap-2">
-                                       <AlignLeft className="w-3.5 h-3.5 text-muted" /> Điền rỗng ("Không xác định")
+                                       <AlignLeft className="w-3.5 h-3.5 text-muted" /> {t("cleaner.workspace.menu_fill_unknown")}
                                     </button>
                                     <div className="h-px bg-border my-1" />
                                     <button onClick={() => handleHeaderAction(col, "DROP_COLUMN")} className="w-full text-left px-3 py-2 text-xs hover:bg-red-50 text-red-600 flex items-center gap-2">
-                                       <Trash2 className="w-3.5 h-3.5 text-red-500" /> Xóa cột
+                                       <Trash2 className="w-3.5 h-3.5 text-red-500" /> {t("cleaner.workspace.menu_drop_col")}
                                     </button>
                                  </div>
                                </>
@@ -593,35 +777,41 @@ function PreviewTable({ data, actions, originalColumns, isLoading, pendingCellEd
                   
                   const rowId = row.original_index;
                   const status = getCellStatus(rowId, col);
-                  const isEditing = editingCell?.rowIdx === idx && editingCell?.col === col;
+                  const isEditing = editingCell?.rowIdx === idx && editingCell?.col === col && editingCell?.isDirectEdit;
                   
                   // Value to display
                   let displayVal = row[col];
-                  if (status.type === "pending") displayVal = status.value;
+                  if (status.type === "pending_edit") displayVal = status.value;
+                  else if (status.type === "fixed" && status.value !== undefined) displayVal = status.value;
                   
                   const isNull = displayVal === null || displayVal === undefined;
                   
-                  // Style logic
+                  // Style logic according to Rule 4:
+                  // Pending: amber/red
+                  // Fixed: green with check icon, tooltip "old value → new value"
+                  // Ignored: grey line-through
                   let cellClasses = "px-4 py-2 truncate max-w-[200px] transition-colors ";
                   let tooltip = null;
                   
-                  if (status.type === "pending") {
-                     cellClasses += "bg-blue-50/80 text-blue-900 border-x border-blue-200 font-medium cursor-pointer";
-                     tooltip = "Đang chờ đồng bộ...";
-                  } else if (status.type === "confirmed") {
-                     cellClasses += "bg-[#FEF9C3]/80 text-amber-900 cursor-pointer hover:border-amber-300 border border-transparent";
-                     tooltip = "Đã sửa thủ công (Server đã áp dụng)";
+                  if (status.type === "ignored") {
+                    cellClasses += "bg-gray-100 text-gray-400 line-through cursor-pointer border border-transparent hover:border-gray-300";
+                    tooltip = t("cleaner.guided.ignored");
+                  } else if (status.type === "fixed" || status.type === "pending_edit") {
+                    cellClasses += "bg-emerald-50 text-emerald-900 border border-emerald-200 font-medium cursor-pointer hover:border-emerald-400";
+                    const oldStr = status.originalValue === null || status.originalValue === undefined ? "null" : String(status.originalValue);
+                    const newStr = isNull ? "null" : String(displayVal);
+                    tooltip = t("cleaner.guided.fixed_tooltip", { oldVal: oldStr, newVal: newStr });
                   } else if (status.type === "error") {
-                     cellClasses += "bg-red-50/80 text-red-900 cursor-pointer border border-transparent hover:border-red-300";
-                     tooltip = ISSUE_TOOLTIPS[status.issue] || "Lỗi dữ liệu";
+                    cellClasses += "bg-red-50 text-red-900 cursor-pointer border border-red-200 hover:border-red-300";
+                    tooltip = t(`cleaner.guided.reasons.${status.issue}`, { defaultValue: t("cleaner.guided.pending") });
                   } else {
-                     cellClasses += "text-muted ";
-                     if (isFullEditMode) {
-                        cellClasses += "cursor-pointer border border-transparent hover:border-gray-300 hover:bg-gray-50";
-                        tooltip = "Nhấn để sửa";
-                     } else {
-                        tooltip = !isNull ? String(displayVal) : null;
-                     }
+                    cellClasses += "text-muted ";
+                    if (isFullEditMode) {
+                       cellClasses += "cursor-pointer border border-transparent hover:border-gray-300 hover:bg-gray-50";
+                       tooltip = t("cleaner.guided.btn_edit_value");
+                    } else {
+                       tooltip = !isNull ? String(displayVal) : null;
+                    }
                   }
 
                   return (
@@ -637,7 +827,7 @@ function PreviewTable({ data, actions, originalColumns, isLoading, pendingCellEd
                           type="text"
                           value={editValue}
                           onChange={(e) => setEditValue(e.target.value)}
-                          onBlur={handleCellSave}
+                          onBlur={() => handleCellSave()}
                           onKeyDown={(e) => {
                             if (e.key === "Enter") handleCellSave();
                             if (e.key === "Escape") setEditingCell(null);
@@ -645,7 +835,26 @@ function PreviewTable({ data, actions, originalColumns, isLoading, pendingCellEd
                           className="w-full bg-white border border-forest rounded px-1 py-0.5 text-ink outline-none text-sm"
                         />
                       ) : (
-                        !isNull ? String(displayVal) : <span className="text-gray-400 italic flex items-center gap-1">null <MousePointerClick className="w-3 h-3 text-red-400 opacity-0 group-hover:opacity-100 transition-opacity" /></span>
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="truncate">
+                            {!isNull ? String(displayVal) : <span className="text-gray-400 italic">null</span>}
+                          </span>
+                          {status.type === "error" && status.reviewState === "pending" && (
+                            <span className="shrink-0 text-[10px] bg-red-100 text-red-700 px-1 py-0.2 rounded font-medium">
+                              !
+                            </span>
+                          )}
+                          {(status.type === "fixed" || status.type === "pending_edit") && (
+                            <span className="shrink-0 text-[10px] bg-emerald-100 text-emerald-800 px-1 py-0.2 rounded font-semibold flex items-center">
+                              ✓
+                            </span>
+                          )}
+                          {status.type === "ignored" && (
+                            <span className="shrink-0 text-[10px] bg-gray-200 text-gray-600 px-1 py-0.2 rounded font-medium">
+                              {t("cleaner.guided.ignored")}
+                            </span>
+                          )}
+                        </div>
                       )}
                     </td>
                   );
@@ -658,24 +867,200 @@ function PreviewTable({ data, actions, originalColumns, isLoading, pendingCellEd
       
       {/* Pagination */}
       <div className="flex items-center justify-between mt-4">
-        <span className="text-xs text-muted">Trang {page} / {totalPages} (Mẫu {data.length} dòng)</span>
+        <span className="text-xs text-muted">
+          {t("cleaner.pagination_info", { page, totalPages, total: data.length })}
+        </span>
         <div className="flex gap-2">
           <button
             onClick={() => handlePageChange(Math.max(1, page - 1))}
             disabled={page === 1}
             className="px-3 py-1 bg-white border border-border rounded text-sm disabled:opacity-50 hover:bg-sage/20 transition-all text-ink font-medium"
           >
-            Trước
+            {t("cleaner.prev_page")}
           </button>
           <button
             onClick={() => handlePageChange(Math.min(totalPages, page + 1))}
             disabled={page === totalPages}
             className="px-3 py-1 bg-white border border-border rounded text-sm disabled:opacity-50 hover:bg-sage/20 transition-all text-ink font-medium"
           >
-            Sau
+            {t("cleaner.next_page")}
           </button>
         </div>
       </div>
+
+      {/* Guided Mode Cell Detail Modal/Panel - responsive, 375px+ compliant */}
+      {activeErrorPanel && (
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs"
+          onClick={() => setActiveErrorPanel(null)}
+        >
+          <div 
+            className="bg-white border border-border rounded-xl shadow-2xl p-5 w-full max-w-[375px] space-y-4 animate-in fade-in zoom-in-95"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-start justify-between gap-2 border-b border-border pb-3">
+              <div>
+                <p className="text-xs uppercase tracking-wider font-semibold text-muted">
+                  {t("cleaner.guided.cell_coordinate", { rowId: activeErrorPanel.rowId, col: activeErrorPanel.col })}
+                </p>
+                <div className="flex items-center gap-2 mt-1">
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                    cellReviewStates[`${activeErrorPanel.rowId}:${activeErrorPanel.col}`] === "ignored"
+                      ? "bg-gray-100 text-gray-700"
+                      : cellReviewStates[`${activeErrorPanel.rowId}:${activeErrorPanel.col}`] === "fixed"
+                      ? "bg-emerald-100 text-emerald-800"
+                      : "bg-red-100 text-red-800"
+                  }`}>
+                    {cellReviewStates[`${activeErrorPanel.rowId}:${activeErrorPanel.col}`] === "ignored"
+                      ? t("cleaner.guided.ignored")
+                      : cellReviewStates[`${activeErrorPanel.rowId}:${activeErrorPanel.col}`] === "fixed"
+                      ? t("cleaner.guided.fixed")
+                      : t("cleaner.guided.pending")}
+                  </span>
+                </div>
+              </div>
+              <button
+                onClick={() => setActiveErrorPanel(null)}
+                className="p-1 rounded-lg text-muted hover:text-ink hover:bg-gray-100 transition-colors"
+                title={t("cleaner.guided.cancel")}
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Issue Reason */}
+            <div className="space-y-1">
+              <p className="text-[11px] font-medium text-muted uppercase tracking-wider">
+                {t("cleaner.guided.reason_title")}
+              </p>
+              <div className="bg-[#FFF0E6] text-[#A84300] border border-[#ffd0aa] rounded-lg p-2.5 text-xs">
+                {activeErrorPanel.errorCell.issue_type === "missing"
+                  ? t("cleaner.guided.reasons.missing")
+                  : activeErrorPanel.errorCell.issue_type === "type_mismatch"
+                  ? t("cleaner.guided.reasons.type_mismatch")
+                  : activeErrorPanel.errorCell.issue_type === "encoding"
+                  ? t("cleaner.guided.reasons.encoding")
+                  : activeErrorPanel.errorCell.issue_type === "semantic_error"
+                  ? t("cleaner.guided.reasons.semantic_error", { type: activeErrorPanel.errorCell.semantic_type || "" })
+                  : t("cleaner.guided.reasons.default")}
+              </div>
+            </div>
+
+            {/* Current Value / Inline Edit */}
+            {editingCell?.rowIdx === activeErrorPanel.rowIdx && editingCell?.col === activeErrorPanel.col && !editingCell?.isDirectEdit ? (
+              <div className="space-y-2">
+                <label className="text-[11px] font-medium text-muted uppercase tracking-wider block">
+                  {t("cleaner.guided.btn_edit_value")}
+                </label>
+                <input
+                  autoFocus
+                  type="text"
+                  value={editValue}
+                  onChange={(e) => setEditValue(e.target.value)}
+                  className="w-full border border-forest rounded-lg p-2 text-sm text-ink outline-none focus:ring-1 focus:ring-forest"
+                  placeholder={t("cleaner.guided.enter_new_value")}
+                />
+                
+                {/* Rule 3: Hint that typing the word null saves text */}
+                <p className="text-[11px] text-muted italic">
+                  {t("cleaner.guided.null_typing_hint")}
+                </p>
+
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => {
+                      handleCellSave(undefined, activeErrorPanel.rowIdx, activeErrorPanel.col);
+                      setActiveErrorPanel(null);
+                    }}
+                    className={`${BTN.primary} flex-1 py-1.5 text-xs justify-center`}
+                  >
+                    {t("cleaner.guided.save_cell")}
+                  </button>
+                  <button
+                    onClick={() => setEditingCell(null)}
+                    className={`${BTN.secondary} flex-1 py-1.5 text-xs justify-center`}
+                  >
+                    {t("cleaner.guided.cancel")}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-1">
+                <p className="text-[11px] font-medium text-muted uppercase tracking-wider">
+                  {t("cleaner.guided.current_value")}
+                </p>
+                <p className="text-sm font-mono bg-gray-50 border border-border rounded-lg p-2 text-ink break-all">
+                  {activeErrorPanel.currentValue === null || activeErrorPanel.currentValue === undefined
+                    ? <span className="italic text-gray-400">null</span>
+                    : String(activeErrorPanel.currentValue)}
+                </p>
+              </div>
+            )}
+
+            {/* Action Buttons */}
+            {(!editingCell || editingCell.rowIdx !== activeErrorPanel.rowIdx || editingCell.col !== activeErrorPanel.col) && (
+              <div className="flex flex-col gap-2 pt-2 border-t border-border">
+                {/* 1. Apply Suggestion - only shown if errorCell carries suggested_value */}
+                {activeErrorPanel.errorCell.suggested_value !== undefined && activeErrorPanel.errorCell.suggested_value !== null && (
+                  <button
+                    onClick={() => {
+                      handleCellSave(activeErrorPanel.errorCell.suggested_value, activeErrorPanel.rowIdx, activeErrorPanel.col);
+                      setActiveErrorPanel(null);
+                    }}
+                    className={`${BTN.primary} w-full py-2 text-xs flex items-center justify-center gap-1.5`}
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    {t("cleaner.guided.btn_apply_suggestion")}: "{String(activeErrorPanel.errorCell.suggested_value)}"
+                  </button>
+                )}
+
+                {/* 2. Edit value */}
+                <button
+                  onClick={() => {
+                    setEditingCell({
+                      rowIdx: activeErrorPanel.rowIdx,
+                      col: activeErrorPanel.col,
+                      isDirectEdit: false
+                    });
+                    setEditValue(activeErrorPanel.currentValue === null || activeErrorPanel.currentValue === undefined ? "" : String(activeErrorPanel.currentValue));
+                  }}
+                  className={`${BTN.secondary} w-full py-2 text-xs flex items-center justify-center gap-1.5`}
+                >
+                  <Edit2 className="w-3.5 h-3.5" />
+                  {t("cleaner.guided.btn_edit_value")}
+                </button>
+
+                {/* Rule 3: Add a "Set empty (null)" button in the edit panel. Send JSON null */}
+                <button
+                  onClick={() => {
+                    handleCellSave(null, activeErrorPanel.rowIdx, activeErrorPanel.col);
+                    setActiveErrorPanel(null);
+                  }}
+                  className="w-full py-2 text-xs font-medium border border-border rounded-lg text-ink hover:bg-gray-50 flex items-center justify-center gap-1.5 transition-colors"
+                >
+                  <X className="w-3.5 h-3.5 text-muted" />
+                  {t("cleaner.guided.btn_set_null")}
+                </button>
+
+                {/* 3. Ignore / Unignore */}
+                <button
+                  onClick={() => {
+                    onSetCellIgnored(activeErrorPanel.rowId, activeErrorPanel.col);
+                    setActiveErrorPanel(null);
+                  }}
+                  className="w-full py-2 text-xs font-medium border border-border rounded-lg text-muted hover:text-ink hover:bg-gray-50 flex items-center justify-center gap-1.5 transition-colors"
+                >
+                  <EyeOff className="w-3.5 h-3.5" />
+                  {cellReviewStates[`${activeErrorPanel.rowId}:${activeErrorPanel.col}`] === "ignored"
+                    ? t("cleaner.guided.btn_unignore")
+                    : t("cleaner.guided.btn_ignore")}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

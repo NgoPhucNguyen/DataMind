@@ -1,4 +1,5 @@
 import { Upload } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 export const UploadZone = ({
   isDragging,
@@ -8,6 +9,8 @@ export const UploadZone = ({
   handleDrop,
   handleInputChange
 }) => {
+  const { t } = useTranslation();
+
   return (
     <div
       id="upload-zone"
@@ -34,9 +37,10 @@ export const UploadZone = ({
       />
       <div className="text-muted text-sm">
         <Upload size={40} strokeWidth={1.5} className="mx-auto mb-3 text-forest" />
-        <span className="block mb-1 text-ink font-medium">Kéo thả file vào đây</span>
-        hoặc click để chọn file &mdash; CSV, XLSX, XLS (tối đa 10MB)
+        <span className="block mb-1 text-ink font-medium">{t("profiler.upload_drag")}</span>
+        {t("profiler.upload_hint")}
       </div>
     </div>
   );
 };
+

@@ -1,7 +1,8 @@
-from sqlalchemy import Column, BigInteger, String, DateTime, ForeignKey, Numeric, Enum, JSON, Boolean
+from sqlalchemy import Column, BigInteger, String, DateTime, ForeignKey, Numeric, Enum, JSON, Boolean, Date
 from sqlalchemy.orm import declarative_base, relationship
 from datetime import datetime
 import enum
+from app.services.ai_usage_service import FREE_DAILY_RUNS
 
 Base = declarative_base()
 
@@ -21,7 +22,7 @@ class PaymentEventStatus(str, enum.Enum):
 
 
 
-# ===== Payment / Subscription / Credits layer =====
+# ===== Payment / Subscription layer =====
 
 class User(Base):
     __tablename__ = "users"
@@ -63,9 +64,11 @@ class UserAIUsage(Base):
 
     user_id = Column(BigInteger, ForeignKey("users.id"), primary_key=True, index=True)
     runs_used = Column(BigInteger, default=0, nullable=False)
-    runs_limit = Column(BigInteger, default=2, nullable=False)
+    runs_limit = Column(BigInteger, default=FREE_DAILY_RUNS, nullable=False)
     period_start = Column(DateTime, default=datetime.utcnow, nullable=False)
     plan = Column(String, default="free", nullable=False)
+    pro_expires_at = Column(DateTime, nullable=True)
+    runs_reset_date = Column(Date, nullable=True)
 
     user = relationship("User")
 
@@ -78,6 +81,22 @@ class AIUsageLog(Base):
     timestamp = Column(DateTime, default=datetime.utcnow, nullable=False)
     result = Column(String, nullable=False)
     counted_against_quota = Column(Boolean, default=False, nullable=False)
+
+    user = relationship("User")
+
+
+class AIUsageRecord(Base):
+    """
+    Bảng lưu từng lượt sử dụng AI chi tiết theo tính năng:
+    profiler (phân tích), reanalyze (sửa & phân tích lại), explain (giải thích), re_explain (giải thích lại).
+    Dùng để đếm quota và hiển thị per-feature breakdown.
+    """
+    __tablename__ = "ai_usage_records"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    user_id = Column(BigInteger, ForeignKey("users.id"), nullable=False, index=True)
+    feature = Column(String, nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
 
     user = relationship("User")
 

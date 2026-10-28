@@ -79,8 +79,9 @@ def create_order(
     #         }
     #     }
         
-    # Get Pro package amount, default to 2000 if not found (for testing)
-    amount = 2000.00
+    # Đọc amount từ biến môi trường PRO_PRICE_VND (mặc định 50000)
+    import os
+    amount = float(os.getenv("PRO_PRICE_VND", "50000"))
     # Generate unique order_ref
     while True:
         random_suffix = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))

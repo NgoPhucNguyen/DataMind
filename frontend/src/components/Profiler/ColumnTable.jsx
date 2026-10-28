@@ -1,26 +1,12 @@
 import { useState } from "react";
+import { useTranslation, Trans } from "react-i18next";
 import { AlertCircle, AlertTriangle, Info, Download, ChevronDown, ChevronUp } from "lucide-react";
 import { CARD, TEXT, BTN } from "../../constants/ui";
 import { TypeBadge } from "./Badges";
 import { ExpandableText } from "./ExpandableText";
+import { getCurrentLang } from "../../i18n";
 
 const COLUMN_TYPES = ["numeric", "datetime", "categorical", "multiple_choice", "text"];
-
-const TYPE_LABELS = {
-  numeric: "Numeric",
-  datetime: "Datetime",
-  categorical: "Categorical",
-  multiple_choice: "Multi-choice",
-  text: "Text",
-};
-
-const CHART_LABELS = {
-  bar: "Bar",
-  pie: "Pie",
-  line: "Line",
-  histogram: "Histogram",
-};
-
 const DEFAULT_VISIBLE = 10;
 
 export const ColumnTable = ({
@@ -29,6 +15,7 @@ export const ColumnTable = ({
   getEffectiveType,
   handleOverride
 }) => {
+  const { t } = useTranslation();
   const [showAll, setShowAll] = useState(false);
 
   if (!result) return null;
@@ -36,16 +23,27 @@ export const ColumnTable = ({
   const cols = result.columns;
   const visible = showAll ? cols : cols.slice(0, DEFAULT_VISIBLE);
   const hasMore = cols.length > DEFAULT_VISIBLE;
+  const lang = getCurrentLang();
+  const numberLocale = lang === "vi" ? "vi-VN" : "en-US";
 
   return (
     <div className={CARD}>
       {/* Header */}
       <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-        <h2 className={TEXT.sectionTitle}>Column Structure &amp; Data Issues</h2>
+        <h2 className={TEXT.sectionTitle}>{t("profiler.col_section_title")}</h2>
         <div className="flex items-center gap-2 text-xs text-muted">
           <span>
-            Showing <strong className="text-ink">{visible.length}</strong> of{" "}
-            <strong className="text-ink">{cols.length}</strong> columns
+            <Trans
+              i18nKey="profiler.col_showing"
+              values={{
+                visible: visible.length.toLocaleString(numberLocale),
+                total: cols.length.toLocaleString(numberLocale),
+              }}
+              components={{
+                1: <strong className="text-ink" />,
+                3: <strong className="text-ink" />,
+              }}
+            />
           </span>
           {/* Download report */}
           <button
@@ -65,7 +63,7 @@ export const ColumnTable = ({
             }}
             className={`${BTN.secondary} flex items-center gap-1.5 !py-1 !text-xs`}
           >
-            <Download size={13} /> Download Report
+            <Download size={13} /> {t("profiler.col_download_report")}
           </button>
         </div>
       </div>
@@ -76,17 +74,17 @@ export const ColumnTable = ({
           <table className="w-full text-sm min-w-[700px]">
             <thead>
               <tr className="bg-[#F9F9F8] border-b border-border text-muted text-[10px] uppercase tracking-wider">
-                <th className="text-left px-3 py-2 font-medium">Column Name</th>
-                <th className="text-left px-3 py-2 font-medium">Detected Type</th>
+                <th className="text-left px-3 py-2 font-medium">{t("profiler.col_header_name")}</th>
+                <th className="text-left px-3 py-2 font-medium">{t("profiler.col_header_detected")}</th>
                 <th
                   className="text-left px-3 py-2 font-medium"
-                  title="Auto-detected types may be wrong — override here."
+                  title={t("profiler.col_header_override_tooltip")}
                 >
-                  Override Type
+                  {t("profiler.col_header_override")}
                 </th>
-                <th className="text-right px-3 py-2 font-medium">Unique</th>
-                <th className="text-right px-3 py-2 font-medium">Null%</th>
-                <th className="text-left px-3 py-2 font-medium">Chart Hints</th>
+                <th className="text-right px-3 py-2 font-medium">{t("profiler.col_header_unique")}</th>
+                <th className="text-right px-3 py-2 font-medium">{t("profiler.col_header_null_pct")}</th>
+                <th className="text-left px-3 py-2 font-medium">{t("profiler.col_header_chart_hints")}</th>
               </tr>
             </thead>
             <tbody>
@@ -110,29 +108,29 @@ export const ColumnTable = ({
                         {col.null_pct > 60 && (
                           <AlertCircle
                             className="w-3 h-3 text-red-500 cursor-help shrink-0"
-                            title="Missing >60% of data"
+                            title={t("profiler.col_alert_missing_60")}
                           />
                         )}
                         {col.unique_count === 1 && (
                           <AlertCircle
                             className="w-3 h-3 text-amber-500 cursor-help shrink-0"
-                            title="Only 1 unique value"
+                            title={t("profiler.col_alert_unique_1")}
                           />
                         )}
                         {col.low_confidence &&
                           !col.disguised_numeric?.is_disguised && (
                             <AlertCircle
                               className="w-3 h-3 text-orange-500 cursor-help shrink-0"
-                              title="Low detection confidence"
+                              title={t("profiler.col_alert_low_confidence")}
                             />
                           )}
                         {col.disguised_numeric?.is_disguised && (
                           <span
-                            title="Column contains numeric values stored as text. Use Override Type to convert."
+                            title={t("profiler.col_alert_disguised_numeric")}
                             className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-amber-100 text-amber-700 cursor-help whitespace-nowrap border border-amber-200"
                           >
                             <AlertTriangle className="w-2.5 h-2.5 inline mr-0.5" />
-                            Likely numeric
+                            {t("profiler.col_badge_likely_numeric")}
                           </span>
                         )}
                       </div>
@@ -160,7 +158,7 @@ export const ColumnTable = ({
                       {col.unnamed_warning && (
                         <div className="mt-1 text-[9px] text-blue-600 flex items-center gap-1">
                           <Info className="w-3 h-3 shrink-0" />
-                          <span>{col.unnamed_warning}</span>
+                          <span>{t("profiler.col_unnamed_warning", { defaultValue: col.unnamed_warning })}</span>
                         </div>
                       )}
                     </td>
@@ -182,9 +180,9 @@ export const ColumnTable = ({
                             : "border-border text-muted"
                         }`}
                       >
-                        {COLUMN_TYPES.map((t) => (
-                          <option key={t} value={t}>
-                            {TYPE_LABELS[t]}
+                        {COLUMN_TYPES.map((colType) => (
+                          <option key={colType} value={colType}>
+                            {t(`profiler.type_${colType}`, { defaultValue: colType })}
                           </option>
                         ))}
                       </select>
@@ -194,16 +192,16 @@ export const ColumnTable = ({
                             handleOverride(col.name, col.detected_type)
                           }
                           className="ml-1.5 text-[10px] text-muted hover:text-ink underline"
-                          title="Reset to original detected type"
+                          title={t("profiler.col_override_reset_tooltip")}
                         >
-                          Reset
+                          {t("profiler.col_override_reset")}
                         </button>
                       )}
                     </td>
 
                     {/* Unique count */}
                     <td className="px-3 py-2 text-right font-mono text-xs text-muted">
-                      {col.unique_count.toLocaleString()}
+                      {col.unique_count.toLocaleString(numberLocale)}
                     </td>
 
                     {/* Null % */}
@@ -214,7 +212,7 @@ export const ColumnTable = ({
                             col.null_pct > 30 ? "text-[#9F2F2D] font-medium" : ""
                           }
                         >
-                          {col.null_pct}%
+                          {col.null_pct.toLocaleString(numberLocale)}%
                         </span>
                       ) : (
                         "—"
@@ -230,7 +228,7 @@ export const ColumnTable = ({
                                 key={chart}
                                 className="px-2 py-0.5 text-[10px] rounded-full bg-sage text-forest border border-[#c8e0cb]"
                               >
-                                {CHART_LABELS[chart] || chart}
+                                {t(`profiler.chart_${chart}`, { defaultValue: chart })}
                               </span>
                             ))
                           : <span className="text-muted text-xs">—</span>}
@@ -252,11 +250,11 @@ export const ColumnTable = ({
         >
           {showAll ? (
             <>
-              <ChevronUp className="w-3.5 h-3.5" /> Show less
+              <ChevronUp className="w-3.5 h-3.5" /> {t("profiler.col_show_less")}
             </>
           ) : (
             <>
-              <ChevronDown className="w-3.5 h-3.5" /> Show all {cols.length} columns
+              <ChevronDown className="w-3.5 h-3.5" /> {t("profiler.col_show_all", { count: cols.length.toLocaleString(numberLocale) })}
             </>
           )}
         </button>
@@ -264,12 +262,10 @@ export const ColumnTable = ({
 
       {/* Footer */}
       <p className="mt-2 text-[10px] text-muted">
-        * Type overrides only affect the UI (local state). File hash:{" "}
-        <code className="font-mono bg-[#F9F9F8] px-1 rounded">
-          {result.file_hash.slice(0, 8)}...
-        </code>
+        {t("profiler.col_footer_note", { hash: result.file_hash.slice(0, 8) })}
       </p>
     </div>
   );
 };
+
 

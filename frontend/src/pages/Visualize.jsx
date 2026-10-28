@@ -37,7 +37,7 @@ const COLOR_PRESETS = [
 
 const ENABLE_CHART_EDIT = false; // bật lại khi xử lý xong cache-invalidation cho edit chart
 
-const ChartCard = ({ chart, isSelected, toggleChart, summary, onUpdate, onCellClick, anchorPair, ai_insights_enabled, sessionId, fileHash }) => {
+const ChartCard = ({ chart, isSelected, toggleChart, summary, onUpdate, onCellClick, anchorPair, sessionId, fileHash }) => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [localTitle, setLocalTitle] = useState(chart.user_title || chart.title);
@@ -191,15 +191,13 @@ const ChartCard = ({ chart, isSelected, toggleChart, summary, onUpdate, onCellCl
         </div>
       )}
 
-      {ai_insights_enabled && (
-        <AIInsightsCard 
-          sessionId={sessionId}
-          fileHash={fileHash}
-          chart={chart}
-          autoInsights={insights}
-          anchorPair={anchorPair}
-        />
-      )}
+      <AIInsightsCard 
+        sessionId={sessionId}
+        fileHash={fileHash}
+        chart={chart}
+        autoInsights={insights}
+        anchorPair={anchorPair}
+      />
     </div>
   );
 };
@@ -278,7 +276,6 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
   const { fileSession, updateFileSession, clearFileSession } = useFileSession();
   
   const currentUser = getUser() || {};
-  const { ai_insights_enabled } = currentUser;
 
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState("distribution");
@@ -750,7 +747,7 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
                         onUpdate={handleUpdateChart}
                         onCellClick={chart.type === "heatmap" ? handleAnchorSelect : undefined}
                         anchorPair={chart.type === "heatmap" ? anchorPair : undefined}
-                        ai_insights_enabled={ai_insights_enabled}
+
                         sessionId={fileSession.sessionId}
                         fileHash={fileSession.fileHash}
                       />

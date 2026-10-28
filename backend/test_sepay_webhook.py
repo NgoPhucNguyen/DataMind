@@ -4,6 +4,7 @@ import time
 import hmac
 import hashlib
 from unittest import mock
+from datetime import datetime, timedelta, date
 from sqlalchemy.exc import SQLAlchemyError
 
 # Set environments BEFORE importing app and settings so they take effect
@@ -95,7 +96,7 @@ def test_sepay_webhook():
     db.expire_all()
     usage1 = db.query(UserAIUsage).filter(UserAIUsage.user_id == 1).first()
     assert usage1.plan == 'pro', f"Plan should be upgraded to pro, got {usage1.plan}"
-    assert usage1.runs_limit == 50, "Limit should be 50"
+    assert usage1.runs_limit == 20, f"Limit should be 20, got {usage1.runs_limit}"
     assert usage1.runs_used == 0, "Runs used should be reset to 0"
     
     event1 = db.query(PaymentEvent).filter(PaymentEvent.transaction_id == 999999).first()
@@ -252,9 +253,78 @@ def test_sepay_webhook():
     assert resp8.json()["detail"] == "Invalid signature"
     print("✓ Replay attack blocked (timestamp check works)")
 
+    # ==========================================
+    # TEST 9: Pro Renewal when still active (Accumulate 30 days)
+    # ==========================================
+    print("9. Testing Pro Renewal (Accumulate 30 days)...")
+    initial_expiry = usage1.pro_expires_at
+    order_renew = PendingOrder(user_id=1, order_ref="DM-TEST-RENEW", amount=500000, status=PaymentStatus.PENDING)
+    db.add(order_renew)
+    db.commit()
+
+    payload_renew = {
+        "id": 999995,
+        "gateway": "vietqr",
+        "transactionDate": "2023-10-10 10:10:10",
+        "accountNumber": "123456789",
+        "code": "test code",
+        "content": "Thanh toan DM-TEST-RENEW",
+        "transferType": "in",
+        "transferAmount": 500000,
+        "accumulated": 2600000,
+        "referenceCode": "ref127"
+    }
+    resp_renew = make_request(payload_renew)
+    assert resp_renew.status_code == 200
+    
+    db.expire_all()
+    usage_renew = db.query(UserAIUsage).filter(UserAIUsage.user_id == 1).first()
+    expected_expiry = initial_expiry + timedelta(days=30)
+    assert abs((usage_renew.pro_expires_at - expected_expiry).total_seconds()) < 5, "Renewal should add 30 days to existing expiry"
+    assert usage_renew.plan == "pro"
+    assert usage_renew.runs_limit == 20
+    assert usage_renew.runs_used == 0
+    print("✓ Pro renewal accumulated 30 days correctly")
+
+    # ==========================================
+    # TEST 10: refresh_usage logic unit tests
+    # ==========================================
+    print("10. Testing refresh_usage unit tests...")
+    from app.services.ai_usage_service import refresh_usage, today_vn, FREE_DAILY_RUNS, PRO_DAILY_RUNS
+
+    # Case A: Pro expired -> downgrades to Free
+    mock_expired_usage = UserAIUsage(
+        user_id=999,
+        plan="pro",
+        runs_limit=PRO_DAILY_RUNS,
+        runs_used=15,
+        runs_reset_date=today_vn(),
+        pro_expires_at=datetime.utcnow() - timedelta(days=1)
+    )
+    refresh_usage(mock_expired_usage)
+    assert mock_expired_usage.plan == "free", "Expired pro should downgrade to free"
+    assert mock_expired_usage.runs_limit == FREE_DAILY_RUNS, f"Limit should be {FREE_DAILY_RUNS}"
+    assert mock_expired_usage.pro_expires_at is not None, "pro_expires_at must be preserved for frontend banner"
+    print("✓ refresh_usage correctly downgrades expired Pro to Free")
+
+    # Case B: New day -> resets runs_used to 0
+    yesterday = today_vn() - timedelta(days=1)
+    mock_new_day_usage = UserAIUsage(
+        user_id=999,
+        plan="free",
+        runs_limit=FREE_DAILY_RUNS,
+        runs_used=3,
+        runs_reset_date=yesterday,
+        pro_expires_at=None
+    )
+    refresh_usage(mock_new_day_usage)
+    assert mock_new_day_usage.runs_used == 0, "runs_used should be reset to 0 on new day"
+    assert mock_new_day_usage.runs_reset_date == today_vn(), "runs_reset_date should be updated to today_vn"
+    print("✓ refresh_usage correctly resets runs_used to 0 on new day")
+
     # --- Clean up after success ---
-    db.query(PaymentEvent).filter(PaymentEvent.transaction_id.in_([999999, 999998, 999997, 999996])).delete()
-    db.query(PendingOrder).filter(PendingOrder.order_ref.in_(["DM-TEST-123456", "DM-TEST-MISMATCH", "DM-TEST-ERROR"])).delete()
+    db.query(PaymentEvent).filter(PaymentEvent.transaction_id.in_([999999, 999998, 999997, 999996, 999995])).delete()
+    db.query(PendingOrder).filter(PendingOrder.order_ref.in_(["DM-TEST-123456", "DM-TEST-MISMATCH", "DM-TEST-ERROR", "DM-TEST-RENEW"])).delete()
     db.commit()
     db.close()
     print("All tests passed successfully!")

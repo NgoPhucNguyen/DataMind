@@ -7,7 +7,12 @@ import logging
 from app.core.dependencies import get_current_user
 from app.core.database import get_db
 from sqlalchemy.orm import Session
-from app.services.ai_usage_service import check_ai_quota, record_ai_usage
+from app.services.ai_usage_service import (
+    check_ai_quota,
+    record_ai_usage,
+    record_ai_feature_usage,
+    get_user_ai_usage_summary,
+)
 from app.core import cache
 from app.core.errors import DataMindException, ErrorSeverity
 from app.routers.files import _read_dataframe
@@ -151,76 +156,109 @@ class ExplainRequest(BaseModel):
     col_x: str
     col_y: str | None = None
     tier: str = "tier1"
+    lang: str = "vi"
+    is_reanalyze: bool = False
+    chart_config: dict | None = None
+    plotted_data: list | None = None
 
 @router.post("/explain", summary="Giải thích biểu đồ bằng AI")
 async def explain_chart(
     body: ExplainRequest,
     current_user: dict = Depends(get_current_user),
-    db = Depends(get_db)
+    db: Session = Depends(get_db)
 ):
     from app.services.ai_explain_service import call_gemini_explain
     from app.services.context_builder import build_llm_context, build_dataset_context
     import os
+    import hashlib
     
-    # 0. Lấy file hash
+    # 0. Lấy file bytes và session metadata để tìm file_hash gốc
     cached_file = cache.get_file_bytes(current_user["user_id"], body.session_id)
     if not cached_file:
         raise HTTPException(status_code=410, detail="Phiên làm việc đã hết hạn.")
     
-    import hashlib
-    # Tái tạo hash từ session bytes (dùng làm key tạm nếu ko có file_hash gốc)
-    # Vì file_hash đã bao gồm CACHE_VERSION trong files.py, ta lấy file_hash bằng cách tương tự
-    # Để chắc chắn, ta dùng hàm băm chuẩn hoặc hash MD5.
-    file_hash = "v4:" + hashlib.md5(cached_file["bytes"]).hexdigest()
-    
+    session_meta = cache.get_session_metadata(current_user["user_id"], body.session_id) or {}
+    provenance_hash = session_meta.get("file_hash")
+    file_hash = provenance_hash or ("v4:" + hashlib.md5(cached_file["bytes"]).hexdigest())
+
     # Sort columns for consistent caching if 2 columns
     sorted_x, sorted_y = body.col_x, body.col_y
     if body.col_y:
         sorted_x, sorted_y = sorted([body.col_x, body.col_y])
 
-    # 1. Check edited cache (Tier 2)
-    edited = cache.get_ai_explain_edited(
-        current_user["user_id"], file_hash, body.chart_type, sorted_x, sorted_y, body.tier
-    )
-    if edited:
-        return {"content": edited, "tier": body.tier, "source": "user", "cached": True}
+    # Profiler & User context
+    profiler_ctx = cache.get_profiler_context(current_user["user_id"], file_hash) or {}
+    user_context = cache.get_user_context(current_user["user_id"], file_hash) or {}
+    
+    # Merge context to get description & semantic info
+    desc = profiler_ctx.get("description") or user_context.get("description") or ""
+    desc_src = profiler_ctx.get("description_source") or "user"
+    sem_ctx = profiler_ctx.get("semantic_context") or {}
+    domain = sem_ctx.get("domain", "")
 
-    # 2. Check original cache (Tier 1)
-    original = cache.get_ai_explain_original(
-        file_hash, body.chart_type, sorted_x, sorted_y, body.tier
-    )
-    if original:
-        return {"content": original, "tier": body.tier, "source": "ai", "cached": True}
+    # Calculate context_hash so that changes to description / domain invalidate or update cache
+    ctx_raw_str = f"{desc}:{desc_src}:{domain}"
+    context_hash = hashlib.md5(ctx_raw_str.encode("utf-8")).hexdigest()[:12]
 
-    # 3. Cache Miss -> Check AI Quota
+    # Cleaning Summary from report_sections
+    report_sections = cache.get_all_report_sections(current_user["user_id"], file_hash) or {}
+    cleaner_summary = report_sections.get("cleaner") or {}
+
+    # 1. Check edited cache (Tier 2) with lang
+    edited_data = cache.get_ai_explain_edited(
+        current_user["user_id"], file_hash, body.chart_type, sorted_x, sorted_y, body.tier, lang=body.lang, context_hash=context_hash
+    )
+    if edited_data:
+        content = edited_data.get("content") if isinstance(edited_data, dict) else edited_data
+        saved_ctx_hash = edited_data.get("context_hash") if isinstance(edited_data, dict) else ""
+        is_stale = bool(saved_ctx_hash and saved_ctx_hash != context_hash)
+        
+        # If user explicitly pressed re-analyze, bypass cache
+        if not body.is_reanalyze:
+            usage_info = get_user_ai_usage_summary(db, current_user["user_id"])
+            return {
+                "content": content,
+                "tier": body.tier,
+                "source": "user",
+                "cached": True,
+                "from_cache": True,
+                "is_stale": is_stale,
+                "usage": usage_info,
+            }
+
+    # 2. Check original cache (Tier 1) with lang & context_hash
+    if not body.is_reanalyze:
+        original = cache.get_ai_explain_original(
+            file_hash, body.chart_type, sorted_x, sorted_y, body.tier, lang=body.lang, context_hash=context_hash
+        )
+        if original:
+            usage_info = get_user_ai_usage_summary(db, current_user["user_id"])
+            return {
+                "content": original,
+                "tier": body.tier,
+                "source": "ai",
+                "cached": True,
+                "from_cache": True,
+                "is_stale": False,
+                "usage": usage_info,
+            }
+
+    # 3. Cache Miss -> Check AI Quota (Shared pool)
     check_ai_quota(current_user["user_id"], db)
 
     # 4. Load stats & Build prompt
-    # 4a. Lấy Part 1 từ cache (đã build khi profile)
-    dataset_md = cache.get_dataset_context_md(current_user["user_id"], file_hash)
-    if not dataset_md:
-        profile_data = cache.get_profile(current_user["user_id"], file_hash)
-        if profile_data:
-            dataset_md = build_dataset_context(profile_data)
-            cache.set_dataset_context_md(current_user["user_id"], file_hash, dataset_md)
-            
-    # 4b. Lấy user_context
-    user_context = cache.get_user_context(current_user["user_id"], body.session_id)
-
-    # 4c. Lấy col_stats đầy đủ bằng compute_statistics (tốn ~1-2s nhưng cần)
+    profile_data = cache.get_profile(current_user["user_id"], file_hash)
     summary = visualize_service.compute_statistics(current_user["user_id"], body.session_id)
+    
     col_stats = {}
     if body.chart_type in ("heatmap", "scatter"):
-        # For multi-column charts, we might need correlation from correlation_matrix
         corr_matrix = summary.get("correlation_matrix", {})
         r_val = corr_matrix.get(body.col_x, {}).get(body.col_y, "N/A")
         if r_val == "N/A":
             r_val = corr_matrix.get(body.col_y, {}).get(body.col_x, "N/A")
             
-        # Get semantic types
         col_x_sem = "GENERAL_TEXT"
         col_y_sem = "GENERAL_TEXT"
-        profile_data = cache.get_profile(current_user["user_id"], file_hash)
         if profile_data:
             for col in profile_data.get("columns", []):
                 if col["name"] == body.col_x:
@@ -238,42 +276,64 @@ async def explain_chart(
     else:
         col_stats = summary.get("columns", {}).get(body.col_x, {})
 
-    # 4d. Build prompt cuối (auto_insights tính nội bộ)
+    # Plotted data: cap at 30 points max
+    plotted_data = body.plotted_data
+    if plotted_data and isinstance(plotted_data, list):
+        plotted_data = plotted_data[:30]
+
+    merged_user_context = {
+        "description": desc,
+        "description_source": desc_src,
+        "purpose": user_context.get("purpose") or ""
+    }
+
     prompt = build_llm_context(
-        profile_data=None,
+        profile_data=profile_data,
         chart_type=body.chart_type,
         col_x=body.col_x,
         col_stats=col_stats,
         col_y=body.col_y,
-        dataset_context_md=dataset_md,
-        user_context=user_context,
+        dataset_context_md=None,
+        user_context=merged_user_context,
+        cleaning_summary=cleaner_summary,
+        chart_config=body.chart_config,
+        plotted_data=plotted_data,
     )
+
+    if body.lang == "en":
+        prompt += "\n\nCRITICAL INSTRUCTION: You MUST write your complete analysis and explanation in ENGLISH."
+    else:
+        prompt += "\n\nCRITICAL INSTRUCTION: You MUST write your complete analysis and explanation in VIETNAMESE."
     
     # 5. Gọi AI 
     try:
         explanation = await call_gemini_explain(prompt)
-        
-        if "tính năng ai explain hiện không khả dụng" in explanation.lower() or "lỗi khi gọi ai" in explanation.lower():
-            record_ai_usage(db, current_user["user_id"], "explain-chart", "fallback_used")
-        else:
-            record_ai_usage(db, current_user["user_id"], "explain-chart", "success")
     except Exception as e:
         record_ai_usage(db, current_user["user_id"], "explain-chart", "failed")
         raise e
 
-    # 6. Cache lại
+    # 6. Ghi nhận quota tiêu thụ
+    feature_name = "re_explain" if body.is_reanalyze else "explain"
+    usage_summary = record_ai_feature_usage(db, current_user["user_id"], feature_name)
+
+    # 7. Cache lại với lang và context_hash
     cache.set_ai_explain_original(
-        file_hash, body.chart_type, sorted_x, sorted_y, body.tier, explanation
+        file_hash, body.chart_type, sorted_x, sorted_y, body.tier, explanation, lang=body.lang, context_hash=context_hash
     )
 
     APP_ENV = os.getenv("APP_ENV", "production")
-    response = {"content": explanation, "tier": body.tier, "source": "ai", "cached": False}
+    response = {
+        "content": explanation,
+        "tier": body.tier,
+        "source": "ai",
+        "cached": False,
+        "from_cache": False,
+        "is_stale": False,
+        "usage": usage_summary,
+    }
     
     if APP_ENV in ("development", "local"):
         response["_debug_prompt"] = prompt
-        response["_debug_parts"] = {
-            "part1_dataset_context": dataset_md or "(not available)"
-        }
 
     return response
 
@@ -285,27 +345,40 @@ class SaveExplainRequest(BaseModel):
     col_y: str | None = None
     tier: str = "tier1"
     content: str
+    lang: str = "vi"
 
 @router.post("/explain/save", summary="Lưu nội dung AI giải thích do user sửa")
 async def save_explain(
     body: SaveExplainRequest,
     current_user: dict = Depends(get_current_user)
 ):
+    import hashlib
     cached_file = cache.get_file_bytes(current_user["user_id"], body.session_id)
     if not cached_file:
         raise HTTPException(status_code=410, detail="Phiên làm việc đã hết hạn.")
     
-    import hashlib
-    file_hash = "v4:" + hashlib.md5(cached_file["bytes"]).hexdigest()
+    session_meta = cache.get_session_metadata(current_user["user_id"], body.session_id) or {}
+    provenance_hash = session_meta.get("file_hash")
+    file_hash = provenance_hash or ("v4:" + hashlib.md5(cached_file["bytes"]).hexdigest())
     
     sorted_x, sorted_y = body.col_x, body.col_y
     if body.col_y:
         sorted_x, sorted_y = sorted([body.col_x, body.col_y])
+
+    profiler_ctx = cache.get_profiler_context(current_user["user_id"], file_hash) or {}
+    user_context = cache.get_user_context(current_user["user_id"], file_hash) or {}
+    desc = profiler_ctx.get("description") or user_context.get("description") or ""
+    desc_src = profiler_ctx.get("description_source") or "user"
+    sem_ctx = profiler_ctx.get("semantic_context") or {}
+    domain = sem_ctx.get("domain", "")
+    ctx_raw_str = f"{desc}:{desc_src}:{domain}"
+    context_hash = hashlib.md5(ctx_raw_str.encode("utf-8")).hexdigest()[:12]
         
     cache.set_ai_explain_edited(
-        current_user["user_id"], file_hash, body.chart_type, sorted_x, sorted_y, body.tier, body.content
+        current_user["user_id"], file_hash, body.chart_type, sorted_x, sorted_y, body.tier, body.content, lang=body.lang, context_hash=context_hash
     )
     return {"message": "Đã lưu bản nháp."}
+
 
 
 

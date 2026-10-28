@@ -24,10 +24,43 @@ export const profileFile = async (file, forceRefresh = false) => {   // (2) thê
 };
 
 /**
- * Gọi Gemini AI để phân tích ngữ cảnh dataset (on-demand).
+ * Gọi Gemini AI để phân tích ngữ cảnh dataset (on-demand) kèm theo ngôn ngữ và chỉnh sửa.
  * @param {string} fileHash - Hash của file đã profile
- * @returns {Promise} { semantic_context, column_semantics }
+ * @param {string} lang - Ngôn ngữ ("vi" hoặc "en")
+ * @param {string|null} description - Mô tả bổ sung từ user nếu re-analyze
+ * @param {boolean} isReanalyze - True nếu là phân tích lại theo chỉnh sửa
+ * @returns {Promise}
  */
-export const requestAIContext = (fileHash) => {
-  return api.post("/files/ai-context", { file_hash: fileHash });
+export const requestAIContext = (fileHash, lang = "vi", description = null, isReanalyze = false) => {
+  return api.post("/files/ai-context", {
+    file_hash: fileHash,
+    lang,
+    description,
+    is_reanalyze: isReanalyze,
+  });
+};
+
+/**
+ * Lấy trạng thái Profiler đã persist từ server (không gọi AI).
+ */
+export const getProfilerState = (fileHash) => {
+  return api.get(`/files/profiler-state?file_hash=${encodeURIComponent(fileHash)}`);
+};
+
+/**
+ * Lưu mô tả và trạng thái sửa đổi của Profiler mà không tốn quota AI.
+ */
+export const saveProfilerState = (fileHash, description, descriptionSource) => {
+  return api.post("/files/profiler-state", {
+    file_hash: fileHash,
+    description,
+    description_source: descriptionSource,
+  });
+};
+
+/**
+ * Lấy hạn mức và thống kê sử dụng AI dùng chung.
+ */
+export const getAIUsage = () => {
+  return api.get("/files/ai-usage");
 };

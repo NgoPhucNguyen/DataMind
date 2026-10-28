@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { CheckCircle, Sparkles } from "lucide-react";
 import UpgradeModal from "../components/UpgradeModal";
+import { PLANS, formatVND } from "../lib/plans";
 
 export default function Pricing() {
     const navigate = useNavigate();
@@ -10,21 +11,8 @@ export default function Pricing() {
     const [showUpgradeModal, setShowUpgradeModal] = useState(false);
 
     const isPro = subscription?.plan === "pro";
-
-    const featuresFree = [
-        "Phân tích dữ liệu cơ bản",
-        "2 lượt sử dụng AI Insights mỗi tháng",
-        "Trực quan hóa dữ liệu tiêu chuẩn",
-        "Hỗ trợ cộng đồng"
-    ];
-
-    const featuresPro = [
-        "Mọi thứ trong gói Free",
-        "50 lượt sử dụng AI Insights",
-        "Làm sạch dữ liệu tự động với AI",
-        "Tạo báo cáo chi tiết",
-        "Hỗ trợ ưu tiên"
-    ];
+    const free = PLANS.free;
+    const pro = PLANS.pro;
 
     const handleUpgradeClick = () => {
         if (!user) {
@@ -46,26 +34,33 @@ export default function Pricing() {
                         Chọn gói phù hợp với bạn
                     </h1>
                     <p className="text-muted text-lg max-w-md mx-auto">
-                        Mở khóa toàn bộ tính năng phân tích dữ liệu thông minh và AI với gói Pro.
+                        Bắt đầu miễn phí với {free.aiRuns} lượt AI mỗi ngày. Nâng cấp lên Pro để
+                        nhận {pro.aiRuns} lượt phân tích mỗi ngày (hạn {pro.durationDays} ngày).
                     </p>
                 </div>
 
                 {/* Pricing Cards */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl mx-auto">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-3xl mx-auto">
                     {/* Free Plan */}
                     <div className="rounded-2xl border border-border bg-white p-8 flex flex-col hover:border-forest/30 transition-all">
                         <div className="mb-6">
-                            <h2 className="text-2xl font-serif font-bold mb-1 text-ink">Free</h2>
-                            <p className="text-muted text-sm">Trải nghiệm cơ bản</p>
+                            <h2 className="text-2xl font-serif font-bold mb-1 text-ink">
+                                {free.name}
+                            </h2>
+                            <p className="text-muted text-sm">{free.subtitle}</p>
                         </div>
-                        <div className="mb-8">
-                            <span className="text-4xl font-bold font-mono text-ink tracking-tight">0</span>
-                            <span className="text-muted text-sm ml-2 font-medium">VNĐ</span>
+                        <div className="mb-8 flex items-baseline gap-2">
+                            <span className="text-4xl font-bold font-mono text-ink tracking-tight">
+                                0đ
+                            </span>
+                            <span className="text-muted text-sm font-medium">
+                                / ngày (reset 00:00)
+                            </span>
                         </div>
                         <ul className="space-y-4 mb-8 flex-1">
-                            {featuresFree.map((feat, i) => (
+                            {free.features.map((feat, i) => (
                                 <li key={i} className="flex items-start gap-3 text-sm text-muted">
-                                    <CheckCircle className="w-5 h-5 text-forest shrink-0" />
+                                    <CheckCircle className="w-5 h-5 text-forest shrink-0" strokeWidth={1.5} />
                                     <span>{feat}</span>
                                 </li>
                             ))}
@@ -79,47 +74,55 @@ export default function Pricing() {
                     </div>
 
                     {/* Pro Plan */}
-                    <div className="rounded-2xl border-2 border-forest bg-white p-8 flex flex-col shadow-xl shadow-forest/5 relative scale-100 md:scale-[1.02]">
-                        <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                            <span className="bg-forest text-white text-[10px] font-bold uppercase tracking-widest px-4 py-1.5 rounded-full shadow-sm flex items-center gap-1">
-                                <Sparkles className="w-3 h-3" /> Đề xuất
+                    <div className="rounded-2xl border-2 border-forest bg-white p-8 flex flex-col shadow-[0_4px_20px_rgba(27,67,36,0.08)] relative scale-100 md:scale-[1.02]">
+                        <div className="absolute -top-3.5 left-1/2 -translate-x-1/2">
+                            <span className="bg-forest text-white text-[10px] font-bold uppercase tracking-widest px-4 py-1.5 rounded-full flex items-center gap-1">
+                                <Sparkles className="w-3 h-3" strokeWidth={2} /> Đề xuất
                             </span>
                         </div>
                         <div className="mb-6">
-                            <h2 className="text-2xl font-serif font-bold mb-1 text-forest">Pro</h2>
-                            <p className="text-muted text-sm">Dành cho người dùng chuyên nghiệp</p>
+                            <h2 className="text-2xl font-serif font-bold mb-1 text-forest">
+                                {pro.name}
+                            </h2>
+                            <p className="text-muted text-sm">{pro.subtitle}</p>
                         </div>
-                        <div className="mb-8 flex items-baseline">
-                            <span className="text-4xl font-bold font-mono text-ink tracking-tight">2.000</span>
-                            <span className="text-muted text-sm ml-2 font-medium">VNĐ / tháng</span>
+                        <div className="mb-8">
+                            <div className="flex items-baseline gap-2">
+                                <span className="text-4xl font-bold font-mono text-ink tracking-tight">
+                                    {formatVND(pro.price)}
+                                </span>
+                                <span className="text-muted text-sm font-medium">
+                                    / {pro.periodLabel}
+                                </span>
+                            </div>
+                            <p className="text-xs text-muted mt-1">{pro.aiRuns} lượt/ngày · Reset 00:00 (giờ VN)</p>
                         </div>
                         <ul className="space-y-4 mb-8 flex-1">
-                            {featuresPro.map((feat, i) => (
+                            {pro.features.map((feat, i) => (
                                 <li key={i} className="flex items-start gap-3 text-sm font-medium text-ink">
-                                    <CheckCircle className="w-5 h-5 text-forest shrink-0" />
+                                    <CheckCircle className="w-5 h-5 text-forest shrink-0" strokeWidth={1.5} />
                                     <span>{feat}</span>
                                 </li>
                             ))}
                         </ul>
                         <button
                             onClick={handleUpgradeClick}
-                            disabled={isPro}
-                            className={`w-full py-3.5 rounded-xl text-sm font-bold transition-all shadow-sm
-                                ${isPro 
-                                    ? "bg-forest/10 text-forest cursor-not-allowed" 
-                                    : "bg-ink hover:bg-ink/90 text-white"
-                                }
-                            `}
+                            className="w-full py-3.5 rounded-xl text-sm font-bold transition-all shadow-sm bg-ink hover:bg-ink/90 text-white"
                         >
-                            {isPro ? "Đang sử dụng" : "Nâng cấp ngay"}
+                            {isPro ? "Gia hạn thêm 30 ngày" : "Nâng cấp ngay"}
                         </button>
+                        {isPro && subscription?.pro_expires_at && (
+                            <p className="text-xs text-forest text-center mt-2 font-medium">
+                                Hạn hiện tại: {new Date(subscription.pro_expires_at).toLocaleDateString("vi-VN")}
+                            </p>
+                        )}
                     </div>
                 </div>
             </main>
 
-            <UpgradeModal 
-                isOpen={showUpgradeModal} 
-                onClose={() => setShowUpgradeModal(false)} 
+            <UpgradeModal
+                isOpen={showUpgradeModal}
+                onClose={() => setShowUpgradeModal(false)}
                 onSuccess={() => {
                     reloadSubscription();
                 }}

@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { FileSearch, Wand2, PieChart, Workflow, ChevronLeft, ChevronRight, LogOut, PanelLeftClose, PanelLeftOpen, FileText, Crown, Sparkles } from "lucide-react";
 import UpgradeModal from "./UpgradeModal";
+import LanguageToggle from "./LanguageToggle";
 
 export default function Sidebar() {
   const [sidebarState, setSidebarState] = useState(() => {
@@ -135,6 +136,9 @@ export default function Sidebar() {
                     <Sparkles className="w-4 h-4" /> Nâng cấp Pro
                   </button>
                 )}
+                <div className="flex justify-center w-full my-1">
+                  <LanguageToggle />
+                </div>
                 <button
                   onClick={() => updateState("hidden")}
                   className="flex items-center justify-center gap-2 py-2 w-full text-xs text-muted hover:text-ink hover:bg-sage/40 rounded-lg transition-colors border border-transparent"
@@ -150,6 +154,10 @@ export default function Sidebar() {
                   </div>
                 </div>
                 
+                <div className="flex justify-center w-full my-0.5">
+                  <LanguageToggle />
+                </div>
+
                 <button
                   onClick={() => {
                     logout();

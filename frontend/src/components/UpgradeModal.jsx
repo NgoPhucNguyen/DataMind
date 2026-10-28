@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { CheckCircle2, Copy, Loader2, Sparkles, X } from "lucide-react";
 import { createOrder, getOrderStatus } from "../services/paymentService";
 import { trackOnce } from "../lib/analytics";
+import { useAuth } from "../contexts/AuthContext";
 
 export default function UpgradeModal({ isOpen, onClose, onSuccess }) {
     const [order, setOrder] = useState(null);
@@ -10,6 +11,12 @@ export default function UpgradeModal({ isOpen, onClose, onSuccess }) {
     const [error, setError] = useState(null);
     const [pollingTimeout, setPollingTimeout] = useState(false);
     const [copySuccess, setCopySuccess] = useState(false);
+    const { subscription } = useAuth();
+
+    // Snapshot cục bộ tại thời điểm mở modal / tạo đơn (không đọc lại subscription sau khi thanh toán)
+    const [initialIsPro, setInitialIsPro] = useState(false);
+    const [initialCurrentExpiryStr, setInitialCurrentExpiryStr] = useState("");
+    const [initialNewExpiryStr, setInitialNewExpiryStr] = useState("");
 
     useEffect(() => {
         if (!isOpen) {
@@ -18,6 +25,33 @@ export default function UpgradeModal({ isOpen, onClose, onSuccess }) {
             setError(null);
             setPollingTimeout(false);
             return;
+        }
+
+        // Lưu snapshot trạng thái Pro và ngày hết hạn tại thời điểm mở modal
+        try {
+            const isPro = subscription?.plan === "pro";
+            const proExpiresAt = subscription?.pro_expires_at;
+            const isProActive = Boolean(
+                isPro && proExpiresAt && new Date(proExpiresAt).getTime() > Date.now()
+            );
+            setInitialIsPro(isProActive);
+            if (isProActive && proExpiresAt) {
+                const currentExpiry = new Date(proExpiresAt);
+                if (!isNaN(currentExpiry.getTime())) {
+                    const newExpiry = new Date(currentExpiry.getTime() + 30 * 24 * 60 * 60 * 1000);
+                    const formatD = (d) => `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
+                    setInitialCurrentExpiryStr(formatD(currentExpiry));
+                    setInitialNewExpiryStr(formatD(newExpiry));
+                }
+            } else {
+                setInitialCurrentExpiryStr("");
+                setInitialNewExpiryStr("");
+            }
+        } catch (err) {
+            console.error("Error computing expiry snapshot:", err);
+            setInitialIsPro(false);
+            setInitialCurrentExpiryStr("");
+            setInitialNewExpiryStr("");
         }
 
         let isMounted = true;
@@ -79,7 +113,7 @@ export default function UpgradeModal({ isOpen, onClose, onSuccess }) {
                         currency: "VND",
                         items: [{ item_id: "pro", item_name: "DataMind Pro", price: Number(order.amount), quantity: 1 }],
                     });
-                    if (onSuccess) onSuccess();
+                    // KHÔNG gọi onSuccess() tại đây để tránh re-render / unmount màn hình thành công
                     return; // Stop polling
                 }
             } catch (error) {
@@ -99,12 +133,21 @@ export default function UpgradeModal({ isOpen, onClose, onSuccess }) {
             isMounted = false;
             clearTimeout(timeoutId);
         };
-    }, [status, order, onSuccess]);
+    }, [status, order]);
 
     const handleCopy = (text) => {
         navigator.clipboard.writeText(text);
         setCopySuccess(true);
         setTimeout(() => setCopySuccess(false), 2000);
+    };
+
+    // Khi người dùng bấm "Bắt đầu sử dụng" hoặc đóng modal sau khi thành công
+    const handleClose = () => {
+        const wasCompleted = status === "completed";
+        onClose();
+        if (wasCompleted && onSuccess) {
+            onSuccess();
+        }
     };
 
     if (!isOpen) return null;
@@ -116,10 +159,12 @@ export default function UpgradeModal({ isOpen, onClose, onSuccess }) {
                 <div className="px-6 py-4 border-b border-border flex justify-between items-center bg-sage/20">
                     <div className="flex items-center gap-2 text-forest">
                         <Sparkles className="w-5 h-5" />
-                        <h2 className="text-lg font-bold">Nâng cấp Pro Plan</h2>
+                        <h2 className="text-lg font-bold">
+                            {initialIsPro ? "Gia hạn Pro Plan" : "Nâng cấp Pro Plan"}
+                        </h2>
                     </div>
                     <button
-                        onClick={onClose}
+                        onClick={handleClose}
                         className="text-muted hover:text-ink transition-colors p-1 rounded-md hover:bg-black/5"
                     >
                         <X className="w-5 h-5" />
@@ -128,14 +173,41 @@ export default function UpgradeModal({ isOpen, onClose, onSuccess }) {
 
                 {/* Body */}
                 <div className="p-6">
-                    {loading && (
+                    {/* 1. Màn hình thành công: kiểm tra ĐẦU TIÊN và chỉ dùng state cục bộ */}
+                    {status === "completed" && (
+                        <div className="text-center py-8 flex flex-col items-center gap-4">
+                            <div className="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mb-2">
+                                <CheckCircle2 className="w-8 h-8" />
+                            </div>
+                            <div>
+                                <h3 className="text-xl font-bold text-ink mb-1">
+                                    {initialIsPro ? "Gia hạn thành công!" : "Thanh toán thành công!"}
+                                </h3>
+                                <p className="text-muted">
+                                    {initialIsPro
+                                        ? `Cảm ơn bạn. Gói Pro của bạn đã được gia hạn thêm 30 ngày${initialNewExpiryStr ? ` (hạn mới: ${initialNewExpiryStr})` : ""}.`
+                                        : "Cảm ơn bạn. Tài khoản của bạn đã được nâng cấp lên Pro (20 lượt AI/ngày trong 30 ngày)."}
+                                </p>
+                            </div>
+                            <button
+                                onClick={handleClose}
+                                className="mt-2 w-full py-2.5 bg-forest hover:bg-forest/90 text-white rounded-lg font-semibold transition-colors"
+                            >
+                                Bắt đầu sử dụng
+                            </button>
+                        </div>
+                    )}
+
+                    {/* 2. Trạng thái Loading */}
+                    {status !== "completed" && loading && (
                         <div className="flex flex-col items-center justify-center py-12 gap-3 text-muted">
                             <Loader2 className="w-8 h-8 animate-spin text-forest" />
                             <p>Đang khởi tạo đơn hàng...</p>
                         </div>
                     )}
 
-                    {status === "error" && !loading && (
+                    {/* 3. Trạng thái Lỗi */}
+                    {status !== "completed" && status === "error" && !loading && (
                         <div className="text-center py-8 text-red-600">
                             <p>{error}</p>
                             <button
@@ -147,34 +219,28 @@ export default function UpgradeModal({ isOpen, onClose, onSuccess }) {
                         </div>
                     )}
 
-                    {status === "completed" && (
-                        <div className="text-center py-8 flex flex-col items-center gap-4">
-                            <div className="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mb-2">
-                                <CheckCircle2 className="w-8 h-8" />
-                            </div>
-                            <div>
-                                <h3 className="text-xl font-bold text-ink mb-1">Thanh toán thành công!</h3>
-                                <p className="text-muted">Cảm ơn bạn. Tài khoản của bạn đã được nâng cấp lên Pro.</p>
-                            </div>
-                            <button
-                                onClick={onClose}
-                                className="mt-2 w-full py-2.5 bg-forest hover:bg-forest/90 text-white rounded-lg font-semibold transition-colors"
-                            >
-                                Bắt đầu sử dụng
-                            </button>
-                        </div>
-                    )}
-
-                    {status === "pending" && order && !pollingTimeout && (
+                    {/* 4. Trạng thái Pending - Hiển thị mã QR và thông tin chuyển khoản */}
+                    {status !== "completed" && status === "pending" && order && !pollingTimeout && (
                         <div className="space-y-5 flex flex-col items-center">
                             <p className="text-sm text-center text-muted px-4">
                                 Vui lòng quét mã QR hoặc chuyển khoản theo thông tin bên dưới. Hệ thống sẽ tự động cập nhật ngay sau khi nhận được.
                             </p>
 
+                            {initialIsPro && (
+                                <div className="w-full bg-forest/5 border border-forest/20 rounded-xl p-3 text-xs text-forest text-center">
+                                    <p className="font-semibold flex items-center justify-center gap-1.5">
+                                        <Sparkles className="w-3.5 h-3.5" /> Gia hạn thêm 30 ngày
+                                    </p>
+                                    <p className="text-muted mt-0.5">
+                                        Hạn hiện tại: <span className="text-ink font-medium">{initialCurrentExpiryStr}</span> → Hạn mới: <span className="font-bold text-forest">{initialNewExpiryStr}</span>
+                                    </p>
+                                </div>
+                            )}
+
                             {/* QR Code */}
                             <div className="p-2 bg-white border border-border shadow-sm rounded-xl inline-block">
                                 <img
-                                    src={`https://img.vietqr.io/image/${order.transfer_info.bank_name}-${order.transfer_info.account_number}-compact2.jpg?amount=${order.amount}&addInfo=${order.order_ref}&accountName=${encodeURIComponent(order.transfer_info.account_name)}`}
+                                    src={`https://img.vietqr.io/image/${order.transfer_info?.bank_name || 'ACB'}-${order.transfer_info?.account_number || ''}-compact2.jpg?amount=${order.amount}&addInfo=${order.order_ref}&accountName=${encodeURIComponent(order.transfer_info?.account_name || '')}`}
                                     alt="QR Code"
                                     className="w-48 h-48 object-contain"
                                 />
@@ -184,19 +250,19 @@ export default function UpgradeModal({ isOpen, onClose, onSuccess }) {
                             <div className="w-full bg-sage/20 rounded-xl p-4 space-y-3 text-sm">
                                 <div className="flex justify-between items-center border-b border-border/50 pb-2">
                                     <span className="text-muted">Ngân hàng:</span>
-                                    <span className="font-semibold text-ink">{order.transfer_info.bank_name}</span>
+                                    <span className="font-semibold text-ink">{order.transfer_info?.bank_name}</span>
                                 </div>
                                 <div className="flex justify-between items-center border-b border-border/50 pb-2">
                                     <span className="text-muted">Chủ tài khoản:</span>
-                                    <span className="font-semibold text-ink">{order.transfer_info.account_name}</span>
+                                    <span className="font-semibold text-ink">{order.transfer_info?.account_name}</span>
                                 </div>
                                 <div className="flex justify-between items-center border-b border-border/50 pb-2">
                                     <span className="text-muted">Số tài khoản:</span>
-                                    <span className="font-semibold text-ink font-mono">{order.transfer_info.account_number}</span>
+                                    <span className="font-semibold text-ink font-mono">{order.transfer_info?.account_number}</span>
                                 </div>
                                 <div className="flex justify-between items-center border-b border-border/50 pb-2">
                                     <span className="text-muted">Số tiền:</span>
-                                    <span className="font-bold text-forest text-base">{new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(order.amount)}</span>
+                                    <span className="font-bold text-forest text-base">{new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(order.amount || 0)}</span>
                                 </div>
                                 <div className="flex justify-between items-center pt-1">
                                     <span className="text-muted">Nội dung (Bắt buộc):</span>
@@ -227,7 +293,8 @@ export default function UpgradeModal({ isOpen, onClose, onSuccess }) {
                         </div>
                     )}
 
-                    {pollingTimeout && status === "pending" && (
+                    {/* 5. Polling Timeout */}
+                    {status !== "completed" && pollingTimeout && status === "pending" && (
                         <div className="text-center py-6">
                             <div className="text-amber-500 mb-3 flex justify-center">
                                 <Loader2 className="w-8 h-8" />

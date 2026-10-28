@@ -42,9 +42,9 @@ async def _call_gemini_with_retry(client, prompt):
             contents=prompt,
         )
     )
-def _build_prompt(columns: list[dict]) -> str:
+def _build_prompt(columns: list[dict], lang: str = "vi", user_correction: str | None = None) -> str:
     """
-    Tạo prompt gửi cho Gemini từ danh sách cột đã profile.
+    Tạo prompt gửi cho Gemini từ danh sách cột đã profile, ngôn ngữ yêu cầu, và hiệu chỉnh người dùng (nếu có).
     """
     col_summary_lines = []
     for col in columns:
@@ -57,10 +57,24 @@ def _build_prompt(columns: list[dict]) -> str:
 
     col_summary = "\n".join(col_summary_lines)
 
+    correction_section = ""
+    if user_correction and user_correction.strip():
+        correction_section = f"""
+THÔNG TIN HIỆU CHỈNH TỪ NGƯỜI DÙNG:
+Người dùng mô tả hoặc hiệu chỉnh về dataset này như sau: "{user_correction.strip()}".
+Hãy sử dụng ngữ cảnh này để nhận diện chính xác lĩnh vực và phân loại semantic_type của các cột.
+"""
+
+    lang_instruction = (
+        "BẮT BUỘC: Bạn phải trả lời phần `reasoning`, `domain` và `draft_summary` hoàn toàn bằng TIẾNG ANH (English)."
+        if lang == "en"
+        else "BẮT BUỘC: Bạn phải trả lời phần `reasoning`, `domain` và `draft_summary` hoàn toàn bằng TIẾNG VIỆT (Vietnamese)."
+    )
+
     return f"""Bạn là chuyên gia phân tích dữ liệu. Dưới đây là cấu trúc của một dataset:
 
 {col_summary}
-
+{correction_section}
 Hãy đoán dataset này thuộc lĩnh vực nào (Marketing, HR, Finance, Education, Healthcare, E-commerce, Logistics, hoặc Other).
 Đồng thời, với mỗi cột, hãy phân loại `semantic_type` thành một trong các nhãn sau: 
 SEQUENCE_NUMBER, PERSON_NAME, PHONE_NUMBER, EMAIL, ADDRESS, MONEY, GENERAL_TEXT, DATE_TIME, CODE_ID.
@@ -69,13 +83,14 @@ QUAN TRỌNG:
 - Bạn phải ưu tiên phân loại dựa trên GIÁ TRỊ MẪU THẬT SỰ thay vì chỉ dựa vào tên cột.
 - Nếu cột có giá trị dạng "chữ + số" hoặc "tiền tố + số" (ví dụ "SEQ-101", "ORD-2024-001"), PHẢI phân loại là CODE_ID, KHÔNG phải SEQUENCE_NUMBER.
 - SEQUENCE_NUMBER chỉ được dùng cho cột có giá trị là số nguyên thuần túy (không có chữ hay ký tự đặc biệt).
-- BẮT BUỘC: Bạn phải trả lời phần `reasoning` và `domain` hoàn toàn bằng TIẾNG VIỆT, kể cả khi dữ liệu hoặc tên cột đang dùng tiếng Anh hoặc ngôn ngữ khác.
+- {lang_instruction}
 
 Trả về JSON theo đúng format sau, KHÔNG có markdown, KHÔNG có giải thích thêm:
 {{
   "domain": "<tên lĩnh vực>",
   "confidence": <số thực 0.0 đến 1.0>,
   "reasoning": "<lý giải ngắn gọn trong 1-2 câu>",
+  "draft_summary": "<mô tả ngắn gọn súc tích 1-2 câu về dataset này>",
   "column_semantics": {{
     "<tên cột 1>": {{
       "semantic_type": "<nhãn>",
@@ -85,29 +100,33 @@ Trả về JSON theo đúng format sau, KHÔNG có markdown, KHÔNG có giải t
 }}"""
 
 
-async def get_semantic_context(columns: list[dict]) -> dict[str, Any]:
+async def get_semantic_context(
+    columns: list[dict],
+    lang: str = "vi",
+    user_correction: str | None = None
+) -> dict[str, Any]:
     """
-    Gọi Gemini 3.5 Flash để nhận diện lĩnh vực của dataset.
+    Gọi Gemini để nhận diện lĩnh vực của dataset kèm theo tóm tắt và phân loại cột.
     Nếu key không có hoặc lỗi → trả về fallback, không crash.
     """
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         logger.warning("GEMINI_API_KEY chưa được set. Trả về fallback context.")
-        return _FALLBACK_CONTEXT
+        fallback = dict(_FALLBACK_CONTEXT)
+        fallback["draft_summary"] = (
+            "Dataset overview not available." if lang == "en" else "Chưa có mô tả tổng quan dataset."
+        )
+        return fallback
 
     try:
-        # Import ở đây để tránh lỗi import khi chưa cài package
         from google import genai
 
         client = genai.Client(api_key=api_key)
-        prompt = _build_prompt(columns)
+        prompt = _build_prompt(columns, lang=lang, user_correction=user_correction)
 
-        # Chạy blocking call trong thread pool để không block event loop
         response = await _call_gemini_with_retry(client, prompt)
-
         raw_text = response.text.strip()
 
-        # Xóa markdown code block nếu model trả về có ```json
         if raw_text.startswith("```"):
             raw_text = raw_text.split("```")[1]
             if raw_text.startswith("json"):
@@ -115,29 +134,42 @@ async def get_semantic_context(columns: list[dict]) -> dict[str, Any]:
             raw_text = raw_text.strip()
 
         parsed = json.loads(raw_text)
-        
+
         column_semantics = parsed.get("column_semantics", {})
-        # Áp dụng cơ chế fallback: nếu confidence < 0.75 -> fallback về GENERAL_TEXT
         for col_name, info in column_semantics.items():
             conf = float(info.get("confidence", 0.0))
             stype = info.get("semantic_type", "GENERAL_TEXT")
-            logger.info("Gemini semantic %s: type=%s, confidence=%.2f", col_name, stype, conf)
             if conf < 0.75:
                 info["semantic_type"] = "GENERAL_TEXT"
 
+        domain = str(parsed.get("domain", "Unknown"))
+        reasoning = str(parsed.get("reasoning", ""))
+        draft_summary = str(parsed.get("draft_summary", "")).strip()
+        if not draft_summary:
+            draft_summary = f"{domain}. {reasoning}" if reasoning else domain
+
         return {
-            "domain": str(parsed.get("domain", "Unknown")),
+            "domain": domain,
             "confidence": float(parsed.get("confidence", 0.0)),
-            "reasoning": str(parsed.get("reasoning", "")),
+            "reasoning": reasoning,
+            "draft_summary": draft_summary,
             "column_semantics": column_semantics,
         }
 
     except asyncio.TimeoutError:
         logger.warning("Gemini API timeout sau %ds.", _LLM_TIMEOUT_SECONDS)
-        return _FALLBACK_CONTEXT
+        fallback = dict(_FALLBACK_CONTEXT)
+        fallback["draft_summary"] = (
+            "Dataset overview timed out." if lang == "en" else "Hết thời gian phân tích mô tả dataset."
+        )
+        return fallback
     except json.JSONDecodeError as e:
         logger.warning("Gemini trả về JSON không hợp lệ: %s", e)
-        return _FALLBACK_CONTEXT
+        fallback = dict(_FALLBACK_CONTEXT)
+        fallback["draft_summary"] = (
+            "Unable to parse dataset overview." if lang == "en" else "Không thể phân tích mô tả dataset."
+        )
+        return fallback
     except Exception as e:
         import traceback
         logger.error(f"Gemini thất bại sau 3 lần thử: {e}")

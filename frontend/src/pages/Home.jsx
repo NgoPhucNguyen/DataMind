@@ -25,12 +25,6 @@ export default function Home() {
                     >
                         Xem gói dịch vụ
                     </button>
-                    <button
-                        onClick={() => navigate("/wallet")}
-                        className="bg-white hover:bg-[#F9F9F8] border border-border text-ink px-6 py-3 rounded-lg font-medium transition-all active:scale-[0.98] text-sm"
-                    >
-                        Ví của tôi
-                    </button>
                 </div>
 
                 <div className="flex flex-col sm:flex-row gap-3 mt-2 w-full sm:w-auto px-4 sm:px-0">

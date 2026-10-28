@@ -52,16 +52,6 @@ export default function HowItWorks() {
                         ))}
                     </div>
                 </div>
-
-                <div className="mt-20 p-8 rounded-2xl bg-white border border-border text-center shadow-sm">
-                    <h2 className="text-2xl font-serif font-bold text-ink mb-3">Sẵn sàng bắt đầu?</h2>
-                    <p className="text-muted mb-6 text-sm">Dùng thử miễn phí, không cần thẻ tín dụng.</p>
-                    <a href="/register">
-                        <button className="bg-[#111111] hover:bg-[#222222] text-white px-8 py-3 rounded-lg font-medium transition-all active:scale-[0.98] text-sm shadow-sm">
-                            Tạo tài khoản miễn phí →
-                        </button>
-                    </a>
-                </div>
             </div>
         </div>
     );

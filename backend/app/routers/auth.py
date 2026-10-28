@@ -18,6 +18,7 @@ from app.services.subscription_service import is_pro
 from app.models import UserAIUsage
 from datetime import timedelta
 from app.core.dependencies import get_current_user
+from app.services.ai_usage_service import refresh_usage, today_vn, FREE_DAILY_RUNS
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
@@ -141,23 +142,29 @@ def get_my_subscription(
     db: Session = Depends(get_db)
 ):
     user_id = current_user["user_id"]
-    
-    # 1. Determine plan using is_pro
-    plan = "pro" if is_pro(user_id, db) else "free"
-    
-    # 2. Get usage stats and expiration from UserAIUsage
-    ai_usage = db.query(UserAIUsage).filter(UserAIUsage.user_id == user_id).first()
-    
-    runs_used = ai_usage.runs_used if ai_usage else 0
-    runs_limit = ai_usage.runs_limit if ai_usage else 0
-    
-    pro_expires_at = None
-    if plan == "pro" and ai_usage and ai_usage.period_start:
-        pro_expires_at = (ai_usage.period_start + timedelta(days=30)).isoformat()
-        
+
+    ai_usage = db.query(UserAIUsage).filter(UserAIUsage.user_id == user_id).with_for_update().first()
+    if not ai_usage:
+        ai_usage = UserAIUsage(
+            user_id=user_id,
+            runs_used=0,
+            runs_limit=FREE_DAILY_RUNS,
+            plan="free",
+            runs_reset_date=today_vn()
+        )
+        db.add(ai_usage)
+        db.flush()
+
+    refresh_usage(ai_usage)
+    db.commit()
+
+    iso_pro_expires_at = None
+    if ai_usage.pro_expires_at:
+        iso_pro_expires_at = ai_usage.pro_expires_at.strftime("%Y-%m-%dT%H:%M:%SZ")
+
     return {
-        "plan": plan,
-        "runs_used": runs_used,
-        "runs_limit": runs_limit,
-        "pro_expires_at": pro_expires_at
+        "plan": ai_usage.plan,
+        "runs_used": ai_usage.runs_used,
+        "runs_limit": ai_usage.runs_limit,
+        "pro_expires_at": iso_pro_expires_at
     }

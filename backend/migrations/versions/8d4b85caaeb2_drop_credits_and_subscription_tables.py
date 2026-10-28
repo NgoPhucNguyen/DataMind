@@ -19,26 +19,13 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # children first
-    op.drop_index(op.f('ix_user_subscriptions_user_id'), table_name='user_subscriptions')
-    op.drop_index(op.f('ix_user_subscriptions_package_id'), table_name='user_subscriptions')
-    op.drop_table('user_subscriptions')
+    op.execute("DROP TABLE IF EXISTS user_subscriptions")
+    op.execute("DROP TABLE IF EXISTS payments")
+    op.execute("DROP TABLE IF EXISTS credit_transactions")
+    op.execute("DROP TABLE IF EXISTS credits_wallet")
+    op.execute("DROP TABLE IF EXISTS payment_packages")
 
-    op.drop_index(op.f('ix_payments_user_id'), table_name='payments')
-    op.drop_index(op.f('ix_payments_transaction_code'), table_name='payments')
-    op.drop_index(op.f('ix_payments_package_id'), table_name='payments')
-    op.drop_table('payments')
-
-    op.drop_index(op.f('ix_credit_transactions_user_id'), table_name='credit_transactions')
-    op.drop_table('credit_transactions')
-
-    op.drop_index(op.f('ix_credits_wallet_user_id'), table_name='credits_wallet')
-    op.drop_table('credits_wallet')
-
-    # parent last
-    op.drop_table('payment_packages')
-
-    # enums (autogenerate does not drop these). Never drop paymentstatus.
+    # Never drop paymentstatus (pending_orders uses it)
     op.execute("DROP TYPE IF EXISTS transactiontype")
     op.execute("DROP TYPE IF EXISTS subscriptionstatus")
 

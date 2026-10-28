@@ -1,8 +1,10 @@
 import { useState, useRef, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
-import { Wallet, Settings, LogOut, LayoutDashboard, Sparkles, ChevronDown, Menu, X, Crown } from "lucide-react";
+import { User, Settings, LogOut, LayoutDashboard, Sparkles, ChevronDown, Menu, X, Crown } from "lucide-react";
 import UpgradeModal from "./UpgradeModal";
+import LanguageToggle from "./LanguageToggle";
+
 const NAV_LINKS = [
     { label: "Trang chủ", path: "/" },
     { label: "Giá cả", path: "/pricing" },
@@ -31,17 +33,18 @@ export default function Navbar() {
 
     return (
         <header className="border-b border-border bg-canvas sticky top-0 z-50">
-            <div className="px-4 md:px-6 py-4 flex justify-between items-center">
-                <div className="flex items-center gap-3">
-                    {/* Mobile menu button */}
-                    <button 
-                        className="md:hidden text-ink hover:text-forest p-1 rounded-md" 
+            {/* Changed from flex justify-between to a 3-column grid so nav links stay perfectly centered */}
+            <div className="px-4 md:px-6 py-4 grid grid-cols-3 items-center">
+
+                {/* Left Section: Logo & Mobile Menu */}
+                <div className="flex items-center gap-3 justify-start">
+                    <button
+                        className="md:hidden text-ink hover:text-forest p-1 rounded-md"
                         onClick={() => setShowMobileMenu(!showMobileMenu)}
                     >
                         {showMobileMenu ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
                     </button>
 
-                    {/* Logo */}
                     <div
                         className="flex items-center gap-2 cursor-pointer select-none"
                         onClick={() => navigate("/")}
@@ -55,135 +58,134 @@ export default function Navbar() {
                     </div>
                 </div>
 
-                {/* Nav links */}
-                <nav className="hidden md:flex items-center gap-1">
-                {NAV_LINKS.map((link) => (
-                    <button
-                        key={link.path}
-                        onClick={() => navigate(link.path)}
-                        className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                            location.pathname === link.path
+                {/* Middle Section: Nav Links (Centered) */}
+                <nav className="hidden md:flex items-center justify-center gap-1">
+                    {NAV_LINKS.map((link) => (
+                        <button
+                            key={link.path}
+                            onClick={() => navigate(link.path)}
+                            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${location.pathname === link.path
                                 ? "bg-sage text-forest"
                                 : "text-muted hover:text-ink hover:bg-sage/40"
-                        }`}
-                    >
-                        {link.label}
-                    </button>
-                ))}
-            </nav>
-
-            {/* Auth buttons / User Profile */}
-            <div className="flex items-center gap-2 sm:gap-4">
-                {user ? (
-                    <div className="flex items-center gap-4 relative" ref={menuRef}>
-                        <button
-                            onClick={() => navigate("/dashboard/profiler")}
-                            className="text-sm bg-ink hover:bg-ink/80 text-white px-4 py-2 rounded-lg font-semibold transition-all hidden sm:block"
+                                }`}
                         >
-                            Vào Dashboard
+                            {link.label}
                         </button>
-                        
-                        <div 
-                            className="flex items-center gap-2 text-ink cursor-pointer hover:bg-sage/40 px-2 py-1.5 rounded-lg transition-colors select-none"
-                            onClick={() => setShowMenu(!showMenu)}
-                        >
-                            <div className="w-8 h-8 rounded-full bg-forest flex items-center justify-center text-white font-bold text-sm shrink-0">
-                                {user.full_name?.charAt(0) || user.email?.charAt(0) || "U"}
-                            </div>
-                            <span className="text-sm font-medium hidden lg:block text-ink max-w-[100px] truncate">{user.full_name || "User"}</span>
-                            {subscription?.plan === "pro" && (
-                                <span className="hidden sm:flex items-center gap-1 bg-amber-100 text-amber-700 text-xs px-2 py-0.5 rounded font-bold uppercase tracking-wider">
-                                    <Crown className="w-3 h-3" /> Pro
-                                </span>
-                            )}
-                            <ChevronDown className={`w-4 h-4 text-muted transition-transform shrink-0 ${showMenu ? 'rotate-180' : ''}`} />
-                        </div>
+                    ))}
+                </nav>
 
-                        {/* Dropdown Menu */}
-                        {showMenu && (
-                            <div className="absolute right-0 top-full mt-2 w-56 bg-white border border-border rounded-xl shadow-xl overflow-hidden py-1 z-50 animate-in fade-in slide-in-from-top-2">
-                                <div className="px-4 py-2 border-b border-border mb-1">
-                                    <p className="text-sm font-semibold text-ink truncate">{user.full_name || "User"}</p>
-                                    <p className="text-xs text-muted truncate">{user.email}</p>
+                {/* Right Section: Auth buttons / User Profile & Language Toggle */}
+                <div className="flex items-center justify-end gap-1.5 sm:gap-3">
+                    <LanguageToggle />
+                    {user ? (
+                        <div className="flex items-center gap-4 relative" ref={menuRef} >
+                            <button
+                                onClick={() => navigate("/dashboard/profiler")}
+                                className="text-sm bg-ink hover:bg-ink/80 text-white px-4 py-2 rounded-lg font-semibold transition-all hidden sm:block"
+                            >
+                                Vào Dashboard
+                            </button>
+
+                            <div
+                                className="flex items-center gap-2 text-ink cursor-pointer hover:bg-sage/40 px-2 py-1.5 rounded-lg transition-colors select-none"
+                                onClick={() => setShowMenu(!showMenu)}
+                            >
+                                <div className="w-8 h-8 rounded-full bg-forest flex items-center justify-center text-white font-bold text-sm shrink-0">
+                                    {user.full_name?.charAt(0) || user.email?.charAt(0) || "U"}
                                 </div>
-                                
-                                <div className="p-1">
-                                    <button
-                                        onClick={() => { setShowMenu(false); navigate("/dashboard/profiler"); }}
-                                        className="w-full text-left px-3 py-2 text-sm text-ink hover:bg-sage/40 transition-colors flex items-center gap-2 font-medium rounded-md"
-                                    >
-                                        <LayoutDashboard className="w-4 h-4 text-muted" /> Bảng điều khiển
-                                    </button>
-                                    <button
-                                        onClick={() => { setShowMenu(false); navigate("/dashboard/subscription"); }}
-                                        className="w-full text-left px-3 py-2 text-sm text-ink hover:bg-sage/40 transition-colors flex items-center gap-2 font-medium rounded-md"
-                                    >
-                                        <Wallet className="w-4 h-4 text-muted" /> Tài khoản
-                                    </button>
-                                    {subscription?.plan !== "pro" && (
+                                <span className="text-sm font-medium hidden lg:block text-ink max-w-[100px] truncate">{user.full_name || "User"}</span>
+                                {subscription?.plan === "pro" && (
+                                    <span className="hidden sm:flex items-center gap-1 bg-amber-100 text-amber-700 text-xs px-2 py-0.5 rounded font-bold uppercase tracking-wider">
+                                        <Crown className="w-3 h-3" /> Pro
+                                    </span>
+                                )}
+                                <ChevronDown className={`w-4 h-4 text-muted transition-transform shrink-0 ${showMenu ? 'rotate-180' : ''}`} />
+                            </div>
+
+                            {/* Dropdown Menu */}
+                            {showMenu && (
+                                <div className="absolute right-0 top-full mt-2 w-56 bg-white border border-border rounded-xl shadow-xl overflow-hidden py-1 z-50 animate-in fade-in slide-in-from-top-2">
+                                    <div className="px-4 py-2 border-b border-border mb-1">
+                                        <p className="text-sm font-semibold text-ink truncate">{user.full_name || "User"}</p>
+                                        <p className="text-xs text-muted truncate">{user.email}</p>
+                                    </div>
+
+                                    <div className="p-1">
                                         <button
-                                            onClick={() => { setShowMenu(false); setShowUpgradeModal(true); }}
+                                            onClick={() => { setShowMenu(false); navigate("/dashboard/profiler"); }}
                                             className="w-full text-left px-3 py-2 text-sm text-ink hover:bg-sage/40 transition-colors flex items-center gap-2 font-medium rounded-md"
                                         >
-                                            <Sparkles className="w-4 h-4 text-forest" /> Nâng cấp tài khoản
+                                            <LayoutDashboard className="w-4 h-4 text-muted" /> Bảng điều khiển
                                         </button>
-                                    )}
+                                        <button
+                                            onClick={() => { setShowMenu(false); navigate("/dashboard/subscription"); }}
+                                            className="w-full text-left px-3 py-2 text-sm text-ink hover:bg-sage/40 transition-colors flex items-center gap-2 font-medium rounded-md"
+                                        >
+                                            <User className="w-4 h-4 text-muted" /> Tài khoản
+                                        </button>
+                                        {subscription?.plan !== "pro" && (
+                                            <button
+                                                onClick={() => { setShowMenu(false); setShowUpgradeModal(true); }}
+                                                className="w-full text-left px-3 py-2 text-sm text-ink hover:bg-sage/40 transition-colors flex items-center gap-2 font-medium rounded-md"
+                                            >
+                                                <Sparkles className="w-4 h-4 text-forest" /> Nâng cấp tài khoản
+                                            </button>
+                                        )}
+                                    </div>
+
+                                    <div className="h-px bg-border my-1"></div>
+
+                                    <div className="p-1">
+                                        <button
+                                            onClick={() => { setShowMenu(false); navigate("/settings"); }}
+                                            className="w-full text-left px-3 py-2 text-sm text-ink hover:bg-sage/40 transition-colors flex items-center gap-2 font-medium rounded-md"
+                                        >
+                                            <Settings className="w-4 h-4 text-muted" /> Cài đặt
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                setShowMenu(false);
+                                                logout();
+                                                navigate("/");
+                                            }}
+                                            className="w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors flex items-center gap-2 font-medium rounded-md"
+                                        >
+                                            <LogOut className="w-4 h-4" /> Đăng xuất
+                                        </button>
+                                    </div>
                                 </div>
-                                
-                                <div className="h-px bg-border my-1"></div>
-                                
-                                <div className="p-1">
-                                    <button
-                                        onClick={() => { setShowMenu(false); navigate("/settings"); }}
-                                        className="w-full text-left px-3 py-2 text-sm text-ink hover:bg-sage/40 transition-colors flex items-center gap-2 font-medium rounded-md"
-                                    >
-                                        <Settings className="w-4 h-4 text-muted" /> Cài đặt
-                                    </button>
-                                    <button
-                                        onClick={() => {
-                                            setShowMenu(false);
-                                            logout();
-                                            navigate("/");
-                                        }}
-                                        className="w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors flex items-center gap-2 font-medium rounded-md"
-                                    >
-                                        <LogOut className="w-4 h-4" /> Đăng xuất
-                                    </button>
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                ) : (
-                    <>
-                        <button
-                            onClick={() => navigate("/login")}
-                            className="text-sm text-ink hover:text-forest transition-colors px-4 py-2 rounded-lg hover:bg-sage/40 font-semibold"
-                        >
-                            Đăng nhập
-                        </button>
-                        <button
-                            onClick={() => navigate("/register")}
-                            className="text-sm bg-ink hover:bg-ink/80 text-white px-4 py-2 rounded-lg font-semibold transition-all shadow-sm"
-                        >
-                            Đăng ký
-                        </button>
-                    </>
-                )}
+                            )}
+                        </div>
+                    ) : (
+                        <>
+                            <button
+                                onClick={() => navigate("/login")}
+                                className="text-xs sm:text-sm text-ink hover:text-forest transition-colors px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg hover:bg-sage/40 font-semibold"
+                            >
+                                Đăng nhập
+                            </button>
+                            <button
+                                onClick={() => navigate("/register")}
+                                className="text-xs sm:text-sm bg-ink hover:bg-ink/80 text-white px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg font-semibold transition-all shadow-sm"
+                            >
+                                Đăng ký
+                            </button>
+                        </>
+                    )}
                 </div>
             </div>
 
             {/* Mobile Nav links */}
             {showMobileMenu && (
-                <nav className="md:hidden border-t border-border bg-canvas px-4 py-3 flex flex-col gap-1 shadow-inner">
+                <nav className="md:hidden border-t border-border bg-canvas px-4 py-3 flex flex-col gap-1 shadow-inner" >
                     {NAV_LINKS.map((link) => (
                         <button
                             key={link.path}
                             onClick={() => { navigate(link.path); setShowMobileMenu(false); }}
-                            className={`px-4 py-3 rounded-lg text-sm font-medium text-left transition-colors ${
-                                location.pathname === link.path
-                                    ? "bg-sage text-forest"
-                                    : "text-muted hover:text-ink hover:bg-sage/40"
-                            }`}
+                            className={`px-4 py-3 rounded-lg text-sm font-medium text-left transition-colors ${location.pathname === link.path
+                                ? "bg-sage text-forest"
+                                : "text-muted hover:text-ink hover:bg-sage/40"
+                                }`}
                         >
                             {link.label}
                         </button>
@@ -199,9 +201,9 @@ export default function Navbar() {
                 </nav>
             )}
 
-            <UpgradeModal 
-                isOpen={showUpgradeModal} 
-                onClose={() => setShowUpgradeModal(false)} 
+            <UpgradeModal
+                isOpen={showUpgradeModal}
+                onClose={() => setShowUpgradeModal(false)}
                 onSuccess={() => {
                     reloadSubscription();
                 }}
