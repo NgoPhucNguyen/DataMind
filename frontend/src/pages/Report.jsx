@@ -28,6 +28,15 @@ export default function Report({ pipelineMode, onComplete }) {
   useEffect(() => {
     setCharts(fileSession.confirmedCharts || []);
 
+    // Pre-populate editedInsights from ai_explanation saved in Visualize
+    const preloaded = {};
+    (fileSession.confirmedCharts || []).forEach(c => {
+      if (c.ai_explanation) preloaded[c.chart_id] = c.ai_explanation;
+    });
+    if (Object.keys(preloaded).length > 0) {
+      setEditedInsights(preloaded);
+    }
+
     const fetchIntro = async () => {
       try {
         const schemaFallback = fileSession.statisticalSummary?.columns 
@@ -66,11 +75,12 @@ export default function Report({ pipelineMode, onComplete }) {
         const res = await api.post("/visualize/explain/batch", payload);
         setAiInsights(res.data.explanations || {});
         
-        const initialEdited = {};
+        const batchEdited = {};
         Object.entries(res.data.explanations || {}).forEach(([id, data]) => {
-          initialEdited[id] = data.content;
+          batchEdited[id] = data.content;
         });
-        setEditedInsights(initialEdited);
+        // Merge: preloaded (from Visualize) takes priority over batch results
+        setEditedInsights(prev => ({ ...batchEdited, ...prev }));
       } catch (err) {
         console.error("Failed to fetch batch insights", err);
       }

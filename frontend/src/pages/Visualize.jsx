@@ -743,7 +743,8 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
         user_title: c.user_title || c.title,
         auto_title: c.auto_title || c.title,
         type: c.type,
-        column: c.col
+        column: c.col,
+        ai_explanation: fileSession.chartExplanations?.[c.id]?.content || null,
       }));
 
     proceedToReport(confirmed);

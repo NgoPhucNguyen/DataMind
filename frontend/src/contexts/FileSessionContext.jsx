@@ -18,6 +18,7 @@ const defaultSession = {
   warnings: [],
   userContext: null,
   uploadedAt: null,  // epoch ms — used for the 1-hour file expiry countdown
+  chartExplanations: {},  // { [chartId]: { content, source, lang } }
 };
 
 export function FileSessionProvider({ children }) {

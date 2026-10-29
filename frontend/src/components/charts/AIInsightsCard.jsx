@@ -1,7 +1,8 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Sparkles, Edit2, Save, X, RefreshCw, AlertTriangle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useToast } from "../../contexts/ToastContext";
+import { useFileSession } from "../../contexts/FileSessionContext";
 import { explainChart, saveExplanation } from "../../services/visualizeService";
 import { translateError } from "../../i18n";
 import { BTN, BADGE } from "../../constants/ui";
@@ -24,8 +25,11 @@ function getChartConfig(chart) {
 }
 
 export default function AIInsightsCard({ sessionId, fileHash, chart, autoInsights, anchorPair }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { showToast } = useToast();
+  const { fileSession, updateFileSession } = useFileSession();
+
+  const chartId = chart.id;
 
   const [loading, setLoading] = useState(false);
   const [insightData, setInsightData] = useState(null); // { content, source, cached, from_cache, is_stale, usage }
@@ -35,6 +39,18 @@ export default function AIInsightsCard({ sessionId, fileHash, chart, autoInsight
   const [isExpanded, setIsExpanded] = useState(false);
   const [confirmReanalyze, setConfirmReanalyze] = useState(false);
   const [lastError, setLastError] = useState(null);
+
+  // On mount: restore saved explanation from fileSession (no API call)
+  useEffect(() => {
+    if (!chartId) return;
+    const saved = fileSession.chartExplanations?.[chartId];
+    if (saved) {
+      setInsightData(saved);
+      setEditContent(saved.content || "");
+      setIsExpanded(true);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chartId]);
 
   const currentX =
     chart.type === "heatmap"
@@ -88,6 +104,15 @@ export default function AIInsightsCard({ sessionId, fileHash, chart, autoInsight
       setDisplayedCols({ col_x: currentX, col_y: currentY });
       setEditContent(res.content);
       setIsExpanded(true);
+      // Persist to fileSession so it survives navigation
+      if (chartId) {
+        updateFileSession({
+          chartExplanations: {
+            ...fileSession.chartExplanations,
+            [chartId]: { content: res.content, source: res.source, lang: i18n.language },
+          },
+        });
+      }
     } catch (err) {
       const errCode =
         err?.response?.data?.detail?.code ||
@@ -145,6 +170,15 @@ export default function AIInsightsCard({ sessionId, fileHash, chart, autoInsight
         is_stale: false, // user saved fresh, no longer stale
       }));
       setIsEditing(false);
+      // Persist user edit to fileSession
+      if (chartId) {
+        updateFileSession({
+          chartExplanations: {
+            ...fileSession.chartExplanations,
+            [chartId]: { content: editContent, source: "user", lang: i18n.language },
+          },
+        });
+      }
       showToast(t("visualize.ai_save_success"), "success");
     } catch {
       showToast(t("visualize.ai_save_error"), "error");
