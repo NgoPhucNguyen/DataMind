@@ -11,6 +11,9 @@ import {
 } from "lucide-react";
 import { CARD, TEXT, BTN, BADGE } from "../../constants/ui";
 import { ConfidenceBadge } from "./Badges";
+import { getDomainI18nKey } from "../../constants/dataTypes";
+import { getCurrentLang } from "../../i18n";
+import { Globe } from "lucide-react";
 import AIUsageBadge from "../AIUsageBadge";
 
 export default function MergedDescriptionBox({
@@ -30,6 +33,7 @@ export default function MergedDescriptionBox({
   setContextPurpose,
   usage,
   isFromCache,
+  savedLang,
   onUpgradeClick,
 }) {
   const { t, i18n } = useTranslation();
@@ -189,19 +193,49 @@ export default function MergedDescriptionBox({
         </div>
       </div>
 
-      {/* ── Domain & Semantic result banner if analyzed ───────── */}
-      {semanticContext?.domain && semanticContext.domain !== "Chưa phân tích" && (
-        <div className="mb-3.5 p-2.5 rounded-lg bg-sage/30 border border-border/80 flex flex-wrap items-center justify-between gap-2 text-xs">
-          <div className="flex items-center gap-2">
-            <span className="text-muted font-medium">{t("profiler.domain_label")}</span>
-            <span className="font-semibold text-forest text-sm">{semanticContext.domain}</span>
-            <ConfidenceBadge confidence={semanticContext.confidence} />
-          </div>
-          {semanticContext.reasoning && (
+      {/* ── Domain & Semantic result banner ───────── */}
+      {semanticContext?.domain && (() => {
+        const notAnalyzed = semanticContext.domain === "Chưa phân tích";
+        return (
+          <div className="mb-3.5 p-2.5 rounded-lg bg-sage/30 border border-border/80 flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div className="flex items-center gap-2">
+              <span className="text-muted font-medium">{t("profiler.domain_label")}</span>
+              <span className="font-semibold text-forest text-sm">
+                {notAnalyzed
+                  ? t("profiler.domain_not_analyzed")
+                  : t(getDomainI18nKey(semanticContext.domain), { defaultValue: semanticContext.domain })}
+              </span>
+              {!notAnalyzed && <ConfidenceBadge confidence={semanticContext.confidence} />}
+            </div>
             <p className="text-muted text-[11px] italic max-w-md truncate">
-              {semanticContext.reasoning}
+              {notAnalyzed || !semanticContext.reasoning
+                ? t("profiler.ai_hint")
+                : semanticContext.reasoning}
             </p>
-          )}
+          </div>
+        );
+      })()}
+
+      {/* Language mismatch warning banner */}
+      {savedLang && savedLang !== getCurrentLang() && aiAnalyzed && (
+        <div className="mb-3.5 px-3 py-2 rounded-lg bg-[#FEF6E6] border border-[#FDE68A] flex flex-wrap items-center justify-between gap-2 text-xs text-[#854D0E]">
+          <div className="flex items-center gap-1.5 font-medium">
+            <Globe size={14} className="text-[#D97706] shrink-0" />
+            <span>
+              {t("profiler.lang_mismatch_banner", {
+                savedLang: savedLang === "en" ? "English" : "Tiếng Việt",
+                defaultValue: `Phân tích AI đang lưu bằng ${savedLang === "en" ? "English" : "Tiếng Việt"}, bạn có muốn phân tích lại theo ngôn ngữ hiện tại?`
+              })}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => handleAnalyzeAI(true)}
+            disabled={aiLoading}
+            className="text-xs font-semibold text-forest hover:text-ink underline transition-colors cursor-pointer disabled:opacity-50"
+          >
+            {t("profiler.btn_reanalyze_current_lang", "Phân tích lại theo ngôn ngữ này")}
+          </button>
         </div>
       )}
 
@@ -271,11 +305,10 @@ export default function MergedDescriptionBox({
           ].map(({ value: opt, key: optKey }) => (
             <label
               key={opt}
-              className={`flex items-center gap-1.5 text-xs cursor-pointer border rounded-lg px-2.5 py-1.5 transition-colors select-none ${
-                contextPurpose === opt
+              className={`flex items-center gap-1.5 text-xs cursor-pointer border rounded-lg px-2.5 py-1.5 transition-colors select-none ${contextPurpose === opt
                   ? "bg-sage border-forest/40 text-forest font-semibold"
                   : "border-border text-muted hover:bg-sage/20 hover:text-ink"
-              }`}
+                }`}
             >
               <input
                 type="radio"

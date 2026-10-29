@@ -8,9 +8,11 @@ from app.services import chart_insights
 from app.core.errors import DataMindException, ErrorSeverity
 from app.core import cache
 
-def compute_statistics(user_id: int, session_id: str, warnings: list = None) -> dict:
+def compute_statistics(user_id: int, session_id: str, warnings: list = None, overridden_types: dict[str, str] = None) -> dict:
     if warnings is None:
         warnings = []
+    if overridden_types is None:
+        overridden_types = {}
 
     # Lưu ý: Bỏ short-circuit chặn hoàn toàn /compute tại đây, vì Frontend vẫn
     # cần đọc các thông số thống kê của các cột chữ, thời gian (ngay cả khi
@@ -40,10 +42,15 @@ def compute_statistics(user_id: int, session_id: str, warnings: list = None) -> 
 
     report_header = cleaner_service.build_report_header(warnings, len(df))
     
-    # Get cleaning provenance
+    # Get cleaning provenance and profiler information (SSOT)
     session_meta = cache.get_session_metadata(user_id, session_id) or {}
     file_hash = session_meta.get("file_hash")
     cleaning_log = cache.get_cleaning_log(user_id, file_hash) if file_hash else []
+    
+    profile_data = cache.get_profile(user_id, file_hash) if file_hash else None
+    profile_cols = {}
+    if profile_data and isinstance(profile_data, dict):
+        profile_cols = {c.get("name"): c for c in profile_data.get("columns", []) if isinstance(c, dict) and "name" in c}
     
     summary = {
         "shape": [len(df), len(df.columns)],
@@ -58,42 +65,67 @@ def compute_statistics(user_id: int, session_id: str, warnings: list = None) -> 
     categorical_cols = []
     datetime_cols = []
 
+    VALID_TYPES = {"numeric", "datetime", "categorical", "multiple_choice", "text"}
+
     for col in df.columns:
         series = df[col]
         missing_pct = round(series.isna().mean() * 100, 2)
         unique_count = series.nunique()
         
-        # Determine logical type
-        if pd.api.types.is_numeric_dtype(series):
-            dtype = "numeric"
-            numeric_cols.append(col)
-        elif pd.api.types.is_datetime64_any_dtype(series):
-            dtype = "datetime"
-            datetime_cols.append(col)
-        elif pd.api.types.is_object_dtype(series) or pd.api.types.is_categorical_dtype(series) or pd.api.types.is_string_dtype(series) or pd.api.types.is_bool_dtype(series):
-            # Cố gắng parse lại datetime vì đọc từ CSV có thể mất định dạng
-            is_datetime = False
-            if pd.api.types.is_object_dtype(series) or pd.api.types.is_string_dtype(series):
-                try:
-                    dt_series = pd.to_datetime(series, errors='coerce', format='mixed')
-                    # Nếu trên 50% là datetime hợp lệ
-                    if dt_series.notna().sum() > len(series) * 0.5:
-                        dtype = "datetime"
-                        df[col] = dt_series
-                        series = dt_series
-                        datetime_cols.append(col)
-                        is_datetime = True
-                except:
-                    pass
-
-            if not is_datetime:
-                if unique_count <= 20 or pd.api.types.is_bool_dtype(series):
-                    dtype = "categorical"
-                    categorical_cols.append(col)
-                else:
-                    dtype = "text"
+        # 1. Determine logical type (SSOT priority: override -> profiler -> fallback inference)
+        col_override = overridden_types.get(col) or overridden_types.get(str(col))
+        if col_override == "auto":
+            col_override = None
+            
+        col_prof = profile_cols.get(col) or profile_cols.get(str(col))
+        prof_detected = col_prof.get("detected_type") if col_prof else None
+        
+        if col_override in VALID_TYPES:
+            dtype = col_override
+        elif prof_detected in VALID_TYPES:
+            dtype = prof_detected
         else:
-            dtype = "text"
+            # Fallback inference if profile expired or column missing
+            if pd.api.types.is_numeric_dtype(series):
+                dtype = "numeric"
+            elif pd.api.types.is_datetime64_any_dtype(series):
+                dtype = "datetime"
+            elif pd.api.types.is_object_dtype(series) or pd.api.types.is_categorical_dtype(series) or pd.api.types.is_string_dtype(series) or pd.api.types.is_bool_dtype(series):
+                is_datetime = False
+                if pd.api.types.is_object_dtype(series) or pd.api.types.is_string_dtype(series):
+                    try:
+                        dt_series = pd.to_datetime(series, errors='coerce', format='mixed')
+                        if dt_series.notna().sum() > len(series) * 0.5:
+                            dtype = "datetime"
+                            df[col] = dt_series
+                            series = dt_series
+                            is_datetime = True
+                    except Exception:
+                        pass
+
+                if not is_datetime:
+                    if unique_count <= 20 or pd.api.types.is_bool_dtype(series):
+                        dtype = "categorical"
+                    else:
+                        dtype = "text"
+            else:
+                dtype = "text"
+
+        if dtype == "numeric":
+            if not pd.api.types.is_numeric_dtype(series):
+                series = pd.to_numeric(series, errors='coerce')
+                df[col] = series
+            numeric_cols.append(col)
+        elif dtype == "datetime":
+            if not pd.api.types.is_datetime64_any_dtype(series):
+                try:
+                    series = pd.to_datetime(series, errors='coerce', format='mixed')
+                    df[col] = series
+                except Exception:
+                    pass
+            datetime_cols.append(col)
+        elif dtype in ("categorical", "multiple_choice"):
+            categorical_cols.append(col)
             
         col_summary = {
             "dtype": dtype,
@@ -108,8 +140,10 @@ def compute_statistics(user_id: int, session_id: str, warnings: list = None) -> 
                 col_summary["cleaning_provenance"] = prov
 
         # Check ignore conditions
-        if missing_pct > 60:
+        if missing_pct >= 60:
             col_summary["low_confidence"] = True
+            col_summary["skip_chart"] = True
+            col_summary["skip_reason"] = "Tỷ lệ thiếu cao (≥ 60%)"
             
         if unique_count <= 1:
             col_summary["skip_chart"] = True
@@ -165,27 +199,67 @@ def compute_statistics(user_id: int, session_id: str, warnings: list = None) -> 
                         pass
 
             elif dtype == "categorical" and len(valid_series) > 0:
-                value_counts = valid_series.value_counts()
-                top_10 = value_counts.head(10)
                 total = len(valid_series)
-                col_summary["mode"] = str(top_10.index[0])
-                col_summary["top_values"] = [
-                    {"value": str(val), "count": int(count), "pct": round(count/total*100, 2)}
-                    for val, count in top_10.items()
+                value_counts = valid_series.astype(str).value_counts()
+                all_values = [
+                    {"value": str(val), "count": int(count), "pct": round(count / total * 100, 2)}
+                    for val, count in value_counts.items()
                 ]
+                top_10 = all_values[:10]
+                if len(value_counts) > 10:
+                    rest = all_values[10:]
+                    sum_of_rest = sum(item["count"] for item in rest)
+                    pct_of_rest = round(sum_of_rest / total * 100, 2)
+                    hidden_n = len(value_counts) - 10
+                    top_values = top_10 + [{
+                        "value": "__other__",
+                        "count": int(sum_of_rest),
+                        "pct": pct_of_rest,
+                        "other_n": int(hidden_n)
+                    }]
+                else:
+                    top_values = top_10
+
+                col_summary["mode"] = str(value_counts.index[0]) if len(value_counts) > 0 else ""
+                col_summary["top_values"] = top_values
+                col_summary["all_values"] = all_values[:200]
 
             elif dtype == "multiple_choice" and len(valid_series) > 0:
-                all_tokens = valid_series.astype(str).str.split(',').explode().str.strip()
-                # Loại bỏ token rỗng
-                all_tokens = all_tokens[all_tokens != ""]
-                value_counts = all_tokens.value_counts()
-                top_15 = value_counts.head(15)
-                total_respondents = len(valid_series)
-                col_summary["mode"] = str(top_15.index[0]) if len(top_15) > 0 else ""
-                col_summary["top_values"] = [
-                    {"value": str(val), "count": int(count), "pct": round(count/total_respondents*100, 2)}
-                    for val, count in top_15.items()
+                respondents = len(valid_series)
+                token_lists = valid_series.astype(str).apply(
+                    lambda x: [t.strip() for t in x.split(",") if t.strip()]
+                )
+                total_tokens = int(token_lists.apply(len).sum())
+                avg_choices = round(total_tokens / respondents, 1) if respondents > 0 else 0.0
+
+                all_tokens = [tok for sublist in token_lists for tok in sublist]
+                token_series = pd.Series(all_tokens) if all_tokens else pd.Series(dtype=object)
+                value_counts = token_series.value_counts()
+
+                all_values = [
+                    {"value": str(val), "count": int(count), "pct": round(count / respondents * 100, 2)}
+                    for val, count in value_counts.items()
                 ]
+                top_10 = all_values[:10]
+                if len(value_counts) > 10:
+                    rest = all_values[10:]
+                    sum_of_rest = sum(item["count"] for item in rest)
+                    pct_of_rest = round(sum_of_rest / respondents * 100, 2)
+                    hidden_n = len(value_counts) - 10
+                    top_values = top_10 + [{
+                        "value": "__other__",
+                        "count": int(sum_of_rest),
+                        "pct": pct_of_rest,
+                        "other_n": int(hidden_n)
+                    }]
+                else:
+                    top_values = top_10
+
+                col_summary["respondents"] = respondents
+                col_summary["avg_choices"] = avg_choices
+                col_summary["mode"] = str(value_counts.index[0]) if len(value_counts) > 0 else ""
+                col_summary["top_values"] = top_values
+                col_summary["all_values"] = all_values[:200]
 
             elif dtype == "datetime" and len(valid_series) > 0:
                 col_summary["min_date"] = valid_series.min().isoformat()
@@ -216,6 +290,17 @@ def compute_statistics(user_id: int, session_id: str, warnings: list = None) -> 
                     ]
                 except Exception:
                     pass
+
+        if dtype == "categorical":
+            col_summary.setdefault("top_values", [])
+            col_summary.setdefault("all_values", [])
+            col_summary.setdefault("mode", "")
+        elif dtype == "multiple_choice":
+            col_summary.setdefault("top_values", [])
+            col_summary.setdefault("all_values", [])
+            col_summary.setdefault("mode", "")
+            col_summary.setdefault("respondents", 0)
+            col_summary.setdefault("avg_choices", 0.0)
 
         col_summary["auto_insights"] = chart_insights.generate_insights(col_summary)
         summary["columns"][col] = col_summary

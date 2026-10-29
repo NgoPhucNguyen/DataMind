@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { ZoomIn, ZoomOut } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer,
@@ -24,21 +25,88 @@ export const DistributionChart = ({ data = [], color = "#1B4324" }) => {
 };
 
 export const CategoricalChart = ({ data = [], color = "#1B4324" }) => {
+  const { t } = useTranslation();
+
+  const getLabel = (val, entry) => {
+    if (val === "__other__") {
+      const otherN = entry?.other_n;
+      return otherN ? t("visualize.other_label", { n: otherN }) : t("visualize.other_fallback");
+    }
+    return String(val ?? "");
+  };
+
+  const renderYTick = (props) => {
+    const { x, y, payload } = props;
+    const entry = data.find(d => String(d.value) === String(payload.value));
+    const fullText = getLabel(payload.value, entry);
+    
+    // Wrap to 2 lines (~22 chars per line)
+    const maxLine = 22;
+    let line1 = fullText;
+    let line2 = "";
+    if (fullText.length > maxLine) {
+      const spaceIdx = fullText.lastIndexOf(" ", maxLine);
+      const splitAt = spaceIdx > 10 ? spaceIdx : maxLine;
+      line1 = fullText.substring(0, splitAt);
+      line2 = fullText.substring(splitAt).trim();
+      if (line2.length > maxLine) {
+        line2 = line2.substring(0, maxLine - 1) + "…";
+      }
+    }
+
+    return (
+      <g transform={`translate(${x},${y})`}>
+        <text x={-6} y={line2 ? -4 : 3} textAnchor="end" fill="#626C65" fontSize={10} className="select-none">
+          <title>{fullText}</title>
+          <tspan x={-6}>{line1}</tspan>
+          {line2 && <tspan x={-6} dy={12}>{line2}</tspan>}
+        </text>
+      </g>
+    );
+  };
+
+  const CustomTooltip = ({ active, payload }) => {
+    if (active && payload && payload.length) {
+      const item = payload[0].payload;
+      const isOther = item.value === "__other__";
+      const label = isOther ? (item.other_n ? t("visualize.other_label", { n: item.other_n }) : t("visualize.other_fallback")) : item.value;
+      return (
+        <div className="bg-white border border-[#E5E5E3] rounded-lg p-2.5 shadow-md text-xs z-50 max-w-[260px] pointer-events-none">
+          <p className="font-semibold text-[#121A14] break-words mb-1">{label}</p>
+          <p className="text-[#626C65]">
+            {t("visualize.tooltip_count")} <span className="font-semibold text-[#121A14]">{item.count}</span>
+          </p>
+          {item.pct !== undefined && (
+            <p className="text-[#626C65]">
+              {t("visualize.tooltip_pct")} <span className="font-semibold text-[#121A14]">{item.pct}%</span>
+            </p>
+          )}
+        </div>
+      );
+    }
+    return null;
+  };
+
   return (
     <ResponsiveContainer width="100%" height="100%">
-      <BarChart data={data} layout="vertical" margin={{ left: 10, right: 20 }}>
+      <BarChart data={data} layout="vertical" margin={{ left: 10, right: 20, top: 4, bottom: 4 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="#EAEAEA" horizontal={false} />
         <XAxis type="number" stroke="#626C65" fontSize={10} />
         <YAxis 
           dataKey="value" 
           type="category" 
-          width={100} 
-          stroke="#626C65" 
-          fontSize={10} 
-          tickFormatter={(val) => typeof val === 'string' && val.length > 15 ? val.substring(0, 15) + '...' : val} 
+          width={130} 
+          tick={renderYTick}
         />
-        <Tooltip cursor={{ fill: "rgba(0,0,0,0.02)" }} contentStyle={{ backgroundColor: "#ffffff", border: "1px solid #EAEAEA", borderRadius: 8, color: "#121A14" }} wrapperStyle={{ zIndex: 1000 }} />
-        <Bar dataKey="count" fill={color} radius={[0, 4, 4, 0]} />
+        <Tooltip content={<CustomTooltip />} cursor={{ fill: "rgba(0,0,0,0.02)" }} wrapperStyle={{ zIndex: 1000 }} />
+        <Bar dataKey="count" radius={[0, 4, 4, 0]}>
+          {data.map((entry, index) => (
+            <Cell
+              key={`cell-${index}`}
+              fill={entry.value === "__other__" ? "#9CA3AF" : color}
+            />
+          ))}
+        </Bar>
       </BarChart>
     </ResponsiveContainer>
   );
@@ -59,9 +127,10 @@ export const TrendChart = ({ data = [], color = "#1B4324" }) => {
 };
 
 export const CorrelationHeatmap = ({ matrix, topCorr, onCellClick, anchorPair }) => {
+  const { t } = useTranslation();
   const [zoom, setZoom] = useState(1);
 
-  if (!matrix || Object.keys(matrix).length === 0) return <p className="text-muted text-sm">Không đủ cột số để tính tương quan.</p>;
+  if (!matrix || Object.keys(matrix).length === 0) return <p className="text-muted text-sm">{t("visualize.heatmap_insufficient")}</p>;
 
   const cols = Object.keys(matrix);
 
@@ -85,11 +154,11 @@ export const CorrelationHeatmap = ({ matrix, topCorr, onCellClick, anchorPair })
   return (
     <div className="flex flex-col h-full w-full">
       <div className="flex justify-end gap-2 mb-2 shrink-0">
-        <button onClick={() => setZoom(z => Math.max(0.4, z - 0.2))} className="p-1.5 border border-[#EAEAEA] bg-white text-[#626C65] hover:bg-[#EAF2EB] hover:text-[#1B4324] rounded-md transition-colors" title="Thu nhỏ">
+        <button onClick={() => setZoom(z => Math.max(0.4, z - 0.2))} className="p-1.5 border border-[#EAEAEA] bg-white text-[#626C65] hover:bg-[#EAF2EB] hover:text-[#1B4324] rounded-md transition-colors" title={t("visualize.btn_zoom_out")}>
           <ZoomOut size={16} strokeWidth={1.5} />
         </button>
         <span className="text-xs font-mono flex items-center justify-center w-12 text-[#626C65]">{Math.round(zoom * 100)}%</span>
-        <button onClick={() => setZoom(z => Math.min(2, z + 0.2))} className="p-1.5 border border-[#EAEAEA] bg-white text-[#626C65] hover:bg-[#EAF2EB] hover:text-[#1B4324] rounded-md transition-colors" title="Phóng to">
+        <button onClick={() => setZoom(z => Math.min(2, z + 0.2))} className="p-1.5 border border-[#EAEAEA] bg-white text-[#626C65] hover:bg-[#EAF2EB] hover:text-[#1B4324] rounded-md transition-colors" title={t("visualize.btn_zoom_in")}>
           <ZoomIn size={16} strokeWidth={1.5} />
         </button>
       </div>
@@ -153,13 +222,13 @@ export const CorrelationHeatmap = ({ matrix, topCorr, onCellClick, anchorPair })
 
       {onCellClick && (
         <p className="text-xs text-[#626C65] mt-3 text-center">
-          Click vào ô để khám phá chi tiết mối tương quan
+          {t("visualize.heatmap_click_hint")}
         </p>
       )}
 
       {topCorr && topCorr.length > 0 && (
         <div className="mt-4">
-          <p className="text-sm font-semibold mb-2 text-ink">Tương quan mạnh nhất:</p>
+          <p className="text-sm font-semibold mb-2 text-ink">{t("visualize.heatmap_top_corr")}</p>
           <div className="flex flex-wrap gap-2">
             {topCorr.slice(0, 5).map((tc, idx) => (
               <span key={idx} className="text-xs px-2.5 py-1 rounded-full bg-[#F9F9F8] border border-border text-ink">
@@ -199,9 +268,10 @@ export const PieChartComponent = ({ data = [], color = "#1B4324" }) => {
 };
 
 export const BoxPlotChart = ({ stats, color = "#1B4324" }) => {
+  const { t } = useTranslation();
   if (!stats) return null;
   const data = [
-    { name: "Phân bố", box: [stats.p25 || 0, stats.p75 || 0], min: stats.min, max: stats.max, median: stats.median }
+    { name: t("visualize.boxplot_distribution"), box: [stats.p25 || 0, stats.p75 || 0], min: stats.min, max: stats.max, median: stats.median }
   ];
   return (
     <ResponsiveContainer width="100%" height="100%">

@@ -168,7 +168,8 @@ def build_chart_context(chart_type: str, col_x: str, col_stats: dict, col_y: str
     if auto_insights:
         md += "\n### Auto Insights (server-generated)\n"
         for insight in auto_insights:
-            md += f"- {insight['text']}\n"
+            txt = insight.get("text") or f"{insight.get('key')}: {insight.get('params')}"
+            md += f"- {txt}\n"
             
     return md
 

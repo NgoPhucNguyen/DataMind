@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import {
   ScatterChart, Scatter, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer
 } from "recharts";
@@ -5,6 +6,7 @@ import { X, AlertTriangle, Check } from "lucide-react";
 import { CARD, TEXT, BTN, BADGE } from "../../constants/ui";
 
 const AnchorScatterPanel = ({ colA, colB, rValue, scatterData, loading, error, onClear, isSelected, onToggle }) => {
+  const { t } = useTranslation();
   const rBadgeClass = rValue > 0
     ? `${BADGE.success}`
     : `${BADGE.error}`;
@@ -15,7 +17,7 @@ const AnchorScatterPanel = ({ colA, colB, rValue, scatterData, loading, error, o
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
           <h2 className={`${TEXT.sectionTitle} mb-0`}>
-            Khám phá: {colA} × {colB}
+            {t("visualize.scatter_title", { colA, colB })}
           </h2>
           <span className={rBadgeClass}>
             r = {typeof rValue === "number" ? rValue.toFixed(4) : rValue}
@@ -25,17 +27,17 @@ const AnchorScatterPanel = ({ colA, colB, rValue, scatterData, loading, error, o
           <button
             onClick={onToggle}
             className={`w-6 h-6 rounded flex items-center justify-center border-[2.5px] transition-colors shrink-0 ${isSelected ? "bg-[#121A14] border-[#121A14] text-white" : "border-[#87938B] text-transparent hover:border-[#121A14]"}`}
-            title="Thêm biểu đồ vào báo cáo"
+            title={t("visualize.scatter_add_tooltip")}
           >
             <Check className="w-4 h-4" strokeWidth={3} />
           </button>
           <button
             onClick={onClear}
             className={`${BTN.secondary} flex items-center gap-1.5`}
-            title="Bỏ chọn cặp cột"
+            title={t("visualize.scatter_clear_tooltip")}
           >
             <X className="w-4 h-4" strokeWidth={1.5} />
-            Bỏ chọn
+            {t("visualize.scatter_clear_btn")}
           </button>
         </div>
       </div>
@@ -44,7 +46,7 @@ const AnchorScatterPanel = ({ colA, colB, rValue, scatterData, loading, error, o
       {loading && (
         <div className="flex flex-col items-center justify-center py-16">
           <div className="w-10 h-10 rounded-full border-4 border-[#1B4324] border-t-transparent animate-spin mb-4"></div>
-          <p className={`${TEXT.secondary}`}>Đang tải dữ liệu phân tán...</p>
+          <p className={`${TEXT.secondary}`}>{t("visualize.scatter_loading")}</p>
         </div>
       )}
 
@@ -54,7 +56,7 @@ const AnchorScatterPanel = ({ colA, colB, rValue, scatterData, loading, error, o
           <AlertTriangle className="w-8 h-8 text-[#9F2F2D] mb-3" strokeWidth={1.5} />
           <p className={`${TEXT.body} mb-1 font-medium`}>{error}</p>
           <p className={`${TEXT.caption} mt-1`}>
-            Vui lòng tải lại file hoặc thử lại sau.
+            {t("visualize.scatter_error_hint")}
           </p>
         </div>
       )}
@@ -110,7 +112,7 @@ const AnchorScatterPanel = ({ colA, colB, rValue, scatterData, loading, error, o
           {/* Downsample indicator */}
           {scatterData.count < scatterData.total && (
             <p className="text-xs text-[#626C65] mt-3 text-center">
-              Hiển thị {scatterData.count} / {scatterData.total} điểm dữ liệu (lấy mẫu ngẫu nhiên)
+              {t("visualize.scatter_downsample", { count: scatterData.count, total: scatterData.total })}
             </p>
           )}
         </div>
@@ -120,7 +122,7 @@ const AnchorScatterPanel = ({ colA, colB, rValue, scatterData, loading, error, o
       {!loading && !error && scatterData && scatterData.points.length === 0 && (
         <div className="flex flex-col items-center justify-center py-16 text-center">
           <p className={`${TEXT.secondary}`}>
-            Không có dữ liệu hợp lệ cho cặp cột này (toàn bộ giá trị bị thiếu).
+            {t("visualize.scatter_empty")}
           </p>
         </div>
       )}

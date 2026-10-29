@@ -1,210 +1,392 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useFileSession } from "../contexts/FileSessionContext";
 import { useToast } from "../contexts/ToastContext";
 import api from "../services/axiosClient";
-import { Check, X, AlertTriangle, ArrowLeft, ArrowRight, Lock, FolderUp, Upload, Info, Settings, Edit2, ChevronUp, ChevronDown, Lightbulb } from "lucide-react";
 import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer,
-  LineChart, Line, PieChart, Pie, Cell
-} from "recharts";
-import { useRef } from "react";
-import { profileFile } from "../services/profilerService";
-import { detectIssues, autoClean, confirmClean } from "../services/cleanerService";
-import PageHeader from "../components/PageHeader";
-import { TEXT, BTN, BADGE, CARD } from "../constants/ui";
-
-// --- Components Biểu Đồ ---
-
+  Check, X, AlertTriangle, ArrowLeft, ArrowRight, Lock, FolderUp, Upload,
+  Info, Edit2, ChevronUp, ChevronDown, Lightbulb, Maximize2, FilePlus2, FileCheck2
+} from "lucide-react";
 import {
   DistributionChart, CategoricalChart, TrendChart,
   CorrelationHeatmap, PieChartComponent, BoxPlotChart
 } from "../components/charts/ChartComponents";
 import PageHelpDocs from "../components/PageHelpDocs";
-
 import AnchorScatterPanel from "../components/charts/AnchorScatterPanel";
 import AIInsightsCard from "../components/charts/AIInsightsCard";
 import { getUser } from "../services/authService";
+import { profileFile } from "../services/profilerService";
+import { detectIssues, autoClean, confirmClean } from "../services/cleanerService";
+import PageHeader from "../components/PageHeader";
+import { BTN } from "../constants/ui";
 
-
-
-const COLOR_PRESETS = [
-  { id: 'sage', color: '#1B4324', name: 'Sage Green' },
-  { id: 'ocean', color: '#1D4ED8', name: 'Ocean Blue' },
-  { id: 'coral', color: '#B91C1C', name: 'Coral Red' },
-  { id: 'sunset', color: '#C2410C', name: 'Sunset Orange' },
-];
-
+const CURRENT_SUMMARY_VERSION = 2;
 const ENABLE_CHART_EDIT = false; // bật lại khi xử lý xong cache-invalidation cho edit chart
 
-const ChartCard = ({ chart, isSelected, toggleChart, summary, onUpdate, onCellClick, anchorPair, sessionId, fileHash }) => {
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+export function formatInsight(insight, t) {
+  if (!insight) return "";
+  if (insight.text) return insight.text;
+  const { key, params = {} } = insight;
+  if (!key) return "";
+  return t(`visualize.insight.${key}`, params);
+}
+
+function getSubtitle(chart, stats, summary, t) {
+  if (chart.type === "heatmap") {
+    const numCols = Object.keys(chart.matrix || {}).length;
+    return t("visualize.subtitle_heatmap", { count: numCols });
+  }
+  if (stats?.dtype === "multiple_choice") {
+    const resp = stats.respondents ?? summary?.shape?.[0] ?? "";
+    return t("visualize.subtitle_multiple_choice", { count: resp });
+  }
+  if (stats?.dtype === "categorical" || chart.type === "bar") {
+    const totalRows = summary?.shape?.[0] ?? "";
+    return t("visualize.subtitle_categorical", { count: totalRows });
+  }
+  if (chart.type === "histogram") {
+    const totalRows = summary?.shape?.[0] ?? "";
+    return t("visualize.subtitle_numeric", { count: totalRows });
+  }
+  if (chart.type === "line" || stats?.dtype === "datetime") {
+    const days = stats?.range_days;
+    return days
+      ? t("visualize.subtitle_time_days", { count: days })
+      : t("visualize.subtitle_time_points", { count: chart.data?.length || 0 });
+  }
+  return t("visualize.subtitle_generic", { count: summary?.shape?.[0] || "" });
+}
+
+function isSummaryStale(summary, currentOverrides) {
+  if (!summary) return true;
+  if (summary.summary_version !== CURRENT_SUMMARY_VERSION) return true;
+
+  const cleanCurrent = Object.fromEntries(
+    Object.entries(currentOverrides || {}).filter(([_, v]) => v && v !== "auto")
+  );
+  const cleanSaved = Object.fromEntries(
+    Object.entries(summary.computed_overrides || {}).filter(([_, v]) => v && v !== "auto")
+  );
+  if (JSON.stringify(cleanCurrent) !== JSON.stringify(cleanSaved)) {
+    return true;
+  }
+
+  const cols = Object.values(summary.columns || {});
+  for (const c of cols) {
+    if (!c.skip_chart) {
+      if (c.dtype === "categorical" && !c.all_values) return true;
+      if (c.dtype === "multiple_choice" && (c.respondents === undefined || !c.all_values)) return true;
+    }
+    if (c.auto_insights && c.auto_insights.some(ins => ins.key === undefined && !ins.text)) return true;
+  }
+
+  return false;
+}
+
+const ChartCard = ({
+  chart,
+  isSelected,
+  toggleChart,
+  summary,
+  onUpdate,
+  onCellClick,
+  anchorPair,
+  sessionId,
+  fileHash,
+  onMaximize,
+  isSuggested
+}) => {
+  const { t } = useTranslation();
   const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [isTitleExpanded, setIsTitleExpanded] = useState(false);
   const [localTitle, setLocalTitle] = useState(chart.user_title || chart.title);
+
+  const stats = summary?.columns?.[chart.col];
+  const insights = stats?.auto_insights || [];
+  const subtitle = getSubtitle(chart, stats, summary, t);
+  const displayTitle = chart.user_title || chart.title;
+  const isLongTitle = (displayTitle || "").length > 40;
 
   const handleTitleBlur = () => {
     setIsEditingTitle(false);
     onUpdate(chart.id, { user_title: localTitle });
   };
 
-  const handleApplyConfig = (e) => {
-    e.preventDefault();
-    const formData = new FormData(e.target);
-    const newType = formData.get("chart_type");
-    const newCol = formData.get("column_x");
-    const newColor = formData.get("color_preset");
-
-    let newData = chart.data;
-    let newStats = summary?.columns?.[newCol];
-
-    if (newCol !== chart.col || !newData || newType !== chart.type) {
-      if (newType === "histogram" || newType === "box") newData = newStats?.distribution_bins;
-      else if (newType === "bar" || newType === "pie") newData = newStats?.top_values;
-      else if (newType === "line") newData = newStats?.trend_data;
-    }
-
-    const newAutoTitle = newCol !== chart.col ? `${newType} - ${newCol}` : (chart.auto_title || chart.title);
-
-    onUpdate(chart.id, {
-      type: newType,
-      col: newCol,
-      color: newColor,
-      data: newData,
-      title: newCol !== chart.col ? newAutoTitle : chart.title,
-      user_title: newCol !== chart.col ? newAutoTitle : (chart.user_title || chart.title),
-      auto_title: newAutoTitle
-    });
-    setLocalTitle(newCol !== chart.col ? newAutoTitle : localTitle);
-    setIsSettingsOpen(false);
-  };
-
-  const stats = summary?.columns?.[chart.col];
-  const insights = stats?.auto_insights || [];
-  const availableColumns = summary?.columns ? Object.keys(summary.columns) : [];
+  const barHeight = Math.min(380, Math.max(220, (chart.data?.length || 5) * 28 + 40));
 
   return (
-    <div className={`${CARD} relative transition-all ${isSelected ? "border-[#1B4324] shadow-[0_2px_8px_rgba(27,67,36,0.04)]" : "hover:border-[#626C65]/40"}`}>
-      <div className="flex justify-between items-start mb-4">
-        <div className="flex items-center gap-2 flex-1">
-          {ENABLE_CHART_EDIT && (
+    <div className={`bg-white rounded-xl border transition-all flex flex-col justify-between p-5 ${isSelected ? "border-[#1B4324] ring-1 ring-[#1B4324]/20 shadow-sm" : "border-[#E5E5E3] hover:border-[#1B4324]/40"
+      }`}>
+      <div>
+        {/* Header: Title + Subtitle + Toolbar */}
+        <div className="flex items-start justify-between gap-3 mb-3">
+          <div className="flex-1 min-w-0">
+            {isEditingTitle ? (
+              <input
+                autoFocus
+                className="px-2 py-1 border border-[#1B4324] rounded text-sm font-semibold outline-none w-full max-w-sm"
+                value={localTitle}
+                onChange={e => setLocalTitle(e.target.value)}
+                onBlur={handleTitleBlur}
+                onKeyDown={e => e.key === "Enter" && handleTitleBlur()}
+              />
+            ) : (
+              <div className="group/title flex items-start gap-1.5">
+                <h3 className={`text-sm font-semibold text-[#121A14] leading-snug break-words ${isTitleExpanded ? "" : "line-clamp-2"
+                  }`}>
+                  {displayTitle}
+                </h3>
+                {isLongTitle && (
+                  <button
+                    onClick={() => setIsTitleExpanded(!isTitleExpanded)}
+                    className="text-[11px] text-[#1B4324] hover:underline font-medium shrink-0 ml-1"
+                  >
+                    {isTitleExpanded ? t("visualize.title_collapse") : t("visualize.title_expand")}
+                  </button>
+                )}
+                <button
+                  onClick={() => setIsEditingTitle(true)}
+                  className="opacity-0 group-hover/title:opacity-100 p-0.5 text-[#626C65] hover:text-[#121A14] transition-opacity shrink-0"
+                  title={t("visualize.title_edit_tooltip")}
+                >
+                  <Edit2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+            <p className="text-xs text-[#626C65] mt-1 truncate">{subtitle}</p>
+          </div>
+
+          {/* Top-Right Toolbar */}
+          <div className="flex items-center gap-1.5 shrink-0">
+            {isSuggested && (
+              <span className="text-[10px] font-semibold bg-[#EAF2EB] text-[#1B4324] px-2 py-0.5 rounded-full border border-[#c8e0cb]/50">
+                {t("visualize.badge_suggested")}
+              </span>
+            )}
             <button
-                      onClick={() => toggleChart(chart.id)}
-                      className="p-1 text-muted hover:text-[#9F2F2D] hover:bg-[#FDEBEC] rounded transition-colors"
-                      title="Bỏ chọn"
-                    >
-                      <X className="w-3.5 h-3.5" strokeWidth={2} />
-                    </button>
-          )}
-
-          {isEditingTitle ? (
-            <input
-              autoFocus
-              className="px-2 py-1 border border-forest rounded text-sm font-semibold outline-none w-full max-w-xs"
-              value={localTitle}
-              onChange={e => setLocalTitle(e.target.value)}
-              onBlur={handleTitleBlur}
-              onKeyDown={e => e.key === 'Enter' && handleTitleBlur()}
-            />
-          ) : (
-            <div
-              className="group flex items-center gap-2 cursor-pointer"
-              onClick={() => setIsEditingTitle(true)}
+              onClick={() => onMaximize(chart)}
+              className="w-8 h-8 rounded-lg flex items-center justify-center text-[#626C65] hover:text-[#121A14] hover:bg-[#F3F4F2] transition-colors"
+              title={t("visualize.btn_maximize")}
             >
-              <h2 className={`${TEXT.sectionTitle} mb-0`}>{chart.user_title || chart.title}</h2>
-              <Edit2 className="w-3.5 h-3.5 text-transparent group-hover:text-muted transition-colors" />
-            </div>
-          )}
-        </div>
-
-        <button
-          onClick={() => toggleChart(chart.id)}
-          className={`w-6 h-6 rounded flex items-center justify-center border-[2.5px] transition-colors shrink-0 ${isSelected ? "bg-[#121A14] border-[#121A14] text-white" : "border-[#87938B] text-transparent hover:border-[#121A14]"}`}
-        >
-          <Check className="w-4 h-4" strokeWidth={3} />
-        </button>
-      </div>
-
-      {isSettingsOpen && (
-        <form onSubmit={handleApplyConfig} className="mb-4 p-4 bg-[#F9F9F8] rounded-lg border border-border grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div>
-            <label className="block text-xs font-medium text-ink mb-1">Loại biểu đồ</label>
-            <select name="chart_type" defaultValue={chart.type} className="w-full border border-border rounded-md px-2 py-1.5 text-sm bg-white" disabled={chart.type === "heatmap"}>
-              <option value="histogram">Histogram</option>
-              <option value="box">Box Plot</option>
-              <option value="bar">Bar Chart</option>
-              <option value="pie">Pie Chart</option>
-              <option value="line">Line Chart</option>
-              {chart.type === "heatmap" && <option value="heatmap">Heatmap</option>}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-ink mb-1">Cột dữ liệu</label>
-            <select name="column_x" defaultValue={chart.col} className="w-full border border-border rounded-md px-2 py-1.5 text-sm bg-white" disabled={chart.type === "heatmap"}>
-              {availableColumns.map(col => (
-                <option key={col} value={col}>{col}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-ink mb-1">Màu sắc</label>
-            <div className="flex items-center gap-2 mt-1">
-              {COLOR_PRESETS.map(p => (
-                <label key={p.id} className="cursor-pointer relative">
-                  <input type="radio" name="color_preset" value={p.color} defaultChecked={p.color === (chart.color || COLOR_PRESETS[0].color)} className="peer sr-only" />
-                  <div className="w-6 h-6 rounded-full border-2 border-transparent peer-checked:border-ink" style={{ backgroundColor: p.color }}></div>
-                </label>
-              ))}
-            </div>
-          </div>
-          <div className="sm:col-span-3 flex justify-end">
-            <button type="submit" className="text-xs bg-forest text-white px-3 py-1.5 rounded-md hover:bg-forest/90 font-medium">
-              Áp dụng
+              <Maximize2 className="w-4 h-4" />
             </button>
           </div>
-        </form>
-      )}
+        </div>
 
-      <div className={chart.type === "heatmap" ? "h-[500px] lg:h-[70vh] lg:max-h-[800px] flex flex-col w-full" : "h-72"}>
-        {chart.type === "histogram" && <DistributionChart data={chart.data} color={chart.color} />}
-        {chart.type === "bar" && <CategoricalChart data={chart.data} color={chart.color} />}
-        {chart.type === "line" && <TrendChart data={chart.data} color={chart.color} />}
-        {chart.type === "heatmap" && <CorrelationHeatmap matrix={chart.matrix} topCorr={chart.topCorr} onCellClick={onCellClick} anchorPair={anchorPair} />}
-        {chart.type === "pie" && <PieChartComponent data={chart.data} color={chart.color} />}
-        {chart.type === "box" && <BoxPlotChart stats={stats} color={chart.color} />}
+        {/* Chart Canvas */}
+        <div
+          className={chart.type === "heatmap" ? "h-[500px] lg:h-[65vh] flex flex-col w-full my-2" : "w-full my-2"}
+          style={chart.type === "bar" ? { height: `${barHeight}px` } : (chart.type !== "heatmap" ? { height: "260px" } : undefined)}
+        >
+          {chart.type === "histogram" && <DistributionChart data={chart.data} color={chart.color} />}
+          {chart.type === "bar" && <CategoricalChart data={chart.data} color={chart.color} />}
+          {chart.type === "line" && <TrendChart data={chart.data} color={chart.color} />}
+          {chart.type === "heatmap" && <CorrelationHeatmap matrix={chart.matrix} topCorr={chart.topCorr} onCellClick={onCellClick} anchorPair={anchorPair} />}
+          {chart.type === "pie" && <PieChartComponent data={chart.data} color={chart.color} />}
+          {chart.type === "box" && <BoxPlotChart stats={stats} color={chart.color} />}
+        </div>
+
+        {/* Multiple choice note */}
+        {stats?.dtype === "multiple_choice" && (
+          <p className="text-[11px] text-[#626C65] mt-1 italic">
+            {t("visualize.mc_disclaimer")}
+          </p>
+        )}
+
+        {/* Auto Insights */}
+        {chart.type !== "heatmap" && insights.length > 0 && (
+          <div className="mt-3 pt-3 border-t border-[#E5E5E3]">
+            <p className="text-xs font-semibold text-[#1B4324] mb-1.5 flex items-center gap-1.5">
+              <Lightbulb className="w-3.5 h-3.5 text-[#1B4324]" /> {t("visualize.auto_insights_title")}
+            </p>
+            <ul className="space-y-1">
+              {insights.slice(0, 2).map((ins, idx) => (
+                <li key={idx} className="text-xs text-[#2A342D] leading-snug line-clamp-2">
+                  • {formatInsight(ins, t)}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* AI Explain */}
+        <AIInsightsCard
+          sessionId={sessionId}
+          fileHash={fileHash}
+          chart={chart}
+          autoInsights={insights}
+          anchorPair={anchorPair}
+        />
       </div>
 
-      {chart.type !== "heatmap" && insights.length > 0 && (
-        <div className="mt-3 pt-3 border-t border-gray-100">
-          <p className="text-xs font-medium text-gray-500 mb-1.5 flex items-center gap-1">
-            <Lightbulb className="w-3.5 h-3.5 text-[#1B4324]" /> Nhận xét tự động
-          </p>
-          <ul className="space-y-1">
-            {insights.map((insight, idx) => (
-              <li key={idx} className="text-sm text-gray-700 leading-snug">
-                • {insight.text}
-              </li>
-            ))}
-          </ul>
-          <p className="text-xs text-gray-400 italic mt-1.5">
-            ⓘ Đây là nhận xét tự động dựa trên số liệu, có thể chưa đầy đủ.
-          </p>
-        </div>
-      )}
-
-      <AIInsightsCard 
-        sessionId={sessionId}
-        fileHash={fileHash}
-        chart={chart}
-        autoInsights={insights}
-        anchorPair={anchorPair}
-      />
+      {/* Footer Button: Toggle Add to Report */}
+      <div className="mt-4 pt-3 border-t border-[#E5E5E3]">
+        {isSelected ? (
+          <button
+            onClick={() => toggleChart(chart.id)}
+            className="w-full py-2 px-3 bg-[#EAF2EB] border border-[#1B4324]/30 text-[#1B4324] text-xs font-semibold rounded-lg flex items-center justify-center gap-1.5 transition-colors hover:bg-[#dbece0]"
+          >
+            <FileCheck2 className="w-4 h-4 text-[#1B4324]" /> {t("visualize.btn_added_to_report")}
+          </button>
+        ) : (
+          <button
+            onClick={() => toggleChart(chart.id)}
+            className="w-full py-2 px-3 border border-[#E5E5E3] hover:border-[#1B4324] hover:bg-[#F3F4F2] text-[#2A342D] text-xs font-medium rounded-lg flex items-center justify-center gap-1.5 transition-colors"
+          >
+            <FilePlus2 className="w-4 h-4 text-[#626C65]" /> {t("visualize.btn_add_to_report")}
+          </button>
+        )}
+      </div>
     </div>
   );
 };
 
-// --- Logic Tự Động Phân Loại Biểu Đồ ---
+const EnlargedChartModal = ({
+  chart,
+  summary,
+  isSelected,
+  toggleChart,
+  onClose,
+  sessionId,
+  fileHash,
+  anchorPair,
+  onCellClick
+}) => {
+  const { t } = useTranslation();
 
-const generateCharts = (summary) => {
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  if (!chart) return null;
+  const stats = summary?.columns?.[chart.col];
+  const insights = stats?.auto_insights || [];
+  const subtitle = getSubtitle(chart, stats, summary, t);
+
+  // Use all_values for modal if available (cap 200)
+  const modalData = (chart.type === "bar" && stats?.all_values && stats.all_values.length > 0)
+    ? stats.all_values
+    : chart.data;
+
+  const barHeight = Math.min(600, Math.max(300, (modalData?.length || 5) * 26 + 40));
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-2 sm:p-6" onClick={onClose}>
+      <div
+        className="bg-white rounded-2xl border border-[#E5E5E3] w-full max-w-5xl h-full sm:h-[88vh] max-h-[920px] flex flex-col shadow-2xl overflow-hidden"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Modal Header */}
+        <div className="px-6 py-4 border-b border-[#E5E5E3] flex items-center justify-between bg-white shrink-0">
+          <div className="pr-4">
+            <h2 className="text-base sm:lg font-bold text-[#121A14]">{chart.user_title || chart.title}</h2>
+            <p className="text-xs text-[#626C65] mt-0.5">{subtitle}</p>
+          </div>
+          <button
+            onClick={onClose}
+            className="w-8 h-8 rounded-lg flex items-center justify-center text-[#626C65] hover:text-[#121A14] hover:bg-[#F3F4F2] transition-colors"
+            title={t("visualize.modal_close")}
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Modal Body */}
+        <div className="p-6 overflow-y-auto space-y-6 flex-1">
+          <div className={chart.type === "heatmap" ? "h-[500px]" : "w-full"}>
+            {chart.type === "histogram" && (
+              <div className="h-[360px]">
+                <DistributionChart data={modalData} color={chart.color} />
+              </div>
+            )}
+            {chart.type === "bar" && (
+              <div style={{ height: `${barHeight}px` }}>
+                <CategoricalChart data={modalData} color={chart.color} />
+              </div>
+            )}
+            {chart.type === "line" && (
+              <div className="h-[360px]">
+                <TrendChart data={modalData} color={chart.color} />
+              </div>
+            )}
+            {chart.type === "heatmap" && (
+              <CorrelationHeatmap matrix={chart.matrix} topCorr={chart.topCorr} onCellClick={onCellClick} anchorPair={anchorPair} />
+            )}
+            {chart.type === "pie" && (
+              <div className="h-[360px]">
+                <PieChartComponent data={modalData} color={chart.color} />
+              </div>
+            )}
+            {chart.type === "box" && (
+              <div className="h-[360px]">
+                <BoxPlotChart stats={stats} color={chart.color} />
+              </div>
+            )}
+          </div>
+
+          {stats?.dtype === "multiple_choice" && (
+            <p className="text-xs text-[#626C65] italic">
+              {t("visualize.mc_disclaimer")}
+            </p>
+          )}
+
+          {chart.type !== "heatmap" && insights.length > 0 && (
+            <div className="p-4 bg-[#F9F9F8] rounded-xl border border-[#E5E5E3]">
+              <p className="text-xs font-semibold text-[#1B4324] mb-2 flex items-center gap-1.5">
+                <Lightbulb className="w-4 h-4 text-[#1B4324]" /> {t("visualize.auto_insights_title")}
+              </p>
+              <ul className="space-y-1.5">
+                {insights.map((ins, idx) => (
+                  <li key={idx} className="text-xs text-[#2A342D]">
+                    • {formatInsight(ins, t)}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <AIInsightsCard
+            sessionId={sessionId}
+            fileHash={fileHash}
+            chart={chart}
+            autoInsights={insights}
+            anchorPair={anchorPair}
+          />
+        </div>
+
+        {/* Modal Footer */}
+        <div className="px-6 py-3 border-t border-[#E5E5E3] bg-[#FBFBFA] flex items-center justify-between shrink-0">
+          <button
+            onClick={() => toggleChart(chart.id)}
+            className={`px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 transition-colors ${isSelected
+                ? "bg-[#EAF2EB] border border-[#1B4324]/30 text-[#1B4324] hover:bg-[#dbece0]"
+                : "border border-[#E5E5E3] bg-white hover:border-[#1B4324] text-[#2A342D]"
+              }`}
+          >
+            {isSelected ? (
+              <><FileCheck2 className="w-4 h-4 text-[#1B4324]" /> {t("visualize.btn_added_to_report")}</>
+            ) : (
+              <><FilePlus2 className="w-4 h-4 text-[#626C65]" /> {t("visualize.btn_add_to_report")}</>
+            )}
+          </button>
+          <button
+            onClick={onClose}
+            className="px-4 py-2 bg-white border border-[#E5E5E3] rounded-lg text-xs font-medium text-[#626C65] hover:text-[#121A14] transition-colors"
+          >
+            {t("visualize.modal_close")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const generateCharts = (summary, t) => {
   const charts = {
     distribution: [],
     correlation: [],
@@ -214,7 +396,6 @@ const generateCharts = (summary) => {
 
   if (!summary || !summary.columns) return charts;
 
-  // 1. Phân phối & Theo thời gian
   Object.entries(summary.columns).forEach(([colName, info]) => {
     if (info.skip_chart || info.missing_pct >= 60) return;
 
@@ -223,16 +404,16 @@ const generateCharts = (summary) => {
         id: `dist_${colName}`,
         type: "histogram",
         col: colName,
-        title: `Phân phối: ${colName}`,
+        title: colName,
         data: info.distribution_bins,
-        score: (1 - info.missing_pct / 100) + (info.std / (Math.abs(info.mean) || 1) * 0.5) // Score ảo
+        score: (1 - info.missing_pct / 100) + (info.std / (Math.abs(info.mean) || 1) * 0.5)
       });
     } else if ((info.dtype === "categorical" || info.dtype === "boolean" || info.dtype === "multiple_choice") && info.top_values) {
       charts.distribution.push({
         id: `cat_${colName}`,
         type: "bar",
         col: colName,
-        title: `Tần suất: ${colName}`,
+        title: colName,
         data: info.top_values,
         score: 1 - info.missing_pct / 100
       });
@@ -241,26 +422,24 @@ const generateCharts = (summary) => {
         id: `time_${colName}`,
         type: "line",
         col: colName,
-        title: `Xu hướng: ${colName}`,
+        title: colName,
         data: info.trend_data,
         score: 1.0
       });
     }
   });
 
-  // 2. Tương quan
   if (summary.correlation_matrix && Object.keys(summary.correlation_matrix).length > 0) {
     charts.correlation.push({
       id: `corr_heatmap`,
       type: "heatmap",
-      title: `Ma trận tương quan`,
+      title: t ? t("visualize.heatmap_title") : "Ma trận tương quan",
       matrix: summary.correlation_matrix,
       topCorr: summary.top_correlations,
       score: 1.0
     });
   }
 
-  // Sắp xếp theo score
   charts.distribution.sort((a, b) => b.score - a.score);
   charts.correlation.sort((a, b) => b.score - a.score);
   charts.time.sort((a, b) => b.score - a.score);
@@ -268,21 +447,21 @@ const generateCharts = (summary) => {
   return charts;
 };
 
-// --- Màn hình Chính ---
-
 export default function Visualize({ pipelineMode, onComplete, onError }) {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const { showToast } = useToast();
   const { fileSession, updateFileSession, clearFileSession } = useFileSession();
-  
-  const currentUser = getUser() || {};
 
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState("distribution");
   const [charts, setCharts] = useState({ distribution: [], correlation: [], time: [], other: [] });
   const [selectedChartIds, setSelectedChartIds] = useState(new Set());
+  const [suggestedChartIds, setSuggestedChartIds] = useState(new Set());
   const [customCharts, setCustomCharts] = useState([]);
   const [selectionExpanded, setSelectionExpanded] = useState(false);
+  const [enlargedChart, setEnlargedChart] = useState(null);
+  const [showEmptyConfirmModal, setShowEmptyConfirmModal] = useState(false);
 
   const [showDirectUpload, setShowDirectUpload] = useState(false);
   const [isDirectUploading, setIsDirectUploading] = useState(false);
@@ -290,72 +469,141 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
   const [directSummary, setDirectSummary] = useState(null);
   const fileInputRef = useRef(null);
 
-  // --- Anchor state (Correlation Heatmap click-to-explore) ---
+  // Anchor state for Correlation Heatmap
   const [anchorPair, setAnchorPair] = useState(null);
   const [scatterData, setScatterData] = useState(null);
   const [scatterLoading, setScatterLoading] = useState(false);
   const [scatterError, setScatterError] = useState(null);
   const abortRef = useRef(null);
 
+  // Fetch lock refs to prevent duplicate/infinite /visualize/compute loops
+  const isFetchingRef = useRef(false);
+  const lastFetchedKeyRef = useRef(null);
+
+  // Pre-select 3-5 charts
+  const computePreSelection = useCallback((generated, summary) => {
+    const selected = new Set();
+    const all = [
+      ...(generated.distribution || []),
+      ...(generated.correlation || []),
+      ...(generated.time || [])
+    ];
+
+    // 1. At least one per non-empty category
+    if (generated.distribution?.length > 0) {
+      const bestDist = generated.distribution.find(c => {
+        const ins = summary?.columns?.[c.col]?.auto_insights;
+        return ins && ins.length > 0;
+      }) || generated.distribution[0];
+      if (bestDist) selected.add(bestDist.id);
+    }
+
+    if (generated.correlation?.length > 0 && generated.correlation[0]) {
+      selected.add(generated.correlation[0].id);
+    }
+
+    if (generated.time?.length > 0) {
+      const bestTime = generated.time.find(c => {
+        const ins = summary?.columns?.[c.col]?.auto_insights;
+        return ins && ins.length > 0;
+      }) || generated.time[0];
+      if (bestTime) selected.add(bestTime.id);
+    }
+
+    // 2. Fill up to 3-5 charts total preferring charts with insights
+    for (const c of all) {
+      if (selected.size >= 5) break;
+      if (selected.has(c.id)) continue;
+      const ins = summary?.columns?.[c.col]?.auto_insights;
+      if (ins && ins.length > 0) {
+        selected.add(c.id);
+      }
+    }
+
+    // 3. Fallback to fill up to at least 3
+    for (const c of all) {
+      if (selected.size >= 3) break;
+      selected.add(c.id);
+    }
+
+    return selected;
+  }, []);
+
   useEffect(() => {
     if (!fileSession.statisticalSummary && !fileSession.fileHash) {
       setShowDirectUpload(true);
       return;
     }
+    if (!fileSession.sessionId) return;
 
-    const fetchStats = async () => {
-      if (!fileSession.sessionId) return;
-      setLoading(true);
-      try {
-        const res = await api.post("/visualize/compute", {
-          session_id: fileSession.sessionId,
-          warnings: fileSession.warnings || []
-        });
+    const cleanOverrides = Object.fromEntries(
+      Object.entries(fileSession.overrides || {}).filter(([_, v]) => v && v !== "auto")
+    );
+    const fetchKey = `${fileSession.sessionId}_${JSON.stringify(cleanOverrides)}`;
 
-        const summary = res.data;
-        updateFileSession({ statisticalSummary: summary });
+    const stale = isSummaryStale(fileSession.statisticalSummary, fileSession.overrides);
 
-        const generated = generateCharts(summary);
-        setCharts(generated);
-
-        // Mặc định chọn top 3 của phân phối + heatmap (nếu có khả năng)
-        const initialSelected = new Set();
-        generated.distribution.slice(0, 3).forEach(c => {
-          if (!fileSession.capabilities || (c.type === "histogram" ? fileSession.capabilities.histogram : true)) {
-            initialSelected.add(c.id);
-          }
-        });
-        if (generated.correlation[0] && (!fileSession.capabilities || fileSession.capabilities.correlation)) {
-          initialSelected.add(generated.correlation[0].id);
-        }
-        if (generated.time[0] && (!fileSession.capabilities || fileSession.capabilities.line_chart)) {
-          initialSelected.add(generated.time[0].id);
-        }
-
-        setSelectedChartIds(initialSelected);
-
-        // Chuyển tab tự động nếu không có biểu đồ phân phối
-        if (generated.distribution.length === 0 && generated.correlation.length > 0) setActiveTab("correlation");
-        else if (generated.distribution.length === 0 && generated.time.length > 0) setActiveTab("time");
-
-      } catch (err) {
-        showToast(err.response?.data?.detail || "Không thể tải dữ liệu biểu đồ. Vui lòng thử lại sau.", "error");
-      } finally {
-        setLoading(false);
+    if (!fileSession.statisticalSummary || stale) {
+      if (isFetchingRef.current || lastFetchedKeyRef.current === fetchKey) {
+        return;
       }
-    };
 
-    if (!fileSession.statisticalSummary) {
+      const fetchStats = async () => {
+        isFetchingRef.current = true;
+        setLoading(true);
+        try {
+          const res = await api.post("/visualize/compute", {
+            session_id: fileSession.sessionId,
+            warnings: fileSession.warnings || [],
+            overridden_types: cleanOverrides
+          });
+
+          lastFetchedKeyRef.current = fetchKey;
+
+          const summary = {
+            ...res.data,
+            summary_version: CURRENT_SUMMARY_VERSION,
+            computed_overrides: cleanOverrides
+          };
+
+          updateFileSession({ statisticalSummary: summary });
+
+          const generated = generateCharts(summary, t);
+          setCharts(generated);
+
+          if (fileSession.confirmedCharts && fileSession.confirmedCharts.length > 0) {
+            setSelectedChartIds(new Set(fileSession.confirmedCharts.map(c => c.chart_id)));
+          } else {
+            const preSelected = computePreSelection(generated, summary);
+            setSuggestedChartIds(preSelected);
+            setSelectedChartIds(preSelected);
+          }
+
+          if (generated.distribution.length === 0 && generated.correlation.length > 0) setActiveTab("correlation");
+          else if (generated.distribution.length === 0 && generated.time.length > 0) setActiveTab("time");
+
+        } catch (err) {
+          showToast(err.response?.data?.detail || t("visualize.toast_load_error"), "error");
+        } finally {
+          setLoading(false);
+          isFetchingRef.current = false;
+        }
+      };
+
       fetchStats();
     } else {
-      // Đã có sẵn data trong session
-      const generated = generateCharts(fileSession.statisticalSummary);
+      lastFetchedKeyRef.current = fetchKey;
+      const generated = generateCharts(fileSession.statisticalSummary, t);
       setCharts(generated);
-      if (fileSession.confirmedCharts) {
+      if (fileSession.confirmedCharts && fileSession.confirmedCharts.length > 0) {
         setSelectedChartIds(new Set(fileSession.confirmedCharts.map(c => c.chart_id)));
+      } else {
+        const preSelected = computePreSelection(generated, fileSession.statisticalSummary);
+        setSuggestedChartIds(preSelected);
+        setSelectedChartIds(preSelected);
       }
     }
-  }, [fileSession.sessionId, fileSession.statisticalSummary, fileSession.fileHash]);
+  }, [fileSession.sessionId, fileSession.statisticalSummary, fileSession.fileHash, fileSession.overrides, computePreSelection, t]);
 
   const handleDirectUpload = async (file) => {
     if (!file) return;
@@ -388,7 +636,7 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
       });
 
     } catch (err) {
-      showToast("Không thể phân tích trực tiếp. Vui lòng kiểm tra lại file.", "error");
+      showToast(t("visualize.toast_direct_error"), "error");
     } finally {
       setIsDirectUploading(false);
     }
@@ -419,14 +667,11 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
     });
   }, []);
 
-  // --- Anchor handlers ---
   const handleAnchorSelect = async (colA, colB, r) => {
-    // Abort any in-flight scatter request (race condition fix)
     if (abortRef.current) abortRef.current.abort();
     const controller = new AbortController();
     abortRef.current = controller;
 
-    // Set anchor state immediately (UI responds instantly)
     setAnchorPair({ colA, colB, r });
     setScatterLoading(true);
     setScatterError(null);
@@ -439,13 +684,12 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
         col_y: colB,
       }, { signal: controller.signal });
 
-      // Only update if this controller hasn't been aborted
       if (!controller.signal.aborted) {
         setScatterData(res.data);
       }
     } catch (err) {
       if (err.name !== 'CanceledError' && !controller.signal.aborted) {
-        setScatterError(err.response?.data?.detail || "Không thể tải dữ liệu phân tán.");
+        setScatterError(err.response?.data?.detail || t("visualize.toast_scatter_error"));
       }
     } finally {
       if (!controller.signal.aborted) {
@@ -475,9 +719,19 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
     });
   };
 
+  const proceedToReport = (confirmedList) => {
+    updateFileSession({ confirmedCharts: confirmedList });
+    showToast(t("visualize.toast_confirmed"), "success");
+    if (pipelineMode && onComplete) {
+      onComplete();
+    } else {
+      navigate("/dashboard/report");
+    }
+  };
+
   const handleConfirm = () => {
     if (selectedChartIds.size === 0) {
-      showToast("Vui lòng chọn ít nhất 1 biểu đồ để mang sang báo cáo.", "warning");
+      setShowEmptyConfirmModal(true);
       return;
     }
 
@@ -492,14 +746,12 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
         column: c.col
       }));
 
-    updateFileSession({ confirmedCharts: confirmed });
-    showToast("Đã chốt danh sách biểu đồ! Tiếp tục sang Module 5.", "success");
-    if (pipelineMode && onComplete) {
-      onComplete();
-    } else {
-      navigate("/dashboard/report");
-    }
+    proceedToReport(confirmed);
   };
+
+  const totalCharts = useMemo(() => {
+    return (charts.distribution?.length || 0) + (charts.correlation?.length || 0) + (charts.time?.length || 0) + customCharts.length;
+  }, [charts, customCharts]);
 
   const selectedCharts = useMemo(() => {
     const all = [
@@ -513,30 +765,32 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#FBFBFA] text-ink flex flex-col items-center justify-center py-20 px-6 font-sans">
-        <div className="w-12 h-12 rounded-full border-4 border-forest border-t-transparent animate-spin mb-4"></div>
-        <h2 className="text-xl font-bold mb-2">Đang xử lý số liệu thống kê...</h2>
-        <p className="text-muted text-sm text-center max-w-md">DataMind đang chạy hàng loạt thuật toán (Phân phối, Tương quan, Xu hướng) trên toàn bộ dataset của bạn. Tùy thuộc vào dung lượng file, việc này có thể mất vài giây.</p>
+      <div className="min-h-screen bg-[#F3F4F2] text-[#121A14] flex flex-col items-center justify-center py-20 px-6 font-sans">
+        <div className="w-10 h-10 rounded-full border-3 border-[#1B4324] border-t-transparent animate-spin mb-4"></div>
+        <h2 className="text-lg font-bold mb-1">{t("visualize.loading_title")}</h2>
+        <p className="text-[#626C65] text-xs text-center max-w-md">
+          {t("visualize.loading_desc")}
+        </p>
       </div>
     );
   }
 
   if (showDirectUpload && !directSummary) {
     return (
-      <div className="min-h-screen bg-[#FBFBFA] flex flex-col pt-20 px-6">
+      <div className="min-h-screen bg-[#F3F4F2] flex flex-col pt-16 px-6 font-sans">
         <div className="max-w-3xl mx-auto w-full">
-          <h2 className="text-xl font-semibold text-ink mb-2">Bắt đầu trực quan hóa dữ liệu</h2>
-          <p className="text-sm text-muted mb-6">
-            Tải lên dữ liệu của bạn để hệ thống tự động vẽ biểu đồ (phân phối, tương quan, xu hướng theo thời gian).
+          <h2 className="text-xl font-bold text-[#121A14] mb-2">{t("visualize.direct_title")}</h2>
+          <p className="text-xs text-[#626C65] mb-6">
+            {t("visualize.direct_subtitle")}
           </p>
 
           <div
             id="upload-zone"
             className={`
-              border-2 border-dashed rounded-xl p-8 sm:p-12 text-center cursor-pointer transition-colors
+              border-2 border-dashed rounded-xl p-8 sm:p-12 text-center cursor-pointer transition-colors bg-white
               ${isDragging
                 ? "border-[#1B4324] bg-[#EAF2EB]"
-                : "border-border hover:border-[#1B4324] hover:bg-sage/40"
+                : "border-[#E5E5E3] hover:border-[#1B4324] hover:bg-white"
               }
               ${isDirectUploading ? "pointer-events-none opacity-60" : ""}
             `}
@@ -555,28 +809,27 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
             />
             {isDirectUploading ? (
               <div>
-                <div className="w-10 h-10 rounded-full border-4 border-[#1B4324] border-t-transparent animate-spin mx-auto mb-4"></div>
-                <p className="text-ink font-medium text-lg mb-1">Đang phân tích & làm sạch ngầm...</p>
-                <p className="text-muted text-sm">Quá trình này có thể mất vài giây tùy dung lượng file.</p>
+                <div className="w-10 h-10 rounded-full border-3 border-[#1B4324] border-t-transparent animate-spin mx-auto mb-4"></div>
+                <p className="text-[#121A14] font-medium text-base mb-1">{t("visualize.direct_analyzing")}</p>
+                <p className="text-[#626C65] text-xs">{t("visualize.direct_analyzing_desc")}</p>
               </div>
             ) : (
-              <div className="text-muted text-sm">
-                <Upload size={48} strokeWidth={1.5} className="mx-auto mb-4 text-[#1B4324]" />
-                <span className="block mb-1.5 text-ink font-medium text-lg">Kéo thả file dữ liệu vào đây</span>
-                hoặc click để duyệt file &mdash; hỗ trợ CSV, XLSX, XLS (tối đa 10MB)
+              <div className="text-[#626C65] text-xs">
+                <Upload size={40} strokeWidth={1.5} className="mx-auto mb-3 text-[#1B4324]" />
+                <span className="block mb-1 text-[#121A14] font-semibold text-base">{t("visualize.direct_drag_drop")}</span>
+                {t("visualize.direct_support_hint")}
               </div>
             )}
           </div>
 
-          <div className="mt-8 bg-white border border-border rounded-xl p-6 shadow-sm">
-            <h3 className="font-medium text-ink flex items-center gap-2 mb-4">
-              <Info className="w-5 h-5 text-[#1B4324]" />
-              Lưu ý quá trình trực quan hóa
+          <div className="mt-6 bg-white border border-[#E5E5E3] rounded-xl p-5 shadow-sm">
+            <h3 className="font-semibold text-xs text-[#121A14] flex items-center gap-2 mb-3">
+              <Info className="w-4 h-4 text-[#1B4324]" />
+              {t("visualize.direct_notes_title")}
             </h3>
-            <ul className="text-sm text-muted space-y-3 list-disc pl-5">
-              <li><strong className="text-ink font-medium">Khám phá tự động:</strong> Dựa trên kiểu dữ liệu của các cột (Số, Chữ, Thời gian), hệ thống sẽ tự động vẽ Histogram, Biểu đồ thanh, Line chart và Ma trận tương quan.</li>
-              <li><strong className="text-ink font-medium">Xử lý lỗi ngầm định:</strong> Khi tải file lên tại đây, DataMind tự chạy các bước Profiling và Cleaning để đảm bảo dữ liệu "sạch" trước khi vẽ.</li>
-              <li><strong className="text-ink font-medium">Báo cáo phân tích:</strong> Các biểu đồ bạn chọn ở đây sẽ được đưa thẳng vào bước lập báo cáo cuối cùng để AI phân tích chuyên sâu.</li>
+            <ul className="text-xs text-[#626C65] space-y-2 list-disc pl-5">
+              <li><strong className="text-[#121A14] font-medium">{t("visualize.direct_note1_title")}</strong> {t("visualize.direct_note1_desc")}</li>
+              <li><strong className="text-[#121A14] font-medium">{t("visualize.direct_note2_title")}</strong> {t("visualize.direct_note2_desc")}</li>
             </ul>
           </div>
         </div>
@@ -586,34 +839,32 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
 
   if (showDirectUpload && directSummary) {
     return (
-      <div className="min-h-screen bg-[#FBFBFA] flex flex-col items-center justify-center p-6">
-        <div className="bg-white p-8 rounded-2xl shadow-sm max-w-md w-full text-center border border-border">
-          <Check className="w-12 h-12 text-forest mx-auto mb-4 bg-sage rounded-full p-2" />
-          <h2 className="text-xl font-bold mb-2 text-ink">Đã chuẩn bị xong dữ liệu</h2>
-          <p className="text-lg font-mono mb-4 text-ink">
-            {directSummary.rows} dòng · {directSummary.cols} cột · {directSummary.issuesFixed} vấn đề đã tự động xử lý
+      <div className="min-h-screen bg-[#F3F4F2] flex flex-col items-center justify-center p-6 font-sans">
+        <div className="bg-white p-8 rounded-2xl shadow-sm max-w-md w-full text-center border border-[#E5E5E3]">
+          <Check className="w-12 h-12 text-[#1B4324] mx-auto mb-4 bg-[#EAF2EB] rounded-full p-2.5" />
+          <h2 className="text-lg font-bold mb-2 text-[#121A14]">{t("visualize.direct_done_title")}</h2>
+          <p className="text-sm font-mono mb-4 text-[#121A14]">
+            {t("visualize.direct_done_summary", { rows: directSummary.rows, cols: directSummary.cols, issues: directSummary.issuesFixed })}
           </p>
           <div className="flex flex-col gap-3 mt-6">
             <button
-              onClick={() => {
-                setShowDirectUpload(false);
-              }}
-              className="bg-[#111111] hover:bg-[#222222] text-white py-3 rounded-lg font-semibold w-full transition-all"
+              onClick={() => setShowDirectUpload(false)}
+              className="bg-[#121A14] hover:bg-[#2A342D] text-white py-2.5 rounded-lg text-xs font-semibold w-full transition-colors"
             >
-              Tiếp tục xem biểu đồ
+              {t("visualize.direct_btn_continue")}
             </button>
             <div className="flex gap-3">
               <button
                 onClick={() => navigate(pipelineMode ? "/dashboard/pipeline/profiler" : "/dashboard/profiler")}
-                className="border border-border text-ink py-2 rounded-lg font-semibold w-full hover:bg-sage/20 transition-all text-sm"
+                className="border border-[#E5E5E3] text-[#121A14] py-2 rounded-lg font-medium w-full hover:bg-[#F3F4F2] transition-colors text-xs"
               >
-                Quay lại Phân tích
+                {t("visualize.direct_btn_profiler")}
               </button>
               <button
                 onClick={() => navigate(pipelineMode ? "/dashboard/pipeline/cleaner" : "/dashboard/cleaner")}
-                className="border border-border text-ink py-2 rounded-lg font-semibold w-full hover:bg-sage/20 transition-all text-sm"
+                className="border border-[#E5E5E3] text-[#121A14] py-2 rounded-lg font-medium w-full hover:bg-[#F3F4F2] transition-colors text-xs"
               >
-                Chi tiết Làm sạch
+                {t("visualize.direct_btn_cleaner")}
               </button>
             </div>
           </div>
@@ -625,16 +876,18 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
   const activeCharts = charts[activeTab] || [];
 
   return (
-    <div className="min-h-full bg-[#FBFBFA] text-[#121A14] flex flex-col font-sans relative">
-
-      {/* Main Content Area — full width */}
-      <div className="flex-1 pb-12">
-        <div className="px-6 sm:px-8 py-8 max-w-7xl mx-auto">
+    <div className="min-h-full bg-[#F3F4F2] text-[#121A14] flex flex-col font-sans relative">
+      {/* Main Content Area */}
+      <div className="flex-1 pb-16">
+        <div className="px-4 sm:px-8 py-8 max-w-7xl mx-auto">
           <PageHeader
-            title="Trực quan hóa Dữ liệu"
-            subtitle="Hệ thống đã tự động chọn và xếp hạng các biểu đồ thú vị nhất. Bạn có thể chọn biểu đồ để đưa vào báo cáo cuối cùng."
+            title={t("visualize.page_title")}
+            subtitle={t("visualize.page_subtitle")}
             actions={
               <div className="flex items-center gap-3">
+                <span className="text-xs font-semibold px-2.5 py-1 bg-white border border-[#E5E5E3] text-[#2A342D] rounded-full shadow-sm">
+                  {t("visualize.counter_selected", { selected: selectedChartIds.size, total: totalCharts })}
+                </span>
                 <PageHelpDocs pageId="visualize" />
                 {!pipelineMode && !showDirectUpload && (
                   <>
@@ -642,7 +895,7 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
                       onClick={() => navigate("/dashboard/cleaner")}
                       className={`${BTN.secondary} flex items-center gap-1.5`}
                     >
-                      <ArrowLeft className="w-4 h-4" /> Quay lại
+                      <ArrowLeft className="w-4 h-4" /> {t("visualize.btn_back")}
                     </button>
                     <button
                       onClick={() => {
@@ -652,7 +905,7 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
                       }}
                       className={`${BTN.secondary} flex items-center gap-1.5`}
                     >
-                      <FolderUp className="w-4 h-4" /> Tải file khác
+                      <FolderUp className="w-4 h-4" /> {t("visualize.btn_upload_other")}
                     </button>
                   </>
                 )}
@@ -660,39 +913,38 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
             }
           />
 
-          {/* Capability Summary (Feature 2) */}
+          {/* Capabilities Banner */}
           {fileSession.capabilities && (
-            <div className="bg-sage/20 border border-border rounded-xl p-5 mb-6">
-              <h2 className="text-sm font-semibold mb-3 flex items-center justify-between text-ink">
-                <span>Đánh giá khả năng trực quan hóa</span>
+            <div className="bg-white border border-[#E5E5E3] rounded-xl p-4 mb-6 shadow-sm">
+              <h2 className="text-xs font-semibold mb-2.5 flex items-center justify-between text-[#121A14]">
+                <span>{t("visualize.capability_title")}</span>
                 {fileSession.warnings?.some(w => w.code === "LOW_ROW_COUNT") && (
-                  <span className="text-xs font-normal text-[#956400] bg-[#FBF3DB] px-2 py-0.5 rounded border border-[#f0dda0] flex items-center gap-1">
-                    <AlertTriangle className="w-3 h-3 inline-block" /> Dữ liệu ít, kết quả mang tính tham khảo
+                  <span className="text-[11px] font-normal text-[#956400] bg-[#FBF3DB] px-2 py-0.5 rounded border border-[#f0dda0] flex items-center gap-1">
+                    <AlertTriangle className="w-3 h-3 inline-block" /> {t("visualize.capability_low_rows")}
                   </span>
                 )}
               </h2>
-              <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
-                <span className={`flex items-center gap-1.5 ${((fileSession.capabilities.histogram || fileSession.capabilities.bar_chart) && charts.distribution.length > 0) ? 'text-forest font-semibold' : 'text-[#9F2F2D]/80'}`}>
-                  {((fileSession.capabilities.histogram || fileSession.capabilities.bar_chart) && charts.distribution.length > 0) ? <Check className="w-4 h-4 shrink-0" /> : <X className="w-4 h-4 shrink-0" />} Phân phối
+              <div className="flex flex-wrap gap-x-5 gap-y-2 text-xs">
+                <span className={`flex items-center gap-1.5 ${((fileSession.capabilities.histogram || fileSession.capabilities.bar_chart) && charts.distribution.length > 0) ? 'text-[#1B4324] font-semibold' : 'text-[#9F2F2D]/80'}`}>
+                  {((fileSession.capabilities.histogram || fileSession.capabilities.bar_chart) && charts.distribution.length > 0) ? <Check className="w-3.5 h-3.5 shrink-0" /> : <X className="w-3.5 h-3.5 shrink-0" />} {t("visualize.cap_distribution")}
                 </span>
-                <span className={`flex items-center gap-1.5 ${(fileSession.capabilities.correlation && charts.correlation.length > 0) ? 'text-forest font-semibold' : 'text-[#9F2F2D]/80'}`}>
-                  {(fileSession.capabilities.correlation && charts.correlation.length > 0) ? <Check className="w-4 h-4 shrink-0" /> : <X className="w-4 h-4 shrink-0" />} Tương quan
+                <span className={`flex items-center gap-1.5 ${(fileSession.capabilities.correlation && charts.correlation.length > 0) ? 'text-[#1B4324] font-semibold' : 'text-[#9F2F2D]/80'}`}>
+                  {(fileSession.capabilities.correlation && charts.correlation.length > 0) ? <Check className="w-3.5 h-3.5 shrink-0" /> : <X className="w-3.5 h-3.5 shrink-0" />} {t("visualize.cap_correlation")}
                 </span>
-                <span className={`flex items-center gap-1.5 ${(fileSession.capabilities.line_chart && charts.time.length > 0) ? 'text-forest font-semibold' : 'text-[#9F2F2D]/80'}`}>
-                  {(fileSession.capabilities.line_chart && charts.time.length > 0) ? <Check className="w-4 h-4 shrink-0" /> : <X className="w-4 h-4 shrink-0" />} Theo thời gian
+                <span className={`flex items-center gap-1.5 ${(fileSession.capabilities.line_chart && charts.time.length > 0) ? 'text-[#1B4324] font-semibold' : 'text-[#9F2F2D]/80'}`}>
+                  {(fileSession.capabilities.line_chart && charts.time.length > 0) ? <Check className="w-3.5 h-3.5 shrink-0" /> : <X className="w-3.5 h-3.5 shrink-0" />} {t("visualize.cap_time")}
                 </span>
               </div>
             </div>
           )}
 
-          {/* Tabs */}
-          <div className="flex gap-2 border-b border-border mb-6 pb-1 overflow-x-auto">
+          {/* Navigation Tabs */}
+          <div className="flex gap-2 border-b border-[#E5E5E3] mb-6 pb-1 overflow-x-auto">
             {[
-              { id: "distribution", label: `Phân phối (${charts.distribution.length})` },
-              { id: "correlation", label: `Tương quan (${charts.correlation.length})` },
-              { id: "time", label: `Theo thời gian (${charts.time.length})` },
+              { id: "distribution", label: t("visualize.tab_distribution", { count: charts.distribution.length }) },
+              { id: "correlation", label: t("visualize.tab_correlation", { count: charts.correlation.length }) },
+              { id: "time", label: t("visualize.tab_time", { count: charts.time.length }) },
             ].map(tab => {
-              // Check capability to optionally style the tab
               const isSupported = !fileSession.capabilities || (
                 (tab.id === "distribution" && fileSession.capabilities.histogram) ||
                 (tab.id === "correlation" && fileSession.capabilities.correlation) ||
@@ -703,41 +955,43 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`px-4 py-2 text-sm font-medium whitespace-nowrap transition-colors border-b-2 ${activeTab === tab.id ? "border-forest text-forest font-semibold" : "border-transparent text-muted hover:text-ink"} ${!isSupported && activeTab !== tab.id ? 'opacity-50' : ''}`}
+                  className={`px-4 py-2 text-xs font-medium whitespace-nowrap transition-colors border-b-2 ${activeTab === tab.id
+                      ? "border-[#1B4324] text-[#1B4324] font-semibold"
+                      : "border-transparent text-[#626C65] hover:text-[#121A14]"
+                    } ${!isSupported && activeTab !== tab.id ? 'opacity-50' : ''}`}
                 >
                   {tab.label} {!isSupported && <AlertTriangle className="w-3 h-3 inline-block ml-1" />}
                 </button>
-              )
+              );
             })}
           </div>
 
-          {/* Chart Grid */}
+          {/* Chart Grid: 2 columns from lg (1024px), 1 column below; Heatmap spans full width */}
           {activeCharts.length === 0 ? (
-            <div className="text-center py-20 border-2 border-dashed border-border rounded-xl">
-              <p className="text-muted">Không có biểu đồ nào phù hợp trong mục này.</p>
+            <div className="text-center py-16 bg-white border border-[#E5E5E3] rounded-xl">
+              <p className="text-xs text-[#626C65]">{t("visualize.tab_empty")}</p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {activeCharts.map(chart => {
-                // Determine if chart is disabled by capabilities
                 let isDisabled = false;
                 let disableReason = "";
 
                 if (fileSession.capabilities) {
                   if (chart.type === "histogram" && !fileSession.capabilities.histogram) {
                     isDisabled = true;
-                    disableReason = "Cần ít nhất 1 cột số và 5 dòng dữ liệu.";
+                    disableReason = t("visualize.locked_histogram");
                   } else if (chart.type === "heatmap" && !fileSession.capabilities.correlation) {
                     isDisabled = true;
-                    disableReason = "Cần ít nhất 2 cột số và 10 dòng dữ liệu.";
+                    disableReason = t("visualize.locked_heatmap");
                   } else if (chart.type === "line" && !fileSession.capabilities.line_chart) {
                     isDisabled = true;
-                    disableReason = "Cần ít nhất 2 dòng dữ liệu.";
+                    disableReason = t("visualize.locked_line");
                   }
                 }
 
                 return (
-                  <div key={chart.id} className={`relative group ${chart.type === 'heatmap' ? 'xl:col-span-2' : ''}`}>
+                  <div key={chart.id} className={`relative group ${chart.type === 'heatmap' ? 'lg:col-span-2' : ''}`}>
                     <div className={`transition-all ${isDisabled ? 'opacity-20 grayscale pointer-events-none' : ''}`}>
                       <ChartCard
                         chart={chart}
@@ -747,19 +1001,19 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
                         onUpdate={handleUpdateChart}
                         onCellClick={chart.type === "heatmap" ? handleAnchorSelect : undefined}
                         anchorPair={chart.type === "heatmap" ? anchorPair : undefined}
-
                         sessionId={fileSession.sessionId}
                         fileHash={fileSession.fileHash}
+                        onMaximize={setEnlargedChart}
+                        isSuggested={suggestedChartIds.has(chart.id)}
                       />
                     </div>
 
-                    {/* Disabled Overlay & Tooltip */}
                     {isDisabled && (
-                      <div className="absolute inset-0 z-10 flex items-center justify-center bg-canvas/60 rounded-xl border border-border/10 backdrop-blur-[1px]">
-                        <div className="bg-white px-4 py-3 rounded-lg border border-border text-center max-w-[80%] shadow-md">
-                          <Lock className="w-6 h-6 mx-auto mb-2 text-ink/70" />
-                          <p className="text-sm font-semibold text-ink mb-1">Không khả dụng</p>
-                          <p className="text-xs text-muted">{disableReason}</p>
+                      <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/60 rounded-xl border border-[#E5E5E3] backdrop-blur-[1px]">
+                        <div className="bg-white px-4 py-3 rounded-lg border border-[#E5E5E3] text-center max-w-[80%] shadow-md">
+                          <Lock className="w-5 h-5 mx-auto mb-1.5 text-[#121A14]/70" />
+                          <p className="text-xs font-semibold text-[#121A14] mb-0.5">{t("visualize.locked_title")}</p>
+                          <p className="text-[11px] text-[#626C65]">{disableReason}</p>
                         </div>
                       </div>
                     )}
@@ -769,8 +1023,7 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
             </div>
           )}
 
-
-          {/* Anchor Scatter Panel — appears below chart grid when a correlation cell is clicked */}
+          {/* Anchor Scatter Panel */}
           {activeTab === "correlation" && anchorPair && (
             <AnchorScatterPanel
               colA={anchorPair.colA}
@@ -787,7 +1040,7 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
                   type: "scatter",
                   colA: anchorPair.colA,
                   colB: anchorPair.colB,
-                  title: `Phân tán: ${anchorPair.colA} × ${anchorPair.colB}`,
+                  title: `${anchorPair.colA} × ${anchorPair.colB}`,
                   data: scatterData,
                   r: anchorPair.r
                 });
@@ -797,58 +1050,108 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
         </div>
       </div>
 
-      {/* Sticky Bottom Bar (Selection Panel) */}
-      <div className="sticky bottom-0 z-40 w-full bg-white/95 backdrop-blur-md border-t border-border shadow-[0_-4px_20px_rgba(0,0,0,0.06)] mt-auto">
-        {/* Expanded panel — list of selected charts */}
+      {/* Enlarged Chart Modal */}
+      <EnlargedChartModal
+        chart={enlargedChart}
+        summary={fileSession.statisticalSummary}
+        isSelected={enlargedChart ? selectedChartIds.has(enlargedChart.id) : false}
+        toggleChart={toggleChart}
+        onClose={() => setEnlargedChart(null)}
+        sessionId={fileSession.sessionId}
+        fileHash={fileSession.fileHash}
+        anchorPair={anchorPair}
+        onCellClick={handleAnchorSelect}
+      />
+
+      {/* Confirmation warning modal for 0 charts selected */}
+      {showEmptyConfirmModal && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl border border-[#E5E5E3] p-6 max-w-md w-full shadow-xl">
+            <div className="w-10 h-10 rounded-full bg-[#FBF3DB] text-[#956400] flex items-center justify-center mb-3">
+              <AlertTriangle className="w-5 h-5" />
+            </div>
+            <h3 className="text-base font-bold text-[#121A14] mb-1.5">{t("visualize.empty_selection_warning_title")}</h3>
+            <p className="text-xs text-[#626C65] leading-relaxed mb-6">
+              {t("visualize.empty_selection_warning_desc")}
+            </p>
+            <div className="flex gap-2.5 justify-end">
+              <button
+                onClick={() => setShowEmptyConfirmModal(false)}
+                className="px-4 py-2 text-xs font-semibold rounded-lg border border-[#E5E5E3] text-[#2A342D] hover:bg-[#F3F4F2] transition-colors"
+              >
+                {t("visualize.btn_stay_and_select")}
+              </button>
+              <button
+                onClick={() => {
+                  setShowEmptyConfirmModal(false);
+                  proceedToReport([]);
+                }}
+                className="px-4 py-2 text-xs font-semibold rounded-lg bg-[#121A14] text-white hover:bg-[#2A342D] transition-colors"
+              >
+                {t("visualize.btn_proceed_empty")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Sticky Bottom Bar */}
+      <div className="sticky bottom-0 z-40 w-full bg-white/95 backdrop-blur-md border-t border-[#E5E5E3] shadow-[0_-4px_20px_rgba(0,0,0,0.04)] mt-auto">
+        {/* Expanded list of selected charts */}
         {selectionExpanded && (
-          <div className="max-w-7xl mx-auto px-6 sm:px-8 py-4 border-b border-border">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-semibold text-ink">Biểu đồ đã chọn — sẽ xuất hiện trong báo cáo AI</h3>
+          <div className="max-w-7xl mx-auto px-4 sm:px-8 py-3 border-b border-[#E5E5E3]">
+            <div className="flex items-center justify-between mb-2.5">
+              <h3 className="text-xs font-semibold text-[#121A14]">{t("visualize.selected_panel_title")}</h3>
               <button
                 onClick={() => setSelectionExpanded(false)}
-                className="text-muted hover:text-ink p-1 transition-colors"
+                className="text-[#626C65] hover:text-[#121A14] p-1 transition-colors"
               >
                 <ChevronDown className="w-4 h-4" />
               </button>
             </div>
             {selectedChartIds.size === 0 ? (
-              <p className="text-sm text-muted/60 py-3">Chưa có biểu đồ nào được chọn. Nhấn vào checkbox trên biểu đồ để chọn.</p>
+              <p className="text-xs text-[#626C65]/70 py-2">{t("visualize.selected_panel_empty")}</p>
             ) : (
-              <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto">
+              <div className="flex flex-wrap gap-2 max-h-36 overflow-y-auto">
                 {selectedCharts.map(c => (
-                    <div key={`sel_${c.id}`} className="bg-[#F9F9F8] border border-border rounded-lg px-3 py-2 flex items-center gap-2 text-sm text-ink">
-                      <span className="truncate max-w-[200px] font-medium">{c.user_title || c.title}</span>
-                      <button onClick={() => toggleChart(c.id)} className="text-muted hover:text-red-500 shrink-0 transition-colors">
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  ))
-                }
+                  <div key={`sel_${c.id}`} className="bg-[#F3F4F2] border border-[#E5E5E3] rounded-lg px-2.5 py-1.5 flex items-center gap-2 text-xs text-[#121A14]">
+                    <span className="truncate max-w-[180px] font-medium">{c.user_title || c.title}</span>
+                    <button onClick={() => toggleChart(c.id)} className="text-[#626C65] hover:text-[#9F2F2D] shrink-0 transition-colors">
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
               </div>
             )}
           </div>
         )}
 
         {/* Bottom action bar */}
-        <div className="max-w-7xl mx-auto px-6 sm:px-8 py-3 flex items-center justify-between">
-          <button
-            onClick={() => setSelectionExpanded(!selectionExpanded)}
-            className="flex items-center gap-2 text-sm text-muted hover:text-ink transition-colors"
-          >
-            {selectionExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
-            <span className="font-semibold text-forest">{selectedChartIds.size}</span>
-            <span>biểu đồ đã chọn</span>
-          </button>
+        <div className="max-w-7xl mx-auto px-4 sm:px-8 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setSelectionExpanded(!selectionExpanded)}
+              className="flex items-center gap-1.5 text-xs text-[#626C65] hover:text-[#121A14] transition-colors"
+            >
+              {selectionExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
+              <span className="font-semibold text-[#1B4324]">{selectedChartIds.size}</span>
+              <span>{t("visualize.sticky_selected_count", { count: selectedChartIds.size })}</span>
+            </button>
+            {suggestedChartIds.size > 0 && (
+              <span className="hidden sm:inline-block text-[11px] text-[#626C65] bg-[#F3F4F2] px-2 py-0.5 rounded-full border border-[#E5E5E3]">
+                {t("visualize.sticky_suggested_hint", { n: suggestedChartIds.size })}
+              </span>
+            )}
+          </div>
 
           <button
             onClick={handleConfirm}
-            className={`${BTN.primary} px-6 py-2.5 flex items-center gap-2`}
+            className={`${BTN.primary} px-5 py-2 flex items-center gap-2 text-xs font-semibold`}
           >
-            Chốt danh sách & Chuyển tiếp <ArrowRight className="w-4 h-4" />
+            {t("visualize.btn_confirm_proceed")} <ArrowRight className="w-4 h-4" />
           </button>
         </div>
       </div>
-
     </div>
   );
 }

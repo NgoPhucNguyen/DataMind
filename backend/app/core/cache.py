@@ -19,7 +19,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 _DEFAULT_TTL = 86400       # 24 giờ
-_FILE_BYTES_TTL = 3600000  # 1000 giờ
+_FILE_BYTES_TTL = 3600     # 1 giờ (dùng cho session làm sạch và preview)
 
 
 def _get_client():

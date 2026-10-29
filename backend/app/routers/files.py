@@ -212,18 +212,38 @@ async def profile_file(
     columns_raw = profiler_service.profile_dataframe(df)
     columns = [ColumnProfile(**col) for col in columns_raw]
 
-    # 7. Ngữ cảnh mặc định (KHÔNG gọi Gemini tự động — user bấm nút để kích hoạt)
-    semantic = SemanticContext(
-        domain="Chưa phân tích",
-        confidence=0.0,
-        reasoning="Nhấn nút 'Phân tích AI' để hệ thống nhận diện lĩnh vực dữ liệu.",
-    )
-    
-    for col in columns:
-        col.semantic_type = "GENERAL_TEXT"
-        col.semantic_confidence = 0.0
+    # 7.
+    existing_ctx = cache.get_profiler_context(current_user['user_id'], file_hash)
+    if existing_ctx and existing_ctx.get('semantic_context'):
+        sem_raw = existing_ctx['semantic_context']
+        semantic = SemanticContext(
+            domain=sem_raw.get('domain', 'Chưa phân tích'),
+            confidence=float(sem_raw.get('confidence', 0.0)),
+            reasoning=sem_raw.get('reasoning', ''),
+        )
+        col_sem_map = existing_ctx.get('column_semantics', {})
+        for col in columns:
+            if col.name in col_sem_map:
+                col_info = col_sem_map[col.name]
+                if isinstance(col_info, dict):
+                    col.semantic_type = col_info.get('semantic_type', 'GENERAL_TEXT')
+                    col.semantic_confidence = float(col_info.get('confidence', 0.0))
+                else:
+                    col.semantic_type = str(col_info)
+                    col.semantic_confidence = 0.8
+            else:
+                col.semantic_type = 'GENERAL_TEXT'
+                col.semantic_confidence = 0.0
+    else:
+        semantic = SemanticContext(
+            domain='Chưa phân tích',
+            confidence=0.0,
+            reasoning="Nhấn nút 'Phân tích AI' để hệ thống nhận diện lĩnh vực dữ liệu.",
+            )
+        for col in columns:
+            col.semantic_type = 'GENERAL_TEXT'
+            col.semantic_confidence = 0.0
 
-    # 8. Tạo response
     result = ProfileResponse(
         file_hash=file_hash,
         filename=file.filename,
@@ -341,6 +361,7 @@ async def analyze_ai_context(
         "semantic_context": profile_data["semantic_context"],
         "column_semantics": column_semantics,
         "saved_at": now_saved_at,
+        "lang": body.lang or "vi",
     }
     cache.set_profiler_context(current_user["user_id"], body.file_hash, profiler_ctx_payload)
     cache.set_user_context(current_user["user_id"], body.file_hash, draft_summary, "")
@@ -420,6 +441,7 @@ async def save_profiler_state(
         "semantic_context": existing.get("semantic_context"),
         "column_semantics": existing.get("column_semantics", {}),
         "saved_at": saved_at,
+        "lang": existing.get("lang"),
     }
     cache.set_profiler_context(current_user["user_id"], body.file_hash, data)
     cache.set_user_context(current_user["user_id"], body.file_hash, body.description, "")

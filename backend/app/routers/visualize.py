@@ -4,6 +4,7 @@ from pydantic import BaseModel
 import io
 import logging
 
+from app.core.errors import DataMindException, ErrorSeverity
 from app.core.dependencies import get_current_user
 from app.core.database import get_db
 from sqlalchemy.orm import Session
@@ -24,6 +25,7 @@ logger = logging.getLogger(__name__)
 class ComputeRequest(BaseModel):
     session_id: str
     warnings: list = []
+    overridden_types: dict[str, str] = {}
 
 @router.post("/compute", summary="Tính toán các thống kê cho module trực quan hóa")
 async def compute(
@@ -34,7 +36,10 @@ async def compute(
     # visualize_service.compute_statistics(session_id) — router chỉ dispatch.
     try:
         summary = visualize_service.compute_statistics(
-            current_user["user_id"], body.session_id, warnings=body.warnings
+            current_user["user_id"],
+            body.session_id,
+            warnings=body.warnings,
+            overridden_types=body.overridden_types,
         )
     except DataMindException as e:
         logger.warning(f"DataMindException in compute: {e.code} - {e.user_message}")
@@ -172,14 +177,28 @@ async def explain_chart(
     import os
     import hashlib
     
-    # 0. Lấy file bytes và session metadata để tìm file_hash gốc
-    cached_file = cache.get_file_bytes(current_user["user_id"], body.session_id)
-    if not cached_file:
-        raise HTTPException(status_code=410, detail="Phiên làm việc đã hết hạn.")
-    
+    # 0. Lấy session metadata để tìm file_hash gốc
     session_meta = cache.get_session_metadata(current_user["user_id"], body.session_id) or {}
-    provenance_hash = session_meta.get("file_hash")
-    file_hash = provenance_hash or ("v4:" + hashlib.md5(cached_file["bytes"]).hexdigest())
+    file_hash = session_meta.get("file_hash")
+    
+    cached_file = None
+    if not file_hash:
+        cached_file = cache.get_file_bytes(current_user["user_id"], body.session_id)
+        if cached_file:
+            file_hash = "v4:" + hashlib.md5(cached_file["bytes"]).hexdigest()
+
+    if not file_hash:
+        raise DataMindException(
+            code="ERR_SYS_CACHE_EXPIRED",
+            severity=ErrorSeverity.CRITICAL,
+            user_message="Phiên làm việc đã hết hạn hoặc file không tìm thấy. Vui lòng upload lại.",
+            technical_detail={
+                "module": "visualize",
+                "location": "explain_chart",
+                "root_cause": f"Không tìm thấy metadata hoặc file bytes cho session '{body.session_id}'"
+            },
+            suggested_action=None
+        )
 
     # Sort columns for consistent caching if 2 columns
     sorted_x, sorted_y = body.col_x, body.col_y
@@ -243,7 +262,23 @@ async def explain_chart(
                 "usage": usage_info,
             }
 
-    # 3. Cache Miss -> Check AI Quota (Shared pool)
+    # 3. Cache Miss (hoặc is_reanalyze=True) -> Cần file bytes để tính toán & gọi Gemini
+    if cached_file is None:
+        cached_file = cache.get_file_bytes(current_user["user_id"], body.session_id)
+    if not cached_file:
+        raise DataMindException(
+            code="ERR_SYS_CACHE_EXPIRED",
+            severity=ErrorSeverity.CRITICAL,
+            user_message="Phiên làm việc đã hết hạn hoặc file không tìm thấy. Vui lòng upload lại.",
+            technical_detail={
+                "module": "visualize",
+                "location": "explain_chart",
+                "root_cause": f"cache.get_file_bytes(user={current_user['user_id']}, '{body.session_id}') trả về None trên cache miss"
+            },
+            suggested_action=None
+        )
+
+    # 4. Check AI Quota (Shared pool)
     check_ai_quota(current_user["user_id"], db)
 
     # 4. Load stats & Build prompt
@@ -355,7 +390,17 @@ async def save_explain(
     import hashlib
     cached_file = cache.get_file_bytes(current_user["user_id"], body.session_id)
     if not cached_file:
-        raise HTTPException(status_code=410, detail="Phiên làm việc đã hết hạn.")
+        raise DataMindException(
+            code="ERR_SYS_CACHE_EXPIRED",
+            severity=ErrorSeverity.CRITICAL,
+            user_message="Phiên làm việc đã hết hạn hoặc file không tìm thấy. Vui lòng upload lại.",
+            technical_detail={
+                "module": "visualize",
+                "location": "explain_chart",
+                "root_cause": f"cache.get_file_bytes(user={current_user['user_id']}, '{body.session_id}') trả về None"
+            },
+            suggested_action=None
+        )
     
     session_meta = cache.get_session_metadata(current_user["user_id"], body.session_id) or {}
     provenance_hash = session_meta.get("file_hash")

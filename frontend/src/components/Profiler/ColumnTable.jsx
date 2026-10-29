@@ -1,43 +1,132 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useTranslation, Trans } from "react-i18next";
-import { AlertCircle, AlertTriangle, Info, Download, ChevronDown, ChevronUp } from "lucide-react";
-import { CARD, TEXT, BTN } from "../../constants/ui";
-import { TypeBadge } from "./Badges";
+import {
+  AlertCircle,
+  AlertTriangle,
+  Info,
+  ChevronDown,
+  ChevronUp,
+  X,
+  HelpCircle,
+} from "lucide-react";
+import { CARD } from "../../constants/ui";
 import { ExpandableText } from "./ExpandableText";
+import { TypeDropdownButton } from "./TypeDropdownButton";
 import { getCurrentLang } from "../../i18n";
+import {
+  CHART_CONFIG,
+  getSuggestedChartsForType,
+} from "../../constants/dataTypes";
 
-const COLUMN_TYPES = ["numeric", "datetime", "categorical", "multiple_choice", "text"];
 const DEFAULT_VISIBLE = 10;
+
+/**
+ * Helper to check if a column requires user review
+ * Counting ONLY: null_pct > 60, unique_count === 1, disguised_numeric, unnamed_warning
+ * Plain text columns are NOT counted as warnings!
+ */
+export function isAttentionColumn(col) {
+  if (col.null_pct > 60) return true;
+  if (col.unique_count === 1) return true;
+  if (col.disguised_numeric?.is_disguised) return true;
+  if (Boolean(col.unnamed_warning)) return true;
+  return false;
+}
 
 export const ColumnTable = ({
   result,
   overrides,
   getEffectiveType,
-  handleOverride
+  handleOverride,
 }) => {
   const { t } = useTranslation();
   const [showAll, setShowAll] = useState(false);
+  const [filterNeedsReview, setFilterNeedsReview] = useState(false);
+  const [expandedMobileRows, setExpandedMobileRows] = useState({});
+  const [showOverrideHelp, setShowOverrideHelp] = useState(false);
 
   if (!result) return null;
 
-  const cols = result.columns;
-  const visible = showAll ? cols : cols.slice(0, DEFAULT_VISIBLE);
-  const hasMore = cols.length > DEFAULT_VISIBLE;
+  const cols = result.columns || [];
   const lang = getCurrentLang();
   const numberLocale = lang === "vi" ? "vi-VN" : "en-US";
 
+  // Attention count (only 4 strict conditions)
+  const attentionCount = useMemo(() => {
+    return cols.filter(isAttentionColumn).length;
+  }, [cols]);
+
+  // Filtered list
+  const filteredCols = useMemo(() => {
+    if (!filterNeedsReview) return cols;
+    return cols.filter(isAttentionColumn);
+  }, [cols, filterNeedsReview]);
+
+  const visible = showAll ? filteredCols : filteredCols.slice(0, DEFAULT_VISIBLE);
+  const hasMore = filteredCols.length > DEFAULT_VISIBLE;
+
+  const toggleMobileRow = (colName) => {
+    setExpandedMobileRows((prev) => ({
+      ...prev,
+      [colName]: !prev[colName],
+    }));
+  };
+
   return (
     <div className={CARD}>
-      {/* Header */}
-      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-        <h2 className={TEXT.sectionTitle}>{t("profiler.col_section_title")}</h2>
+      {/* ── 1. Summary Band Above Table ── */}
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-4 pb-3 border-b border-border">
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <span className="text-sm font-semibold text-ink">
+            {result.total_rows.toLocaleString(numberLocale)}{" "}
+            <span className="font-normal text-muted">{t("profiler.summary_rows", "dòng")}</span>
+            {" · "}
+            {result.total_columns.toLocaleString(numberLocale)}{" "}
+            <span className="font-normal text-muted">{t("profiler.summary_cols", "cột")}</span>
+          </span>
+
+          {attentionCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setFilterNeedsReview((prev) => !prev)}
+              title={
+                filterNeedsReview
+                  ? t("profiler.chip_filter_clear", "Bấm để xem tất cả cột")
+                  : t("profiler.chip_filter_apply", "Bấm để lọc các cột cần xem")
+              }
+              aria-pressed={filterNeedsReview}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold transition-all cursor-pointer ${
+                filterNeedsReview
+                  ? "bg-[#D97706] text-white ring-2 ring-[#D97706]/40 shadow-sm"
+                  : "bg-[#FEF6E6] text-[#854D0E] border border-[#FDE68A] hover:bg-[#FDF0D5]"
+              }`}
+            >
+              <AlertTriangle size={13} className={filterNeedsReview ? "text-white" : "text-[#D97706]"} aria-hidden="true" />
+              <span>
+                {t("profiler.chip_needs_review", {
+                  count: attentionCount,
+                  defaultValue: `${attentionCount} cột cần xem`,
+                })}
+              </span>
+              {filterNeedsReview && <X size={12} className="ml-0.5" aria-hidden="true" />}
+            </button>
+          )}
+
+          {filterNeedsReview && (
+            <span className="text-xs text-muted">
+              {t("profiler.filtering_hint", "Đang lọc hiển thị")}
+            </span>
+          )}
+        </div>
+
+        {/* Showing count & Info Help Popover Button */}
         <div className="flex items-center gap-2 text-xs text-muted">
           <span>
             <Trans
               i18nKey="profiler.col_showing"
               values={{
                 visible: visible.length.toLocaleString(numberLocale),
-                total: cols.length.toLocaleString(numberLocale),
+                total: filteredCols.length.toLocaleString(numberLocale),
               }}
               components={{
                 1: <strong className="text-ink" />,
@@ -45,193 +134,220 @@ export const ColumnTable = ({
               }}
             />
           </span>
-          {/* Download report */}
-          <button
-            onClick={() => {
-              const dataStr =
-                "data:text/json;charset=utf-8," +
-                encodeURIComponent(JSON.stringify(result, null, 2));
-              const a = document.createElement("a");
-              a.setAttribute("href", dataStr);
-              a.setAttribute(
-                "download",
-                `${result.filename.split(".")[0]}_report.json`
-              );
-              document.body.appendChild(a);
-              a.click();
-              a.remove();
-            }}
-            className={`${BTN.secondary} flex items-center gap-1.5 !py-1 !text-xs`}
-          >
-            <Download size={13} /> {t("profiler.col_download_report")}
-          </button>
+
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setShowOverrideHelp((prev) => !prev)}
+              aria-label={t("profiler.popover_info_title", "Cách hệ thống xử lý ghi đè")}
+              className="p-1 rounded-full text-muted hover:text-ink hover:bg-neutral-100 transition-colors cursor-pointer"
+              title={t("profiler.popover_info_title", "Cách hệ thống xử lý ghi đè")}
+            >
+              <HelpCircle size={15} />
+            </button>
+
+            {showOverrideHelp && (
+              <div
+                role="dialog"
+                className="absolute right-0 top-7 z-30 w-80 p-3.5 bg-white border border-border rounded-xl shadow-lg text-xs text-ink space-y-2 animate-in fade-in"
+              >
+                <div className="flex items-center justify-between font-semibold border-b border-border pb-1.5">
+                  <span className="flex items-center gap-1.5 text-forest">
+                    <Info size={14} />
+                    {t("profiler.popover_info_title", "Tác động khi đổi loại dữ liệu")}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowOverrideHelp(false)}
+                    className="p-0.5 text-muted hover:text-ink rounded cursor-pointer"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+                <p className="text-muted leading-relaxed">
+                  {t(
+                    "profiler.popover_info_desc",
+                    "Khi đổi kiểu cột, bộ phận Làm sạch (Cleaner) sẽ áp dụng quy tắc tương ứng:"
+                  )}
+                </p>
+                <ul className="space-y-1.5 text-[13px] leading-snug">
+                  <li>
+                    <strong className="text-ink">{t("profiler.type_numeric", "Số liệu")}:</strong>{" "}
+                    {t("profiler.popover_rule_numeric", "Điền ô trống bằng số trung vị (median) & chuyển đổi sang số.")}
+                  </li>
+                  <li>
+                    <strong className="text-ink">{t("profiler.type_categorical", "Danh mục")}:</strong>{" "}
+                    {t("profiler.popover_rule_categorical", "Điền ô trống bằng giá trị phổ biến nhất (mode).")}
+                  </li>
+                  <li>
+                    <strong className="text-ink">{t("profiler.type_text", "Văn bản")}:</strong>{" "}
+                    {t("profiler.popover_rule_text", "Bỏ qua các bước kiểm tra cấu trúc & chuẩn hóa số.")}
+                  </li>
+                </ul>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Table — horizontal scroll on mobile */}
-      <div className="border border-border rounded-xl overflow-hidden bg-white shadow-sm">
+      {/* ── 2. Desktop Table with vertical column borders ── */}
+      <div className="hidden md:block border border-border rounded-xl overflow-hidden bg-white shadow-sm">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[700px]">
+          <table className="w-full text-sm min-w-[720px] border-collapse">
             <thead>
-              <tr className="bg-[#F9F9F8] border-b border-border text-muted text-[10px] uppercase tracking-wider">
-                <th className="text-left px-3 py-2 font-medium">{t("profiler.col_header_name")}</th>
-                <th className="text-left px-3 py-2 font-medium">{t("profiler.col_header_detected")}</th>
-                <th
-                  className="text-left px-3 py-2 font-medium"
-                  title={t("profiler.col_header_override_tooltip")}
-                >
-                  {t("profiler.col_header_override")}
+              <tr className="bg-[#F9F9F8] border-b border-border text-muted text-xs uppercase tracking-wider">
+                {/* 1. Tên cột: align-left */}
+                <th className="text-left px-3.5 py-2.5 font-semibold text-ink border-r border-border/80">
+                  {t("profiler.col_header_name", "Tên cột")}
                 </th>
-                <th className="text-right px-3 py-2 font-medium">{t("profiler.col_header_unique")}</th>
-                <th className="text-right px-3 py-2 font-medium">{t("profiler.col_header_null_pct")}</th>
-                <th className="text-left px-3 py-2 font-medium">{t("profiler.col_header_chart_hints")}</th>
+
+                {/* 2. Loại dữ liệu: align-left */}
+                <th className="text-left px-3.5 py-2.5 font-semibold text-ink min-w-[170px] border-r border-border/80">
+                  {t("profiler.col_header_type", "Loại dữ liệu")}
+                </th>
+
+                {/* 3. Giá trị khác nhau: 2 lines, align-middle (center) */}
+                <th className="text-center px-3.5 py-1.5 font-semibold text-ink w-[110px] leading-tight border-r border-border/80">
+                  <div className="flex flex-col items-center">
+                    <span>{t("profiler.col_header_unique_line1", "Giá trị")}</span>
+                    <span>{t("profiler.col_header_unique_line2", "khác nhau")}</span>
+                  </div>
+                </th>
+
+                {/* 4. Ô trống: align-middle (center) */}
+                <th className="text-center px-3.5 py-2.5 font-semibold text-ink w-[90px] border-r border-border/80">
+                  {t("profiler.col_header_null_pct", "Ô trống")}
+                </th>
+
+                {/* 5. Gợi ý biểu đồ: align-left */}
+                <th className="text-left px-3.5 py-2.5 font-semibold text-ink">
+                  {t("profiler.col_header_chart_hints", "Gợi ý biểu đồ")}
+                </th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-border">
               {visible.map((col, idx) => {
                 const effectiveType = getEffectiveType(col);
-                const isOverridden = overrides[col.name] !== undefined;
+                const isOverridden = overrides[col.name] !== undefined && overrides[col.name] !== col.detected_type;
+                const suggestedCharts = getSuggestedChartsForType(effectiveType, col);
 
                 return (
                   <tr
                     key={col.name}
-                    className={`border-b border-border last:border-b-0 ${
+                    className={`transition-colors hover:bg-neutral-50/70 ${
                       idx % 2 === 0 ? "bg-white" : "bg-[#FAFAFA]"
                     }`}
                   >
-                    {/* Column Name */}
-                    <td className="px-3 py-2 font-mono text-xs text-ink max-w-[220px]">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <div className="max-w-[200px] whitespace-normal">
+                    {/* 1. Tên cột: text-left, border-r */}
+                    <td className="px-3.5 py-2.5 text-left text-sm text-ink max-w-[220px] align-middle border-r border-border/80">
+                      <div className="flex items-start gap-1.5">
+                        <div className="font-medium text-ink max-w-[190px] break-words leading-snug">
                           <ExpandableText text={col.name} />
                         </div>
-                        {col.null_pct > 60 && (
-                          <AlertCircle
-                            className="w-3 h-3 text-red-500 cursor-help shrink-0"
-                            title={t("profiler.col_alert_missing_60")}
-                          />
-                        )}
-                        {col.unique_count === 1 && (
-                          <AlertCircle
-                            className="w-3 h-3 text-amber-500 cursor-help shrink-0"
-                            title={t("profiler.col_alert_unique_1")}
-                          />
-                        )}
-                        {col.low_confidence &&
-                          !col.disguised_numeric?.is_disguised && (
-                            <AlertCircle
-                              className="w-3 h-3 text-orange-500 cursor-help shrink-0"
-                              title={t("profiler.col_alert_low_confidence")}
-                            />
+
+                        {/* Status Icons */}
+                        <div className="flex items-center gap-1 shrink-0 mt-0.5">
+                          {col.null_pct > 60 && (
+                            <span
+                              title={t("profiler.col_alert_missing_60", "Thiếu hơn 60% dữ liệu")}
+                              aria-label={t("profiler.col_alert_missing_60", "Thiếu hơn 60% dữ liệu")}
+                              className="text-[#9F2F2D]"
+                            >
+                              <AlertCircle size={15} />
+                            </span>
                           )}
-                        {col.disguised_numeric?.is_disguised && (
-                          <span
-                            title={t("profiler.col_alert_disguised_numeric")}
-                            className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-amber-100 text-amber-700 cursor-help whitespace-nowrap border border-amber-200"
-                          >
-                            <AlertTriangle className="w-2.5 h-2.5 inline mr-0.5" />
-                            {t("profiler.col_badge_likely_numeric")}
-                          </span>
-                        )}
+                          {col.unique_count === 1 && (
+                            <span
+                              title={t("profiler.col_alert_unique_1", "Chỉ có 1 giá trị duy nhất")}
+                              aria-label={t("profiler.col_alert_unique_1", "Chỉ có 1 giá trị duy nhất")}
+                              className="text-[#D97706]"
+                            >
+                              <AlertCircle size={15} />
+                            </span>
+                          )}
+                          {col.disguised_numeric?.is_disguised && (
+                            <span
+                              title={t("profiler.col_alert_disguised_numeric", "Cột chứa dữ liệu số nhưng lưu dưới dạng văn bản.")}
+                              aria-label={t("profiler.col_alert_disguised_numeric", "Cột chứa dữ liệu số nhưng lưu dưới dạng văn bản.")}
+                              className="px-1.5 py-0.5 rounded text-[11px] font-semibold bg-[#FEF6E6] text-[#854D0E] border border-[#FDE68A] whitespace-nowrap"
+                            >
+                              <AlertTriangle size={11} className="inline mr-1 text-[#D97706]" aria-hidden="true" />
+                              {t("profiler.col_badge_likely_numeric", "Có thể là số")}
+                            </span>
+                          )}
+                        </div>
                       </div>
-                      {col.disguised_numeric?.is_disguised &&
-                        col.disguised_numeric.sample_convertible?.length > 0 && (
-                          <div className="mt-1 text-[9px] text-muted flex flex-wrap gap-x-1.5 gap-y-0.5 leading-tight">
-                            {col.disguised_numeric.sample_convertible.map(
-                              (sample, i) => (
-                                <span key={i}>
-                                  {sample}
-                                  {i <
-                                  col.disguised_numeric.sample_convertible
-                                    .length -
-                                    1
-                                    ? " · "
-                                    : ""}
-                                </span>
-                              )
-                            )}
-                            {col.disguised_numeric.null_synonym_count > 0 && (
-                              <span>· N/A → NaN</span>
-                            )}
-                          </div>
-                        )}
+
                       {col.unnamed_warning && (
-                        <div className="mt-1 text-[9px] text-blue-600 flex items-center gap-1">
-                          <Info className="w-3 h-3 shrink-0" />
+                        <div className="mt-1 text-xs text-[#1D4ED8] flex items-center gap-1 font-normal">
+                          <Info size={12} className="shrink-0" aria-hidden="true" />
                           <span>{t("profiler.col_unnamed_warning", { defaultValue: col.unnamed_warning })}</span>
                         </div>
                       )}
                     </td>
 
-                    {/* Detected Type */}
-                    <td className="px-3 py-2">
-                      <TypeBadge type={col.detected_type} />
+                    {/* 2. Loại dữ liệu: text-left, border-r */}
+                    <td className="px-3.5 py-2.5 text-left align-middle border-r border-border/80">
+                      <TypeDropdownButton
+                        colName={col.name}
+                        effectiveType={effectiveType}
+                        detectedType={col.detected_type}
+                        isOverridden={isOverridden}
+                        onSelectType={handleOverride}
+                        onReset={handleOverride}
+                      />
                     </td>
 
-                    {/* Override dropdown */}
-                    <td className="px-3 py-2">
-                      <select
-                        id={`override-${col.name}`}
-                        value={effectiveType}
-                        onChange={(e) => handleOverride(col.name, e.target.value)}
-                        className={`text-xs rounded border px-2 py-1 bg-white outline-none focus:ring-1 focus:ring-forest focus:border-forest ${
-                          isOverridden
-                            ? "border-forest text-forest"
-                            : "border-border text-muted"
-                        }`}
-                      >
-                        {COLUMN_TYPES.map((colType) => (
-                          <option key={colType} value={colType}>
-                            {t(`profiler.type_${colType}`, { defaultValue: colType })}
-                          </option>
-                        ))}
-                      </select>
-                      {isOverridden && (
-                        <button
-                          onClick={() =>
-                            handleOverride(col.name, col.detected_type)
-                          }
-                          className="ml-1.5 text-[10px] text-muted hover:text-ink underline"
-                          title={t("profiler.col_override_reset_tooltip")}
-                        >
-                          {t("profiler.col_override_reset")}
-                        </button>
-                      )}
-                    </td>
-
-                    {/* Unique count */}
-                    <td className="px-3 py-2 text-right font-mono text-xs text-muted">
+                    {/* 3. Giá trị khác nhau: text-center (align-middle), tabular-nums, border-r */}
+                    <td className="px-3.5 py-2.5 text-center font-mono text-sm text-ink align-middle tabular-nums w-[110px] border-r border-border/80">
                       {col.unique_count.toLocaleString(numberLocale)}
                     </td>
 
-                    {/* Null % */}
-                    <td className="px-3 py-2 text-right font-mono text-xs text-muted">
+                    {/* 4. Ô trống: text-center (align-middle), tabular-nums, border-r */}
+                    <td className="px-3.5 py-2.5 text-center font-mono text-sm align-middle tabular-nums w-[90px] border-r border-border/80">
                       {col.null_pct > 0 ? (
                         <span
                           className={
-                            col.null_pct > 30 ? "text-[#9F2F2D] font-medium" : ""
+                            col.null_pct > 60
+                              ? "text-[#9F2F2D] font-semibold"
+                              : col.null_pct > 30
+                              ? "text-[#B45309] font-medium"
+                              : "text-ink"
                           }
                         >
                           {col.null_pct.toLocaleString(numberLocale)}%
                         </span>
                       ) : (
-                        "—"
+                        <span className="text-muted/60">0%</span>
                       )}
                     </td>
 
-                    {/* Chart hints */}
-                    <td className="px-3 py-2">
-                      <div className="flex gap-1 flex-wrap">
-                        {col.suggested_charts.length > 0
-                          ? col.suggested_charts.map((chart) => (
+                    {/* 5. Gợi ý biểu đồ: text-left, aligned to the left so no weird empty spaces */}
+                    <td className="px-3.5 py-2.5 text-left align-middle">
+                      <div className="flex gap-1.5 flex-wrap items-center justify-start">
+                        {suggestedCharts.length > 0 ? (
+                          suggestedCharts.map((chart) => {
+                            const chartCfg = CHART_CONFIG[chart];
+                            const ChartIcon = chartCfg?.icon;
+                            return (
                               <span
                                 key={chart}
-                                className="px-2 py-0.5 text-[10px] rounded-full bg-sage text-forest border border-[#c8e0cb]"
+                                title={t(chartCfg?.i18nKey || chart, { defaultValue: chart })}
+                                aria-label={t(chartCfg?.i18nKey || chart, { defaultValue: chart })}
+                                className="inline-flex items-center gap-1 px-2.5 py-0.5 text-xs font-medium rounded-full bg-[#EAF2EB] text-[#1B4324] border border-[#C8E0CB]"
                               >
-                                {t(`profiler.chart_${chart}`, { defaultValue: chart })}
+                                {ChartIcon && <ChartIcon size={12} strokeWidth={2} aria-hidden="true" />}
+                                <span>{t(chartCfg?.i18nKey || chart, { defaultValue: chart })}</span>
                               </span>
-                            ))
-                          : <span className="text-muted text-xs">—</span>}
+                            );
+                          })
+                        ) : (
+                          <span className="text-muted text-xs italic">
+                            {effectiveType === "text"
+                              ? t("profiler.chart_not_suitable", "Không phù hợp để vẽ biểu đồ")
+                              : "—"}
+                          </span>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -242,30 +358,135 @@ export const ColumnTable = ({
         </div>
       </div>
 
-      {/* Show more / Show less toggle */}
+      {/* ── 3. Mobile Cards View (< 768px) ── */}
+      <div className="block md:hidden space-y-3">
+        {visible.map((col) => {
+          const effectiveType = getEffectiveType(col);
+          const isOverridden = overrides[col.name] !== undefined && overrides[col.name] !== col.detected_type;
+          const suggestedCharts = getSuggestedChartsForType(effectiveType, col);
+          const isExpanded = Boolean(expandedMobileRows[col.name]);
+
+          return (
+            <div
+              key={col.name}
+              className="border border-border rounded-xl p-3 bg-white shadow-sm space-y-2.5"
+            >
+              {/* Card Header: Name + TypeDropdownButton */}
+              <div className="flex items-start justify-between gap-2">
+                <div className="font-semibold text-sm text-ink break-words flex-1 leading-snug">
+                  {col.name}
+                </div>
+                <TypeDropdownButton
+                  colName={col.name}
+                  effectiveType={effectiveType}
+                  detectedType={col.detected_type}
+                  isOverridden={isOverridden}
+                  onSelectType={handleOverride}
+                  onReset={handleOverride}
+                />
+              </div>
+
+              {/* Status Warning if any */}
+              {isAttentionColumn(col) && (
+                <div className="flex items-center gap-1.5 text-xs text-[#854D0E] bg-[#FEF6E6] px-2 py-1 rounded border border-[#FDE68A]">
+                  <AlertTriangle size={13} className="text-[#D97706] shrink-0" aria-hidden="true" />
+                  <span>
+                    {col.null_pct > 60
+                      ? t("profiler.col_alert_missing_60", "Thiếu hơn 60% dữ liệu")
+                      : col.unique_count === 1
+                      ? t("profiler.col_alert_unique_1", "Chỉ có 1 giá trị duy nhất")
+                      : col.disguised_numeric?.is_disguised
+                      ? t("profiler.col_alert_disguised_numeric", "Có thể là số")
+                      : t("profiler.col_unnamed_warning", "Cần đặt lại tên")}
+                  </span>
+                </div>
+              )}
+
+              {/* Quick stats row */}
+              <div className="grid grid-cols-2 gap-2 text-xs pt-1 border-t border-border/60">
+                <div className="text-center border-r border-border/60 pr-2">
+                  <span className="text-muted block text-[11px] uppercase tracking-wider">
+                    {t("profiler.col_header_unique_diff", "Khác nhau")}
+                  </span>
+                  <span className="font-mono font-medium text-ink tabular-nums">
+                    {col.unique_count.toLocaleString(numberLocale)}
+                  </span>
+                </div>
+                <div className="text-center pl-2">
+                  <span className="text-muted block text-[11px] uppercase tracking-wider">
+                    {t("profiler.col_header_null_pct", "Ô trống")}
+                  </span>
+                  <span className="font-mono font-medium text-ink tabular-nums">
+                    {col.null_pct > 0 ? `${col.null_pct.toLocaleString(numberLocale)}%` : "0%"}
+                  </span>
+                </div>
+              </div>
+
+              {/* Expand details for Chart suggestions on mobile */}
+              <button
+                type="button"
+                onClick={() => toggleMobileRow(col.name)}
+                className="w-full text-xs text-muted hover:text-ink flex items-center justify-between pt-1 border-t border-border/40 cursor-pointer"
+              >
+                <span>{t("profiler.col_header_chart_hints", "Gợi ý biểu đồ")}</span>
+                {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+              </button>
+
+              {isExpanded && (
+                <div className="pt-1.5 flex gap-1.5 flex-wrap justify-start">
+                  {suggestedCharts.length > 0 ? (
+                    suggestedCharts.map((chart) => {
+                      const chartCfg = CHART_CONFIG[chart];
+                      const ChartIcon = chartCfg?.icon;
+                      return (
+                        <span
+                          key={chart}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full bg-[#EAF2EB] text-[#1B4324] border border-[#C8E0CB]"
+                        >
+                          {ChartIcon && <ChartIcon size={12} />}
+                          <span>{t(chartCfg?.i18nKey || chart, { defaultValue: chart })}</span>
+                        </span>
+                      );
+                    })
+                  ) : (
+                    <span className="text-muted text-xs italic">
+                      {effectiveType === "text"
+                        ? t("profiler.chart_not_suitable", "Không phù hợp để vẽ biểu đồ")
+                        : "—"}
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* ── 4. Show More / Show Less Toggle ── */}
       {hasMore && (
         <button
+          type="button"
           onClick={() => setShowAll((v) => !v)}
-          className="mt-2 w-full flex items-center justify-center gap-1.5 text-xs text-muted hover:text-ink py-1.5 border border-dashed border-border rounded-lg transition-colors hover:border-forest hover:bg-sage/10"
+          className="mt-3 w-full flex items-center justify-center gap-1.5 text-xs font-medium text-muted hover:text-ink py-2 border border-dashed border-border rounded-lg transition-colors hover:border-forest hover:bg-sage/10 cursor-pointer"
         >
           {showAll ? (
             <>
-              <ChevronUp className="w-3.5 h-3.5" /> {t("profiler.col_show_less")}
+              <ChevronUp size={14} aria-hidden="true" />
+              <span>{t("profiler.col_show_less", "Thu gọn bớt")}</span>
             </>
           ) : (
             <>
-              <ChevronDown className="w-3.5 h-3.5" /> {t("profiler.col_show_all", { count: cols.length.toLocaleString(numberLocale) })}
+              <ChevronDown size={14} aria-hidden="true" />
+              <span>
+                {t("profiler.col_show_all", {
+                  count: filteredCols.length.toLocaleString(numberLocale),
+                  defaultValue: `Hiển thị toàn bộ ${filteredCols.length} cột`,
+                })}
+              </span>
             </>
           )}
         </button>
       )}
-
-      {/* Footer */}
-      <p className="mt-2 text-[10px] text-muted">
-        {t("profiler.col_footer_note", { hash: result.file_hash.slice(0, 8) })}
-      </p>
     </div>
   );
 };
-
-

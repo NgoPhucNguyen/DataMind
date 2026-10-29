@@ -66,9 +66,9 @@ Hãy sử dụng ngữ cảnh này để nhận diện chính xác lĩnh vực v
 """
 
     lang_instruction = (
-        "BẮT BUỘC: Bạn phải trả lời phần `reasoning`, `domain` và `draft_summary` hoàn toàn bằng TIẾNG ANH (English)."
+        "BẮT BUỘC: Bạn phải trả lời phần `reasoning` và `draft_summary` hoàn toàn bằng TIẾNG ANH (English). Riêng `domain` BẮT BUỘC chọn chính xác 1 mã code trong: Marketing, HR, Finance, Education, Healthcare, E-commerce, Logistics, Other."
         if lang == "en"
-        else "BẮT BUỘC: Bạn phải trả lời phần `reasoning`, `domain` và `draft_summary` hoàn toàn bằng TIẾNG VIỆT (Vietnamese)."
+        else "BẮT BUỘC: Bạn phải trả lời phần `reasoning` và `draft_summary` hoàn toàn bằng TIẾNG VIỆT (Vietnamese). Riêng `domain` BẮT BUỘC chọn chính xác 1 mã code tiếng Anh trong: Marketing, HR, Finance, Education, Healthcare, E-commerce, Logistics, Other."
     )
 
     return f"""Bạn là chuyên gia phân tích dữ liệu. Dưới đây là cấu trúc của một dataset:
@@ -142,7 +142,17 @@ async def get_semantic_context(
             if conf < 0.75:
                 info["semantic_type"] = "GENERAL_TEXT"
 
-        domain = str(parsed.get("domain", "Unknown"))
+        VALID_DOMAINS = {"Marketing", "HR", "Finance", "Education", "Healthcare", "E-commerce", "Logistics", "Other"}
+        raw_dom = str(parsed.get("domain", "Other")).strip()
+        # Canonical normalization
+        domain_mapping = {
+            "khác": "Other", "other": "Other", "tài chính": "Finance", "finance": "Finance",
+            "nhân sự": "HR", "hr": "HR", "giáo dục": "Education", "education": "Education",
+            "y tế": "Healthcare", "healthcare": "Healthcare", "thương mại điện tử": "E-commerce",
+            "e-commerce": "E-commerce", "ecommerce": "E-commerce", "vận tải": "Logistics",
+            "logistics": "Logistics", "marketing": "Marketing"
+        }
+        domain = domain_mapping.get(raw_dom.lower(), raw_dom if raw_dom in VALID_DOMAINS else "Other")
         reasoning = str(parsed.get("reasoning", ""))
         draft_summary = str(parsed.get("draft_summary", "")).strip()
         if not draft_summary:

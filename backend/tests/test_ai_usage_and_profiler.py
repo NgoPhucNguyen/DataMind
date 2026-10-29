@@ -333,3 +333,115 @@ class TestMultilingualExplainCache:
 
             assert vi_result is None
             assert en_result == "EN cached text"
+
+class TestForceRefreshLogic:
+    def test_force_refresh_preserves_profiler_context_and_zero_ai_cost(self):
+        from unittest.mock import patch
+        from app.core import cache
+        from app.schemas.files import SemanticContext, ColumnProfile
+        import pandas as pd
+
+        current_user = {"user_id": 99, "tier": "free", "is_pro": False}
+        file_hash = "v4:dummyhash123"
+
+        cached_ctx = {
+            "description": "User custom dataset",
+            "description_source": "ai_draft",
+            "semantic_context": {
+                "domain": "Marketing",
+                "confidence": 0.92,
+                "reasoning": "Campaign leads dataset"
+            },
+            "column_semantics": {
+                "col_a": {"semantic_type": "SEQUENCE_NUMBER", "confidence": 0.9},
+                "col_b": {"semantic_type": "GENERAL_TEXT", "confidence": 0.8}
+            }
+        }
+
+        with patch("app.core.cache.get_profiler_context", return_value=cached_ctx):
+            columns_raw = [{"name": "col_a", "detected_type": "numeric"}, {"name": "col_b", "detected_type": "text"}]
+            columns = [ColumnProfile(**c, unique_count=2, null_count=0, null_pct=0.0, sample_values=[], suggested_charts=[]) for c in columns_raw]
+            
+            existing_ctx = cache.get_profiler_context(current_user["user_id"], file_hash)
+            if existing_ctx and existing_ctx.get("semantic_context"):
+                sem_raw = existing_ctx["semantic_context"]
+                semantic = SemanticContext(
+                    domain=sem_raw.get("domain", "Chưa phân tích"),
+                    confidence=float(sem_raw.get("confidence", 0.0)),
+                    reasoning=sem_raw.get("reasoning", ""),
+                )
+                col_sem_map = existing_ctx.get("column_semantics", {})
+                for col in columns:
+                    if col.name in col_sem_map:
+                        col_info = col_sem_map[col.name]
+                        if isinstance(col_info, dict):
+                            col.semantic_type = col_info.get("semantic_type", "GENERAL_TEXT")
+                            col.semantic_confidence = float(col_info.get("confidence", 0.0))
+                        else:
+                            col.semantic_type = str(col_info)
+                            col.semantic_confidence = 0.8
+                    else:
+                        col.semantic_type = "GENERAL_TEXT"
+                        col.semantic_confidence = 0.0
+            else:
+                semantic = SemanticContext(
+                    domain="Chưa phân tích",
+                    confidence=0.0,
+                    reasoning="Nhấn nút 'Phân tích AI' để hệ thống nhận diện lĩnh vực dữ liệu.",
+                )
+                for col in columns:
+                    col.semantic_type = "GENERAL_TEXT"
+                    col.semantic_confidence = 0.0
+
+            assert semantic.domain == "Marketing"
+            assert semantic.confidence == 0.92
+            col_a = next(c for c in columns if c.name == "col_a")
+            assert col_a.semantic_type == "SEQUENCE_NUMBER"
+            assert col_a.semantic_confidence == 0.9
+
+    def test_force_refresh_without_profiler_context_defaults_to_unparsed(self):
+        from unittest.mock import patch
+        from app.core import cache
+        from app.schemas.files import SemanticContext, ColumnProfile
+
+        current_user = {"user_id": 99, "tier": "free", "is_pro": False}
+        file_hash = "v4:freshfile"
+        
+        with patch("app.core.cache.get_profiler_context", return_value=None):
+            columns_raw = [{"name": "col_x", "detected_type": "numeric"}]
+            columns = [ColumnProfile(**c, unique_count=2, null_count=0, null_pct=0.0, sample_values=[], suggested_charts=[]) for c in columns_raw]
+            
+            existing_ctx = cache.get_profiler_context(current_user["user_id"], file_hash)
+            if existing_ctx and existing_ctx.get("semantic_context"):
+                sem_raw = existing_ctx["semantic_context"]
+                semantic = SemanticContext(
+                    domain=sem_raw.get("domain", "Chưa phân tích"),
+                    confidence=float(sem_raw.get("confidence", 0.0)),
+                    reasoning=sem_raw.get("reasoning", ""),
+                )
+                col_sem_map = existing_ctx.get("column_semantics", {})
+                for col in columns:
+                    if col.name in col_sem_map:
+                        col_info = col_sem_map[col.name]
+                        if isinstance(col_info, dict):
+                            col.semantic_type = col_info.get("semantic_type", "GENERAL_TEXT")
+                            col.semantic_confidence = float(col_info.get("confidence", 0.0))
+                        else:
+                            col.semantic_type = str(col_info)
+                            col.semantic_confidence = 0.8
+                    else:
+                        col.semantic_type = "GENERAL_TEXT"
+                        col.semantic_confidence = 0.0
+            else:
+                semantic = SemanticContext(
+                    domain="Chưa phân tích",
+                    confidence=0.0,
+                    reasoning="Nhấn nút 'Phân tích AI' để hệ thống nhận diện lĩnh vực dữ liệu.",
+                )
+                for col in columns:
+                    col.semantic_type = "GENERAL_TEXT"
+                    col.semantic_confidence = 0.0
+
+            assert semantic.domain == "Chưa phân tích"
+            assert semantic.confidence == 0.0
+            assert columns[0].semantic_type == "GENERAL_TEXT"

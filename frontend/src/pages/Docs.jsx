@@ -1,6 +1,7 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 
-const SECTIONS = [
+const STATIC_SECTIONS = [
     {
         id: "intro",
         title: "Giới thiệu đề tài",
@@ -73,9 +74,27 @@ const SECTIONS = [
 ];
 
 export default function Docs() {
+    const { t } = useTranslation();
     const [activeSection, setActiveSection] = useState("intro");
 
-    const current = SECTIONS.find((s) => s.id === activeSection);
+    const sections = [
+        ...STATIC_SECTIONS,
+        {
+            id: "visualize",
+            title: t("visualize.help_docs_title"),
+            content: [
+                { heading: t("visualize.help_docs_step1_title"), body: t("visualize.help_docs_step1_text"), code: false },
+                { heading: t("visualize.help_docs_step2_title"), body: t("visualize.help_docs_step2_text"), code: false },
+                { heading: t("visualize.help_docs_step3_title"), body: t("visualize.help_docs_step3_text"), code: false },
+                { heading: t("visualize.help_docs_step4_title"), body: t("visualize.help_docs_step4_text"), code: false },
+                { heading: t("visualize.help_docs_step5_title"), body: t("visualize.help_docs_step5_text"), code: false },
+                { heading: t("visualize.help_docs_step6_title"), body: t("visualize.help_docs_step6_text"), code: false },
+                { heading: t("visualize.help_docs_step7_title"), body: t("visualize.help_docs_step7_text"), code: false },
+            ]
+        }
+    ];
+
+    const current = sections.find((s) => s.id === activeSection);
 
     return (
         <div className="min-h-screen bg-canvas text-ink flex">
@@ -83,7 +102,7 @@ export default function Docs() {
             <aside className="w-56 flex-shrink-0 border-r border-border px-4 py-10 sticky top-16 self-start hidden md:block">
                 <p className="text-xs font-semibold text-muted uppercase tracking-widest mb-4 px-2">Mục lục</p>
                 <nav className="flex flex-col gap-1">
-                    {SECTIONS.map((s) => (
+                    {sections.map((s) => (
                         <button
                             key={s.id}
                             onClick={() => setActiveSection(s.id)}
@@ -99,12 +118,12 @@ export default function Docs() {
             </aside>
 
             {/* Mobile tabs */}
-            <div className="md:hidden fixed bottom-0 left-0 right-0 bg-canvas border-t border-border flex z-40">
-                {SECTIONS.map((s) => (
+            <div className="md:hidden fixed bottom-0 left-0 right-0 bg-canvas border-t border-border flex z-40 overflow-x-auto">
+                {sections.map((s) => (
                     <button
                         key={s.id}
                         onClick={() => setActiveSection(s.id)}
-                        className={`flex-1 py-3 text-xs font-medium transition-colors ${activeSection === s.id ? "text-forest font-bold" : "text-muted"
+                        className={`flex-1 py-3 px-2 text-xs font-medium whitespace-nowrap transition-colors ${activeSection === s.id ? "text-forest font-bold" : "text-muted"
                             }`}
                     >
                         {s.title}

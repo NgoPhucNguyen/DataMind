@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useFileSession } from "../contexts/FileSessionContext";
 import { useAuth } from "../contexts/AuthContext";
@@ -9,14 +9,24 @@ import {
   saveProfilerState,
   getAIUsage,
 } from "../services/profilerService";
-import api from "../services/axiosClient";
 import { useToast } from "../contexts/ToastContext";
 import { useTranslation } from "react-i18next";
 import { getCurrentLang, translateError } from "../i18n";
-import { AlertTriangle, ArrowLeft, ArrowRight, RotateCcw, RotateCw, Zap, Clock } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  ArrowRight,
+  RotateCw,
+  Zap,
+  Clock,
+  MoreHorizontal,
+  Download,
+  FileSpreadsheet,
+} from "lucide-react";
 import PageHeader from "../components/PageHeader";
 import PageHelpDocs from "../components/PageHelpDocs";
 import { PAGE, BTN } from "../constants/ui";
+import { getDomainI18nKey } from "../constants/dataTypes";
 
 // Profiler sub-components
 import { UploadZone } from "../components/Profiler/UploadZone";
@@ -25,14 +35,15 @@ import { ColumnTable } from "../components/Profiler/ColumnTable";
 import MergedDescriptionBox from "../components/Profiler/MergedDescriptionBox";
 import UpgradeModal from "../components/UpgradeModal";
 
-// ── Expiry Banner ── slim countdown strip shown below the table ──
+// ── Calm Footer Strip ── contains Cached status & Countdown ──
 const SESSION_TTL_MS = 3600 * 1000;
 
-function ExpiryBanner({ uploadedAt, filename }) {
+function ProfilerFooterLine({ uploadedAt, filename, isCached }) {
   const [secondsLeft, setSecondsLeft] = useState(() => {
     if (!uploadedAt) return SESSION_TTL_MS / 1000;
     return Math.max(0, Math.floor((SESSION_TTL_MS - (Date.now() - uploadedAt)) / 1000));
   });
+  const { t } = useTranslation();
 
   useEffect(() => {
     const tick = () => {
@@ -49,26 +60,38 @@ function ExpiryBanner({ uploadedAt, filename }) {
   const s = secondsLeft % 60;
   const formatted = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   const isUrgent = secondsLeft > 0 && secondsLeft < 300;
-  const { t } = useTranslation();
 
   return (
-    <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs border transition-colors ${
-      isUrgent
-        ? "bg-[#FDEBEC] border-[#f5c6cb] text-[#9F2F2D]"
-        : "bg-[#F9F9F8] border-border text-muted"
-    }`}>
-      <Clock className="w-3.5 h-3.5 shrink-0" />
-      <span>
-        {t("profiler.expiry_file")} <strong className={isUrgent ? "text-[#9F2F2D]" : "text-ink"}>{filename}</strong>{" "}
-        {isUrgent
-          ? <span className="font-semibold">{t("profiler.expiry_urgent", { time: formatted })}</span>
-          : <span>{t("profiler.expiry_normal", { time: formatted })}</span>}
-      </span>
+    <div className="flex flex-wrap items-center justify-between gap-3 px-3.5 py-2.5 rounded-xl border border-border/70 bg-[#FBFBFA] text-xs text-muted">
+      {/* Expiry countdown */}
+      <div className="flex items-center gap-2">
+        <Clock className={`w-3.5 h-3.5 shrink-0 ${isUrgent ? "text-[#9F2F2D]" : "text-muted"}`} />
+        <span>
+          {t("profiler.expiry_file", "File")}{" "}
+          <strong className={isUrgent ? "text-[#9F2F2D]" : "text-ink"}>{filename}</strong>{" "}
+          {isUrgent ? (
+            <span className="font-semibold text-[#9F2F2D]">
+              {t("profiler.expiry_urgent", { time: formatted })}
+            </span>
+          ) : (
+            <span>{t("profiler.expiry_normal", { time: formatted })}</span>
+          )}
+        </span>
+      </div>
+
+      {/* Cached badge on the footer line */}
+      {isCached && (
+        <div className="flex items-center gap-1.5">
+          <span className="px-2 py-0.5 rounded-full border border-[#C8E0CB] bg-[#EAF2EB] text-[#1B4324] text-[11px] font-medium flex items-center gap-1">
+            <Zap className="w-3 h-3 text-forest" />
+            <span>{t("profiler.badge_cached", "Đã lưu đệm")}</span>
+          </span>
+        </div>
+      )}
     </div>
   );
 }
 
-// ── Main Component ─────────────────────────────────────────
 export default function Profiler({ pipelineMode, onComplete, onError }) {
   const fileInputRef = useRef(null);
   const navigate = useNavigate();
@@ -84,7 +107,10 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
   const { t, i18n } = useTranslation();
   const [aiLoading, setAiLoading] = useState(false);
   const [aiAnalyzed, setAiAnalyzed] = useState(false);
-  // Timestamp (ms) of when the file was uploaded — drives the 1-hour countdown
+  const [savedLang, setSavedLang] = useState(null);
+  const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const moreMenuRef = useRef(null);
+
   const [uploadedAt, setUploadedAt] = useState(
     () => fileSession.uploadedAt || null
   );
@@ -102,7 +128,18 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const debounceTimerRef = useRef(null);
 
-  // Load server persisted profiler context & shared AI usage (survives reload/logout within 24h)
+  // Close "..." dropdown menu when clicking outside
+  useEffect(() => {
+    const handleOutsideClick = (e) => {
+      if (moreMenuRef.current && !moreMenuRef.current.contains(e.target)) {
+        setShowMoreMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", handleOutsideClick);
+    return () => document.removeEventListener("mousedown", handleOutsideClick);
+  }, []);
+
+  // Load server persisted profiler context & shared AI usage
   useEffect(() => {
     if (!result?.file_hash) return;
 
@@ -115,6 +152,9 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
           }
           if (res.data.saved_at) {
             setSavedAt(res.data.saved_at);
+          }
+          if (res.data.lang) {
+            setSavedLang(res.data.lang);
           }
           if (res.data.semantic_context?.domain && res.data.semantic_context.domain !== "Chưa phân tích") {
             setAiAnalyzed(true);
@@ -157,7 +197,10 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
     }, 800);
   };
 
-  const handleSaveContext = async () => {
+  // One primary "Tiếp tục: Làm sạch →" button
+  const handleContinueClean = async () => {
+    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+
     if (result?.file_hash) {
       try {
         await saveProfilerState(result.file_hash, description, descriptionSource);
@@ -165,14 +208,9 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
           userContext: { description, purpose: contextPurpose, description_source: descriptionSource }
         });
       } catch (e) {
-        console.error(e);
+        console.error("Flush save profiler state error:", e);
       }
     }
-    if (pipelineMode && onComplete) onComplete();
-    else navigate("/dashboard/cleaner");
-  };
-
-  const handleSkipContext = () => {
     if (pipelineMode && onComplete) onComplete();
     else navigate("/dashboard/cleaner");
   };
@@ -196,12 +234,9 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
     }
   };
 
-  // ── Handlers ──────────────────────────────────────────────
-
   const handleFile = async (file, forceRefresh = false) => {
     if (!file) return;
 
-    // Gate: must be logged in to upload
     if (!user) {
       showToast(t("profiler.login_required"), "warning");
       navigate("/login", { state: { from: location } });
@@ -225,7 +260,7 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
 
     try {
       const res = await profileFile(file, forceRefresh);
-      setResult(res.data, true); // mark as fresh upload to reset countdown
+      setResult(res.data, true);
       
       showToast(forceRefresh ? t("profiler.toast_refreshed") : t("profiler.toast_analyzed"), "success");
     } catch (err) {
@@ -252,7 +287,6 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
   const handleInputChange = (e) => {
     const file = e.target.files?.[0];
     if (file) handleFile(file);
-    // Reset input để có thể upload cùng file lại
     e.target.value = "";
   };
 
@@ -276,6 +310,7 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
     setDescriptionSource("user");
     setSavedAt(null);
     setIsFromCache(false);
+    setSavedLang(null);
   };
 
   const handleAnalyzeAI = async (replace = true) => {
@@ -283,9 +318,10 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
     setAiLoading(true);
     setIsFromCache(false);
     try {
+      const currentLanguage = getCurrentLang();
       const res = await requestAIContext(
         result.file_hash,
-        getCurrentLang(),
+        currentLanguage,
         replace ? null : description,
         false
       );
@@ -295,6 +331,8 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
         semantic_context: data.semantic_context,
       });
       setAiAnalyzed(true);
+      setSavedLang(currentLanguage);
+
       if (replace) {
         setDescription(data.draft_summary || data.description || "");
         setDescriptionSource("ai_draft");
@@ -334,9 +372,10 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
     setAiLoading(true);
     setIsFromCache(false);
     try {
+      const currentLanguage = getCurrentLang();
       const res = await requestAIContext(
         result.file_hash,
-        getCurrentLang(),
+        currentLanguage,
         description,
         true
       );
@@ -346,6 +385,7 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
         semantic_context: data.semantic_context,
       });
       setAiAnalyzed(true);
+      setSavedLang(currentLanguage);
       setDescriptionSource("ai_edited");
       if (data.saved_at) {
         setSavedAt(data.saved_at);
@@ -410,9 +450,23 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
 
   const lang = getCurrentLang();
   const numberLocale = lang === "vi" ? "vi-VN" : "en-US";
-  const displayDomain = result?.semantic_context?.domain === "Chưa phân tích"
-    ? t("profiler.domain_not_analyzed")
-    : result?.semantic_context?.domain;
+  const displayDomain = result?.semantic_context?.domain
+    ? t(getDomainI18nKey(result.semantic_context.domain), { defaultValue: result.semantic_context.domain })
+    : "";
+
+  const handleDownloadReport = () => {
+    if (!result) return;
+    const dataStr =
+      "data:text/json;charset=utf-8," +
+      encodeURIComponent(JSON.stringify(result, null, 2));
+    const a = document.createElement("a");
+    a.setAttribute("href", dataStr);
+    a.setAttribute("download", `${result.filename.split(".")[0]}_report.json`);
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setShowMoreMenu(false);
+  };
 
   return (
     <div className="min-h-screen bg-[#FBFBFA]">
@@ -420,12 +474,13 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
         {/* ── Header ─────────────────────────────────────────────── */}
         <PageHeader
           title={t("profiler.title")}
-          subtitle={result
-            ? `${t("profiler.subtitle_with_result", {
-                cols: result.total_columns.toLocaleString(numberLocale),
-                rows: result.total_rows.toLocaleString(numberLocale),
-              })}${aiAnalyzed ? ` · ${displayDomain}` : ""}`
-            : t("profiler.subtitle_default")
+          subtitle={
+            result
+              ? `${t("profiler.subtitle_with_result", {
+                  cols: result.total_columns.toLocaleString(numberLocale),
+                  rows: result.total_rows.toLocaleString(numberLocale),
+                })}${aiAnalyzed && displayDomain ? ` · ${displayDomain}` : ""}`
+              : t("profiler.subtitle_default")
           }
           actions={
             <div className="flex flex-wrap items-center gap-2">
@@ -433,6 +488,7 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
 
               {!pipelineMode && !result && (
                 <button
+                  type="button"
                   onClick={() => navigate("/")}
                   className={`${BTN.secondary} flex items-center gap-1.5`}
                 >
@@ -440,45 +496,66 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
                 </button>
               )}
 
-              {/* Stats summary + Upload New File — shown when result is loaded */}
               {result && (
                 <>
+                  {/* Secondary button: Tải file khác */}
                   <button
+                    type="button"
                     id="profiler-reanalyze-btn"
                     onClick={handleReset}
-                    className={`${BTN.secondary} flex items-center gap-1.5 text-xs`}
+                    className={`${BTN.secondary} flex items-center gap-1.5 text-xs font-medium text-ink`}
                   >
-                    <RotateCcw size={13} /> {t("profiler.btn_upload_new")}
+                    <FileSpreadsheet size={13} className="text-muted" />
+                    <span>{t("profiler.btn_upload_new", "Tải file khác")}</span>
                   </button>
 
-                  {/* Cache badge + re-analyze — only when result came from cache */}
-                  {result.cached && (
-                    <div className="flex items-center gap-1.5">
-                      <span className="px-2 py-0.5 rounded-full border border-[#EAF2EB] bg-sage text-forest text-[10px] font-medium flex items-center gap-1">
-                        <Zap className="w-3 h-3" /> {t("profiler.badge_cached")}
-                      </span>
-                      <button
-                        onClick={() => handleFile(lastFile, true)}
-                        disabled={!lastFile}
-                        className="flex items-center gap-1 text-[10px] font-medium text-forest hover:text-ink underline transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        <RotateCw className="w-3 h-3" /> {t("profiler.btn_reanalyze")}
-                      </button>
-                    </div>
-                  )}
+                  {/* "..." menu: Re-read file (free) + Download report */}
+                  <div className="relative" ref={moreMenuRef}>
+                    <button
+                      type="button"
+                      onClick={() => setShowMoreMenu((prev) => !prev)}
+                      aria-label={t("profiler.action_menu_more", "Tùy chọn khác")}
+                      className={`${BTN.secondary} p-1.5 text-muted hover:text-ink`}
+                      title={t("profiler.action_menu_more", "Tùy chọn khác")}
+                    >
+                      <MoreHorizontal size={15} />
+                    </button>
 
-                  {/* divider */}
-                  <div className="w-px h-5 bg-border hidden sm:block" />
+                    {showMoreMenu && (
+                      <div className="absolute right-0 top-8 z-30 w-52 py-1 bg-white border border-border rounded-xl shadow-lg text-xs space-y-0.5 animate-in fade-in">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowMoreMenu(false);
+                            handleFile(lastFile, true);
+                          }}
+                          disabled={!lastFile}
+                          className="w-full text-left px-3 py-2 text-ink hover:bg-neutral-50 flex items-center gap-2 disabled:opacity-50"
+                        >
+                          <RotateCw size={13} className="text-forest" />
+                          <span>{t("profiler.btn_reanalyze_file_free", "Đọc lại file (miễn phí)")}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleDownloadReport}
+                          className="w-full text-left px-3 py-2 text-ink hover:bg-neutral-50 flex items-center gap-2"
+                        >
+                          <Download size={13} className="text-muted" />
+                          <span>{t("profiler.col_download_report", "Tải báo cáo JSON")}</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
 
-                  <button onClick={handleSkipContext} className={`${BTN.secondary} text-xs`}>
-                    {t("profiler.btn_skip")}
-                  </button>
+                  {/* Primary Button: Tiếp tục: Làm sạch → */}
                   <button
+                    type="button"
                     id="profiler-next-btn"
-                    onClick={handleSaveContext}
-                    className={`${BTN.primary} flex items-center gap-1.5 text-xs`}
+                    onClick={handleContinueClean}
+                    className={`${BTN.primary} flex items-center gap-1.5 text-xs font-semibold`}
                   >
-                    {pipelineMode ? t("profiler.btn_save_continue") : t("profiler.btn_save_clean")} <ArrowRight size={14} />
+                    <span>{t("profiler.btn_continue_clean", "Tiếp tục: Làm sạch")}</span>
+                    <ArrowRight size={14} />
                   </button>
                 </>
               )}
@@ -486,7 +563,7 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
           }
         />
 
-        {/* ── Upload zone (no result yet) ─────────────────────────── */}
+        {/* ── Upload zone ─────────────────────────────────────────── */}
         {!result && (
           <UploadZone
             isDragging={isDragging}
@@ -512,7 +589,7 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
         {/* ── Results ─────────────────────────────────────────────── */}
         {result && (
           <div className="space-y-4">
-            {/* 1. Column table — first thing visible */}
+            {/* 1. Column Table */}
             <ColumnTable
               result={result}
               overrides={overrides}
@@ -520,10 +597,7 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
               handleOverride={handleOverride}
             />
 
-            {/* 2. Auto-delete countdown — slim strip below the table */}
-            <ExpiryBanner uploadedAt={uploadedAt} filename={result.filename} />
-
-            {/* 3. Merged Description & Context panel */}
+            {/* 2. Merged Description & Context panel */}
             <MergedDescriptionBox
               fileHash={result.file_hash}
               description={description}
@@ -541,7 +615,15 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
               setContextPurpose={setContextPurpose}
               usage={aiUsage}
               isFromCache={isFromCache}
+              savedLang={savedLang}
               onUpgradeClick={() => setShowUpgradeModal(true)}
+            />
+
+            {/* 3. Calm Footer Line: Countdown + Cached badge */}
+            <ProfilerFooterLine
+              uploadedAt={uploadedAt}
+              filename={result.filename}
+              isCached={Boolean(result.cached)}
             />
           </div>
         )}
@@ -557,4 +639,3 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
     </div>
   );
 }
-
