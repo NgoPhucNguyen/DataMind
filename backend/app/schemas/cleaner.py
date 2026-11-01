@@ -200,7 +200,7 @@ class CleanDatasetResponse(BaseModel):
     """
     session_id: str                # UUID của clean session
     filename: str
-    clean_file_url: str            # Supabase Storage public/signed URL
+    clean_file_url: str | None = None          # Supabase Storage public/signed URL
     clean_report: DiffReport
     summary_for_module3: SummaryForModule3
     clean_mode: str                # "auto" | "manual"

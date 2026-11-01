@@ -810,60 +810,67 @@ async def confirm_clean(
     )
 
 #Need checking!
-def _upload_to_supabase(csv_bytes: bytes, original_filename: str, user_id: int) -> str:
-    """
-    Upload file CSV lên Supabase Storage (bucket: "datasets").
-    Nếu chưa có Supabase key → trả về URL giả (dev mode).
+def _safe_storage_name(name: str, max_len: int = 80) -> str:
+    """Tên an toàn cho key Supabase: bỏ dấu, chỉ giữ A-Z a-z 0-9 . _ -"""
+    import unicodedata
+    name = name.replace("đ", "d").replace("Đ", "D")
+    name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode()
+    name = re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("._")
+    return (name[:max_len] or "dataset")
 
-    Tương thích: supabase-py >= 2.0.0
-    Bucket type: Private (dùng signed URL 7 ngày) hoặc Public (dùng public URL).
+
+def _upload_to_supabase(csv_bytes: bytes, original_filename: str, user_id: int) -> str | None:
+    """
+    Upload CSV sạch lên Supabase Storage (bucket "datasets").
+    Key luôn là ASCII an toàn + hash nội dung để không ghi đè file khác cùng tên.
+    Lỗi upload KHÔNG chặn luồng chính: trả về None, người dùng vẫn sang Visualize được.
     """
     import os
     supabase_url = os.getenv("SUPABASE_URL")
     supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
+    stem = original_filename.rsplit(".", 1)[0]
+    content_hash = hashlib.md5(csv_bytes).hexdigest()[:8]
+    path = f"clean/{user_id}/{_safe_storage_name(stem)}_{content_hash}_clean.csv"
+
     if not supabase_url or not supabase_key:
         logger.warning("Supabase chưa cấu hình — dùng dev fallback URL.")
-        stem = original_filename.rsplit(".", 1)[0]
-        return f"https://dev-placeholder.local/clean/{user_id}/{stem}_clean.csv"
+        return f"https://dev-placeholder.local/{path}"
+
+    headers = {
+        "Authorization": f"Bearer {supabase_key}",
+        "apikey": supabase_key,
+    }
 
     try:
         import httpx
-        stem = original_filename.rsplit(".", 1)[0]
-        path = f"clean/{user_id}/{stem}_clean.csv"
-        
-        # 1. Upload file
-        upload_url = f"{supabase_url}/storage/v1/object/datasets/{path}"
-        headers = {
-            "Authorization": f"Bearer {supabase_key}",
-            "apikey": supabase_key,
-            "Content-Type": "text/csv",
-            "x-upsert": "true"
-        }
-        
-        with httpx.Client() as client:
-            resp = client.post(upload_url, headers=headers, content=csv_bytes)
+        with httpx.Client(timeout=30) as client:
+            resp = client.post(
+                f"{supabase_url}/storage/v1/object/datasets/{path}",
+                headers={**headers, "Content-Type": "text/csv", "x-upsert": "true"},
+                content=csv_bytes,
+            )
             resp.raise_for_status()
             logger.info("Supabase upload OK: path=%s", path)
 
-            # 2. Get Signed URL
-            sign_url = f"{supabase_url}/storage/v1/object/sign/datasets/{path}"
-            sign_resp = client.post(sign_url, headers=headers, json={"expiresIn": 604800})
-            
+            sign_resp = client.post(
+                f"{supabase_url}/storage/v1/object/sign/datasets/{path}",
+                headers=headers,
+                json={"expiresIn": 604800},
+            )
             if sign_resp.status_code == 200:
                 signed_path = sign_resp.json().get("signedURL")
                 if signed_path:
                     return f"{supabase_url}/storage/v1{signed_path}"
-                    
-            # Fallback public URL
-            return f"{supabase_url}/storage/v1/object/public/datasets/{path}"
+
+            logger.error("Supabase sign lỗi: status=%s body=%s",
+                         sign_resp.status_code, sign_resp.text[:300])
+            return None
 
     except Exception as e:
-        logger.error("Supabase upload lỗi: %s", e)
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Không thể lưu file lên storage: {str(e)[:200]}",
-        )
+        body = getattr(getattr(e, "response", None), "text", "")
+        logger.error("Supabase upload lỗi: path=%s err=%s body=%s", path, e, body[:300])
+        return None
 
 @router.delete(
     "/session/active",
