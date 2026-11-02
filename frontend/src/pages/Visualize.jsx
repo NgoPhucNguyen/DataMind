@@ -16,7 +16,8 @@ import PageHelpDocs from "../components/PageHelpDocs";
 import AnchorScatterPanel from "../components/charts/AnchorScatterPanel";
 import AIInsightsCard from "../components/charts/AIInsightsCard";
 import { getUser } from "../services/authService";
-import { profileFile } from "../services/profilerService";
+import { profileFile, getSessionStatus } from "../services/profilerService";
+import FileExpiredBanner from "../components/FileExpiredBanner";
 import { detectIssues, autoClean, confirmClean } from "../services/cleanerService";
 import PageHeader from "../components/PageHeader";
 import { BTN } from "../constants/ui";
@@ -467,7 +468,22 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
   const [isDirectUploading, setIsDirectUploading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [directSummary, setDirectSummary] = useState(null);
+  const [fileExpired, setFileExpired] = useState(false);
   const fileInputRef = useRef(null);
+
+  // Check session status on mount
+  useEffect(() => {
+    if (!fileSession.fileHash) return;
+    getSessionStatus(fileSession.fileHash)
+      .then((res) => {
+        if (!res.data.file_available) {
+          setFileExpired(true);
+        }
+      })
+      .catch((err) => {
+        console.warn("Visualize session status check failed:", err);
+      });
+  }, [fileSession.fileHash]);
 
   // Anchor state for Correlation Heatmap
   const [anchorPair, setAnchorPair] = useState(null);
@@ -583,7 +599,13 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
           else if (generated.distribution.length === 0 && generated.time.length > 0) setActiveTab("time");
 
         } catch (err) {
-          showToast(err.response?.data?.detail || t("visualize.toast_load_error"), "error");
+          const detail = err.response?.data?.detail;
+          const errCode = err.response?.data?.code || (typeof detail === "string" && detail.includes("ERR_SYS_CACHE_EXPIRED") ? "ERR_SYS_CACHE_EXPIRED" : "");
+          if (errCode === "ERR_SYS_CACHE_EXPIRED") {
+            setFileExpired(true);
+            return;
+          }
+          showToast(detail || t("visualize.toast_load_error"), "error");
         } finally {
           setLoading(false);
           isFetchingRef.current = false;
@@ -913,6 +935,17 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
               </div>
             }
           />
+
+          {fileExpired && (
+            <FileExpiredBanner
+              fileName={fileSession.fileName}
+              fileHash={fileSession.fileHash}
+              onReuploaded={() => {
+                setFileExpired(false);
+                lastFetchedKeyRef.current = null;
+              }}
+            />
+          )}
 
           {/* Capabilities Banner */}
           {fileSession.capabilities && (

@@ -15,7 +15,8 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation, Trans } from "react-i18next";
 import { useFileSession } from "../contexts/FileSessionContext";
 import { detectIssues, autoClean, confirmClean } from "../services/cleanerService";
-import { profileFile } from "../services/profilerService";
+import { profileFile, getSessionStatus } from "../services/profilerService";
+import FileExpiredBanner from "../components/FileExpiredBanner";
 import { useToast } from "../contexts/ToastContext";
 import { translateError, getCurrentLang } from "../i18n";
 import { ArrowRight, ArrowLeft, Info, CheckCircle, AlertTriangle, Upload, RefreshCw, Eye, MousePointerClick, ShieldCheck, Save, Clock, FolderUp, Download, Lock, Zap, PenTool, Compass, Wand2, ChevronLeft, ChevronRight, Check, HelpCircle } from "lucide-react";
@@ -792,6 +793,21 @@ export default function Cleaner({ pipelineMode, onComplete, onError }) {
   const [error, setError] = useState(null);
   const [confirming, setConfirming] = useState(false);
   const [isSkip, setIsSkip] = useState(false);
+  const [fileExpired, setFileExpired] = useState(false);
+
+  // Check session-status on mount
+  useEffect(() => {
+    if (!fileHash) return;
+    getSessionStatus(fileHash)
+      .then((res) => {
+        if (!res.data.file_available) {
+          setFileExpired(true);
+        }
+      })
+      .catch((err) => {
+        console.warn("Cleaner session-status check failed:", err);
+      });
+  }, [fileHash]);
 
   // Filters state
   const [filterOnlyErrorCols, setFilterOnlyErrorCols] = useState(false);
@@ -879,6 +895,13 @@ export default function Cleaner({ pipelineMode, onComplete, onError }) {
     } catch (err) {
       if (err.name === "CanceledError" || err.code === "ERR_CANCELED") return;
       const detail = err?.response?.data?.detail;
+      const errCode = err?.response?.data?.code || (typeof detail === "string" && detail.includes("ERR_SYS_CACHE_EXPIRED") ? "ERR_SYS_CACHE_EXPIRED" : "");
+      if (errCode === "ERR_SYS_CACHE_EXPIRED") {
+        setFileExpired(true);
+        setError(null);
+        setStep("previewing_issues");
+        return;
+      }
       const msg = typeof detail === "string" ? translateError(detail, detail) : t("cleaner.toast_detect_failed");
       setError(msg);
       showToast(msg, "error");
@@ -929,6 +952,13 @@ export default function Cleaner({ pipelineMode, onComplete, onError }) {
     } catch (err) {
       if (err.name === "CanceledError" || err.code === "ERR_CANCELED") return;
       const detail = err?.response?.data?.detail;
+      const errCode = err?.response?.data?.code || (typeof detail === "string" && detail.includes("ERR_SYS_CACHE_EXPIRED") ? "ERR_SYS_CACHE_EXPIRED" : "");
+      if (errCode === "ERR_SYS_CACHE_EXPIRED") {
+        setFileExpired(true);
+        setError(null);
+        setStep("previewing_issues");
+        return;
+      }
       const msg = typeof detail === "string" ? translateError(detail, detail) : t("cleaner.toast_auto_clean_failed");
       setError(msg);
       showToast(msg, "error");
@@ -978,6 +1008,12 @@ export default function Cleaner({ pipelineMode, onComplete, onError }) {
     } catch (err) {
       setIsSkip(false);
       const detail = err?.response?.data?.detail;
+      const errCode = err?.response?.data?.code || (typeof detail === "string" && detail.includes("ERR_SYS_CACHE_EXPIRED") ? "ERR_SYS_CACHE_EXPIRED" : "");
+      if (errCode === "ERR_SYS_CACHE_EXPIRED") {
+        setFileExpired(true);
+        setError(null);
+        return;
+      }
       const msg = typeof detail === "string" ? translateError(detail, detail) : t("cleaner.toast_confirm_failed");
       setError(msg);
       showToast(msg, "error");
@@ -1103,6 +1139,17 @@ export default function Cleaner({ pipelineMode, onComplete, onError }) {
         />
 
         {/* Persistent Navigation Bar (after upload) */}
+        {fileExpired && (
+          <FileExpiredBanner
+            fileName={fileName}
+            fileHash={fileHash}
+            onReuploaded={() => {
+              setFileExpired(false);
+              runDetection();
+            }}
+          />
+        )}
+
         {fileHash && step !== "detecting" && (
           <div className="mb-4 bg-white border border-border rounded-xl px-4 py-2.5 flex items-center justify-between gap-3 shadow-sm">
             <div>

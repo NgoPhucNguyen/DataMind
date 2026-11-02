@@ -21,6 +21,7 @@ class ColumnProfile(BaseModel):
     unnamed_warning: str | None = None
     semantic_type: str | None = None
     semantic_confidence: float | None = None
+    detection_reason: dict | None = None
 
 
 class SemanticContext(BaseModel):
@@ -47,3 +48,4 @@ class ProfileResponse(BaseModel):
     semantic_context: SemanticContext
     cached: bool            # True nếu kết quả lấy từ Redis cache
     is_first_upload: bool = False
+    file_expires_at: str | None = None  # ISO 8601 UTC timestamp khi file bytes trong Redis hết hạn

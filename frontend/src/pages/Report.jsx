@@ -22,7 +22,8 @@ import {
 } from "lucide-react";
 import { PAGE, BTN } from "../constants/ui";
 import api from "../services/axiosClient";
-import { getAIUsage } from "../services/profilerService";
+import { getAIUsage, getSessionStatus } from "../services/profilerService";
+import FileExpiredBanner from "../components/FileExpiredBanner";
 import UpgradeModal from "../components/UpgradeModal";
 import AIUsageBadge from "../components/AIUsageBadge";
 import {
@@ -67,6 +68,21 @@ export default function Report({ pipelineMode, onComplete }) {
   // Usage & Upgrade
   const [aiUsage, setAiUsage] = useState(null);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [fileExpired, setFileExpired] = useState(false);
+
+  // Check session status on mount
+  useEffect(() => {
+    if (!fileSession.fileHash) return;
+    getSessionStatus(fileSession.fileHash)
+      .then((res) => {
+        if (!res.data.file_available) {
+          setFileExpired(true);
+        }
+      })
+      .catch((err) => {
+        console.warn("Report session status check failed:", err);
+      });
+  }, [fileSession.fileHash]);
 
   // 1. Loading state initialization
   // Start loading only if there's a fileHash to fetch; otherwise false
@@ -555,6 +571,16 @@ export default function Report({ pipelineMode, onComplete }) {
             </button>
           </div>
         </div>
+
+        {fileExpired && (
+          <FileExpiredBanner
+            fileName={fileName}
+            fileHash={fileHash}
+            onReuploaded={() => {
+              setFileExpired(false);
+            }}
+          />
+        )}
 
         {/* Document Container */}
         <div

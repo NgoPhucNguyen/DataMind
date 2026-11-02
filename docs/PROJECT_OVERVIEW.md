@@ -6,7 +6,7 @@ Current infra constraints (based on Render free tier, Supabase free, Upstash fre
 - **Row Limit**: 50,000 rows maximum
 - **RAM Constraint**: 512MB on Render (limits Pandas processing)
 - **TTL (Time to Live)**:
-  - `filebytes:{file_hash}` and `filebytes:{file_hash}_clean`: 1 hour
+  - `filebytes:{file_hash}` and `filebytes:{file_hash}_clean`: 5 hours
   - `profile:{file_hash}`: 24 hours
 - **Supabase Storage**: 7-day signed URL expiry (clean file URL invalidates after 7 days)
 - **Cleaner Limits**: Minimum 10 rows required post-clean. Requires at least 1 numeric column.

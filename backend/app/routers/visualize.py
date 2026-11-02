@@ -130,7 +130,7 @@ async def scatter_data(
     if cached is None:
         raise HTTPException(
             status_code=status.HTTP_410_GONE,
-            detail="Phiên làm việc đã hết hạn (cache TTL 1 giờ). Vui lòng tải lại file."
+            detail="Phiên làm việc đã hết hạn (cache TTL 5 giờ). Vui lòng tải lại file."
         )
     
     file_bytes = io.BytesIO(cached["bytes"])
@@ -185,7 +185,7 @@ async def explain_chart(
     if not file_hash:
         cached_file = cache.get_file_bytes(current_user["user_id"], body.session_id)
         if cached_file:
-            file_hash = "v4:" + hashlib.md5(cached_file["bytes"]).hexdigest()
+            file_hash = "v5:" + hashlib.md5(cached_file["bytes"]).hexdigest()
 
     if not file_hash:
         raise DataMindException(
@@ -409,7 +409,7 @@ async def save_explain(
     
     session_meta = cache.get_session_metadata(current_user["user_id"], body.session_id) or {}
     provenance_hash = session_meta.get("file_hash")
-    file_hash = provenance_hash or ("v4:" + hashlib.md5(cached_file["bytes"]).hexdigest())
+    file_hash = provenance_hash or ("v5:" + hashlib.md5(cached_file["bytes"]).hexdigest())
     
     sorted_x, sorted_y = body.col_x, body.col_y
     if body.col_y:
@@ -454,7 +454,7 @@ async def get_batch_explain(
         return {"explanations": {}}
     
     import hashlib
-    file_hash = "v4:" + hashlib.md5(cached_file["bytes"]).hexdigest()
+    file_hash = "v5:" + hashlib.md5(cached_file["bytes"]).hexdigest()
     
     results = {}
     for item in body.charts:

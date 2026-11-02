@@ -59,6 +59,13 @@ export const saveProfilerState = (fileHash, description, descriptionSource) => {
 };
 
 /**
+ * Kiểm tra trạng thái khả dụng của file và cache (rẻ, không gọi AI).
+ */
+export const getSessionStatus = (fileHash) => {
+  return api.get(`/files/session-status?file_hash=${encodeURIComponent(fileHash)}`);
+};
+
+/**
  * Lấy hạn mức và thống kê sử dụng AI dùng chung.
  */
 export const getAIUsage = () => {

@@ -180,7 +180,7 @@ async def profile_file(
         )
 
     # 3. Tính hash để kiểm tra cache
-    CACHE_VERSION = "v4"
+    CACHE_VERSION = "v5"
     file_hash = f"{CACHE_VERSION}:{hashlib.md5(content).hexdigest()}"
 
     # 4. Kiểm tra Redis cache
@@ -192,14 +192,23 @@ async def profile_file(
         cached_data = cache.get_profile(current_user["user_id"], file_hash)
         if cached_data:
             logger.info("Cache HIT: file_hash=%s user=%s", file_hash, current_user["user_id"])
-            # FIX: Mặc dù profile cache hit (TTL 24h), file bytes có thể đã hết hạn (TTL 1h).
+            # FIX: Mặc dù profile cache hit (TTL 24h), file bytes có thể đã hết hạn (TTL 5h).
             # Ta cần đảm bảo file bytes được lưu lại vào cache.
             cache.set_file_bytes(current_user["user_id"], file_hash, content, file.filename, ext)
             cached_data.pop("is_first_upload", None)
+            
+            # Tính file_expires_at thực tế từ Redis TTL
+            ttl_sec = cache.get_file_bytes_ttl(current_user["user_id"], file_hash) or cache._FILE_BYTES_TTL
+            expires_at_iso = datetime.fromtimestamp(
+                datetime.now(timezone.utc).timestamp() + ttl_sec, tz=timezone.utc
+            ).isoformat()
+            
             return ProfileResponse(
-      **cached_data, cached=True,
-      is_first_upload=_mark_first_upload(db, current_user["user_id"]),
-  )
+                **cached_data,
+                cached=True,
+                file_expires_at=expires_at_iso,
+                is_first_upload=_mark_first_upload(db, current_user["user_id"]),
+            )
     # 5. Parse DataFrame từ memory buffer
     file_bytes = io.BytesIO(content)
     df = _read_dataframe(file_bytes, ext)
@@ -240,7 +249,7 @@ async def profile_file(
         semantic = SemanticContext(
             domain='Chưa phân tích',
             confidence=0.0,
-            reasoning="Nhấn nút 'Phân tích AI' để hệ thống nhận diện lĩnh vực dữ liệu.",
+            reasoning="",
             )
         for col in columns:
             col.semantic_type = 'GENERAL_TEXT'
@@ -263,8 +272,14 @@ async def profile_file(
     cache_data.pop("is_first_upload", None) 
     cache.set_profile(current_user["user_id"], file_hash, cache_data)
 
-    # 10. Lưu file bytes vào Redis để Cleaner endpoints tái dùng (TTL 1h)
+    # 10. Lưu file bytes vào Redis để Cleaner endpoints tái dùng (TTL 5h)
     cache.set_file_bytes(current_user["user_id"], file_hash, content, file.filename, ext)
+
+    ttl_sec = cache.get_file_bytes_ttl(current_user["user_id"], file_hash) or cache._FILE_BYTES_TTL
+    expires_at_iso = datetime.fromtimestamp(
+        datetime.now(timezone.utc).timestamp() + ttl_sec, tz=timezone.utc
+    ).isoformat()
+    result.file_expires_at = expires_at_iso
 
     # Save profiler report section
     cache.set_report_section(current_user["user_id"], file_hash, "profiler", {
@@ -393,6 +408,39 @@ async def analyze_ai_context(
 # ─────────────────────────────────────────────────────────────────────────────
 # Endpoints: Profiler State Persistence (Không gọi Gemini)
 # ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/session-status", summary="Kiểm tra trạng thái khả dụng của file và cache (rẻ, không gọi AI)")
+async def get_session_status(
+    file_hash: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Kiểm tra xem file bytes, profile data và context còn tồn tại trong Redis hay không.
+    Trả về thời gian hết hạn file_expires_at thực tế nếu file còn hiệu lực.
+    """
+    user_id = current_user["user_id"]
+    ttl_sec = cache.get_file_bytes_ttl(user_id, file_hash)
+    file_available = ttl_sec is not None and ttl_sec > 0
+    
+    file_expires_at = None
+    if file_available and ttl_sec:
+        file_expires_at = datetime.fromtimestamp(
+            datetime.now(timezone.utc).timestamp() + ttl_sec, tz=timezone.utc
+        ).isoformat()
+
+    profile_data = cache.get_profile(user_id, file_hash)
+    profile_available = profile_data is not None
+
+    ctx = cache.get_profiler_context(user_id, file_hash)
+    context_available = ctx is not None
+
+    return {
+        "file_available": file_available,
+        "file_expires_at": file_expires_at,
+        "profile_available": profile_available,
+        "context_available": context_available,
+    }
+
 
 @router.get("/profiler-state", summary="Lấy trạng thái Profiler đã lưu (không gọi AI)")
 async def get_profiler_state(

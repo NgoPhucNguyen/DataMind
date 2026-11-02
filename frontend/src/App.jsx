@@ -114,6 +114,8 @@ function AppRoutes() {
         <Route path="/register" element={<GuestOnly><Register /></GuestOnly>} />
         <Route path="/pricing" element={<Pricing />} />
         <Route path="/docs" element={<Docs />} />
+        <Route path="/docs/:module" element={<Docs />} />
+        <Route path="/docs/:module/:topic" element={<Docs />} />
       </Route>
 
       {/* ── Dashboard pages with Sidebar (single RequireAuth wrapper) ── */}

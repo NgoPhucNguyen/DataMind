@@ -5,7 +5,7 @@ Wrapper Upstash Redis cho việc cache ProfileResponse JSON và raw file bytes.
 
 Keys:
   - "profile:{file_hash}"      → JSON string, TTL 24h
-  - "filebytes:{file_hash}"    → base64-encoded bytes, TTL 1h
+  - "filebytes:{file_hash}"    → base64-encoded bytes, TTL 5h
 
 Nếu Redis không kết nối được → log warning và bỏ qua cache (không crash request).
 """
@@ -19,7 +19,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 _DEFAULT_TTL = 86400       # 24 giờ
-_FILE_BYTES_TTL = 3600     # 1 giờ (dùng cho session làm sạch và preview)
+_FILE_BYTES_TTL = 18000     # 5 giờ (dùng cho session làm sạch và preview)
 
 
 def _get_client():
@@ -118,7 +118,7 @@ def set_profile(user_id: int,file_hash: str, data: dict[str, Any], ttl: int = _D
 def set_file_bytes(user_id: int,file_hash: str, content: bytes, filename: str, ext: str) -> None:
     """
     Lưu raw file bytes vào Redis (base64-encoded) kèm metadata.
-    TTL 1 giờ — đủ dùng cho session làm sạch.
+    TTL 5 giờ — đủ dùng cho session làm sạch.
     Nếu Redis lỗi → bỏ qua, không crash.
     """
     client = _get_client()
@@ -158,17 +158,35 @@ def get_file_bytes(user_id: int,file_hash: str) -> dict | None:
         logger.warning("Redis GET file bytes lỗi: %s", e)
         return None
 
+
+def get_file_bytes_ttl(user_id: int, file_hash: str) -> int | None:
+    """
+    Lấy thời gian sống còn lại (TTL tính bằng giây) của file bytes trong Redis.
+    Trả về số nguyên giây (> 0), hoặc None nếu key không tồn tại / hết hạn (-2) / Redis lỗi.
+    """
+    client = _get_client()
+    if client is None:
+        return None
+    try:
+        ttl = client.ttl(f"filebytes:{user_id, file_hash}")
+        if ttl is not None and ttl > 0:
+            return int(ttl)
+        return None
+    except Exception as e:
+        logger.warning("Redis TTL file bytes lỗi: %s", e)
+        return None
+
 def set_user_context(user_id: int,session_id: str, description: str, purpose: str) -> None:
     """
     Lưu context của user (description, purpose) vào Redis.
-    TTL 1 giờ.
+    TTL 5 giờ.
     """
     client = _get_client()
     if client is None:
         return
     try:
         payload = json.dumps({"description": description, "purpose": purpose})
-        client.set(f"user_context:{user_id, session_id}", payload, ex=3600)
+        client.set(f"user_context:{user_id, session_id}", payload, ex=_FILE_BYTES_TTL)
     except Exception as e:
         logger.warning("Redis SET user context lỗi: %s", e)
 
@@ -191,7 +209,7 @@ def get_user_context(user_id: int, session_id: str) -> dict | None:
 def set_session_metadata(user_id: int,session_id: str, metadata: dict[str, Any], ttl: int = _FILE_BYTES_TTL) -> None:
     """
     Lưu metadata của session vào Redis (ví dụ: schema, loại cột lấy từ Profiler).
-    TTL mặc định 1 giờ.
+    TTL mặc định 5 giờ.
     """
     client = _get_client()
     if client is None:

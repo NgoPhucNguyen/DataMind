@@ -17,7 +17,8 @@ const defaultSession = {
   capabilities: null,
   warnings: [],
   userContext: null,
-  uploadedAt: null,  // epoch ms — used for the 1-hour file expiry countdown
+  uploadedAt: null,  // epoch ms
+  fileExpiresAt: null, // ISO string from backend (Redis actual expiration)
   chartExplanations: {},  // { [chartId]: { content, source, lang } }
 };
 

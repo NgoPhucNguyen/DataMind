@@ -176,7 +176,15 @@ export const ColumnTable = ({
                   </li>
                   <li>
                     <strong className="text-ink">{t("profiler.type_categorical", "Danh mục")}:</strong>{" "}
-                    {t("profiler.popover_rule_categorical", "Điền ô trống bằng giá trị phổ biến nhất (mode).")}
+                    {t("profiler.popover_rule_categorical", "Điền ô trống bằng nhãn 'Không xác định'.")}
+                  </li>
+                  <li>
+                    <strong className="text-ink">{t("profiler.type_multiple_choice", "Nhiều lựa chọn")}:</strong>{" "}
+                    {t("profiler.popover_rule_multiple_choice", "Điền ô trống bằng nhãn 'Không xác định'.")}
+                  </li>
+                  <li>
+                    <strong className="text-ink">{t("profiler.type_datetime", "Thời gian")}:</strong>{" "}
+                    {t("profiler.popover_rule_datetime", "Giữ nguyên ô trống & chuyển đổi sang datetime.")}
                   </li>
                   <li>
                     <strong className="text-ink">{t("profiler.type_text", "Văn bản")}:</strong>{" "}

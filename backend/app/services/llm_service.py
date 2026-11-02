@@ -25,7 +25,7 @@ _FALLBACK_CONTEXT = {
     "column_semantics": {}
 }
 
-_GEMINI_MODEL = os.getenv("GEMINI_MODEL")
+# _GEMINI_MODEL = os.getenv("GEMINI_MODEL")
 _LLM_TIMEOUT_SECONDS = 15
 
 @retry(
@@ -35,8 +35,8 @@ _LLM_TIMEOUT_SECONDS = 15
 )
 
 async def _call_gemini_with_retry(client, prompt):
-    # Chọn model từ env, nếu lỗi 503 sẽ thử lại với model đó hoặc model dự phòng
-    model_name = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+    # Chọn model từ env, nếu không có sẽ lấy theo cấu hình mặc định từ ai_client
+    model_name = os.getenv("GEMINI_MODEL") or "gemini-2.0-flash"
     return await asyncio.get_event_loop().run_in_executor(
         None,
         lambda: client.models.generate_content(

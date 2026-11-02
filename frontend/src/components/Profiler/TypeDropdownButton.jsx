@@ -125,7 +125,9 @@ export function TypeDropdownButton({
           <span className="font-medium text-[#B45309] bg-[#FEF6E6] px-1.5 py-0.5 rounded border border-[#FDE68A]/60">
             {t("profiler.overridden_from", {
               original: t(`profiler.type_${detectedType}`, { defaultValue: detectedType }),
-              defaultValue: `Đã đổi từ ${detectedType}`,
+              defaultValue: t("profiler.overridden_from", {
+                original: t(`profiler.type_${detectedType}`, { defaultValue: detectedType }),
+              }),
             })}
           </span>
           <button

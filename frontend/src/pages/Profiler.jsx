@@ -8,7 +8,9 @@ import {
   getProfilerState,
   saveProfilerState,
   getAIUsage,
+  getSessionStatus,
 } from "../services/profilerService";
+import FileExpiredBanner from "../components/FileExpiredBanner";
 import { useToast } from "../contexts/ToastContext";
 import { useTranslation } from "react-i18next";
 import { getCurrentLang, translateError } from "../i18n";
@@ -36,10 +38,16 @@ import MergedDescriptionBox from "../components/Profiler/MergedDescriptionBox";
 import UpgradeModal from "../components/UpgradeModal";
 
 // ── Calm Footer Strip ── contains Cached status & Countdown ──
-const SESSION_TTL_MS = 3600 * 1000;
+const SESSION_TTL_MS = 18000 * 1000;
 
-function ProfilerFooterLine({ uploadedAt, filename, isCached }) {
+function ProfilerFooterLine({ uploadedAt, filename, isCached, fileExpiresAt }) {
   const [secondsLeft, setSecondsLeft] = useState(() => {
+    if (fileExpiresAt) {
+      const expMs = new Date(fileExpiresAt).getTime();
+      if (!isNaN(expMs)) {
+        return Math.max(0, Math.floor((expMs - Date.now()) / 1000));
+      }
+    }
     if (!uploadedAt) return SESSION_TTL_MS / 1000;
     return Math.max(0, Math.floor((SESSION_TTL_MS - (Date.now() - uploadedAt)) / 1000));
   });
@@ -47,29 +55,39 @@ function ProfilerFooterLine({ uploadedAt, filename, isCached }) {
 
   useEffect(() => {
     const tick = () => {
+      if (fileExpiresAt) {
+        const expMs = new Date(fileExpiresAt).getTime();
+        if (!isNaN(expMs)) {
+          setSecondsLeft(Math.max(0, Math.floor((expMs - Date.now()) / 1000)));
+          return;
+        }
+      }
       const ref = uploadedAt || Date.now();
       setSecondsLeft(Math.max(0, Math.floor((SESSION_TTL_MS - (Date.now() - ref)) / 1000)));
     };
     tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
-  }, [uploadedAt]);
+  }, [uploadedAt, fileExpiresAt]);
 
   const h = Math.floor(secondsLeft / 3600);
   const m = Math.floor((secondsLeft % 3600) / 60);
   const s = secondsLeft % 60;
   const formatted = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-  const isUrgent = secondsLeft > 0 && secondsLeft < 300;
+  const isRed = secondsLeft > 0 && secondsLeft < 300;
+  const isAmber = secondsLeft >= 300 && secondsLeft < 1800;
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 px-3.5 py-2.5 rounded-xl border border-border/70 bg-[#FBFBFA] text-xs text-muted">
+    <div className={`flex flex-wrap items-center justify-between gap-3 px-3.5 py-2.5 rounded-xl border transition-colors text-xs ${
+      isRed ? "bg-[#FDEBEC] border-[#f5c6cb] text-[#9F2F2D]" : isAmber ? "bg-amber-50/70 border-amber-200 text-amber-800" : "bg-[#FBFBFA] border-border/70 text-muted"
+    }`}>
       {/* Expiry countdown */}
       <div className="flex items-center gap-2">
-        <Clock className={`w-3.5 h-3.5 shrink-0 ${isUrgent ? "text-[#9F2F2D]" : "text-muted"}`} />
+        <Clock className={`w-3.5 h-3.5 shrink-0 ${isRed ? "text-[#9F2F2D]" : isAmber ? "text-amber-600" : "text-muted"}`} />
         <span>
           {t("profiler.expiry_file", "File")}{" "}
-          <strong className={isUrgent ? "text-[#9F2F2D]" : "text-ink"}>{filename}</strong>{" "}
-          {isUrgent ? (
+          <strong className={isRed ? "text-[#9F2F2D]" : isAmber ? "text-amber-900" : "text-ink"}>{filename}</strong>{" "}
+          {isRed ? (
             <span className="font-semibold text-[#9F2F2D]">
               {t("profiler.expiry_urgent", { time: formatted })}
             </span>
@@ -100,9 +118,28 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
   const { user } = useAuth();
   const { fileSession, updateFileSession, clearFileSession } = useFileSession();
 
-  const [isDragging, setIsDragging] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
+  const [fileExpired, setFileExpired] = useState(false);
+  const [fileExpiresAt, setFileExpiresAt] = useState(fileSession.fileExpiresAt || null);
+
+  // Check session-status on mount if fileSession exists
+  useEffect(() => {
+    if (!fileSession.fileHash) {
+      setFileExpired(false);
+      return;
+    }
+    getSessionStatus(fileSession.fileHash)
+      .then((res) => {
+        const data = res.data;
+        setFileExpired(!data.file_available);
+        if (data.file_expires_at) {
+          setFileExpiresAt(data.file_expires_at);
+          updateFileSession({ fileExpiresAt: data.file_expires_at });
+        }
+      })
+      .catch((err) => {
+        console.warn("Failed to check session status:", err);
+      });
+  }, [fileSession.fileHash]);
   const [lastFile, setLastFile] = useState(null);
   const { t, i18n } = useTranslation();
   const [aiLoading, setAiLoading] = useState(false);
@@ -222,7 +259,16 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
     } else {
       const ts = isNewUpload ? Date.now() : (fileSession.uploadedAt || Date.now());
       setUploadedAt(ts);
-      updateFileSession({ profileData: data, fileHash: data.file_hash, fileName: data.filename, uploadedAt: ts });
+      const expiresAt = data.file_expires_at || fileSession.fileExpiresAt || null;
+      if (expiresAt) setFileExpiresAt(expiresAt);
+      setFileExpired(false);
+      updateFileSession({
+        profileData: data,
+        fileHash: data.file_hash,
+        fileName: data.filename,
+        uploadedAt: ts,
+        fileExpiresAt: expiresAt,
+      });
     }
   };
 
@@ -575,6 +621,18 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
           />
         )}
 
+        {/* ── File Expired Calm Amber Banner ──────────────────────── */}
+        {fileExpired && result && (
+          <FileExpiredBanner
+            fileName={result.filename || fileSession.fileName}
+            fileHash={result.file_hash || fileSession.fileHash}
+            onReuploaded={(newProfile) => {
+              setResult(newProfile, true);
+              setFileExpired(false);
+            }}
+          />
+        )}
+
         {/* ── Error ───────────────────────────────────────────────── */}
         {error && (
           <div className="mt-4 px-4 py-3 rounded-lg bg-[#FDEBEC] text-[#9F2F2D] text-sm border border-[#f5c6cb] flex items-start gap-2">
@@ -624,6 +682,7 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
               uploadedAt={uploadedAt}
               filename={result.filename}
               isCached={Boolean(result.cached)}
+              fileExpiresAt={fileExpiresAt || result.file_expires_at}
             />
           </div>
         )}
