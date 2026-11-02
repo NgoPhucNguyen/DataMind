@@ -8,6 +8,7 @@ File KHÔNG ghi vào disk. Đọc từ memory buffer (io.BytesIO).
 
 import io
 import re
+import os
 import hashlib
 import logging
 import uuid
@@ -28,6 +29,7 @@ from app.services.ai_usage_service import (
 )
 from app.core import cache
 from app.core.errors import DataMindException, ErrorSeverity
+from app.core.ai_client import get_dev_provider
 from app.schemas.files import ProfileResponse, SemanticContext, ColumnProfile
 from app.schemas.cleaner import (
     IssueDetectRequest, IssueReport,
@@ -372,7 +374,7 @@ async def analyze_ai_context(
         current_user["user_id"],
     )
 
-    return {
+    res = {
         "semantic_context": profile_data["semantic_context"],
         "column_semantics": column_semantics,
         "draft_summary": draft_summary,
@@ -381,6 +383,11 @@ async def analyze_ai_context(
         "saved_at": now_saved_at,
         "usage": usage_summary,
     }
+    dev_prov = get_dev_provider()
+    if dev_prov:
+        res["provider"] = dev_prov
+
+    return res
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -598,6 +605,9 @@ async def auto_clean(
     )
     import math
     preview_df = cleaned_df.head(500).copy()
+    # Capture preview labels BEFORE reset_index (original index labels)
+    preview_labels = list(preview_df.index)
+
     preview_df = preview_df.replace({float('nan'): None, pd.NaT: None})
     for col in preview_df.columns:
         if pd.api.types.is_datetime64_any_dtype(preview_df[col]):
@@ -611,10 +621,24 @@ async def auto_clean(
     if profile_data:
         for col in profile_data.get("columns", []):
             column_semantics[col.get("name")] = col.get("semantic_type", "GENERAL_TEXT")
-    
+
     # Chỉ tính lỗi trên preview_df để hiển thị cho nhẹ, hoặc tính trên cleaned_df nếu muốn đầy đủ
     # Chú ý: Auto-clean không chủ động sửa semantic error nên ta báo cáo lỗi trên preview_df
     error_cells = cleaner_service._get_error_cells(preview_df, body.overridden_types, column_semantics)
+
+    # Compute cell-level diff and removed rows
+    changed_cells, changed_truncated = cleaner_service.compute_changed_cells(
+        original_df=df,
+        cleaned_df=cleaned_df,
+        preview_labels=preview_labels,
+        edited_keys=set(),
+        cap=2000,
+    )
+    removed_rows = cleaner_service.compute_removed_rows(
+        original_df=df,
+        cleaned_df=cleaned_df,
+        window_size=500,
+    )
 
     return AutoCleanResponse(
         file_hash=body.file_hash,
@@ -622,6 +646,9 @@ async def auto_clean(
         validation=validation_res,
         preview_data=preview_df.to_dict(orient="records"),
         error_cells=error_cells,
+        changed_cells=changed_cells,
+        removed_rows=removed_rows,
+        changed_truncated=changed_truncated,
     )
 
 
@@ -654,27 +681,58 @@ async def manual_clean_preview(
         # Lấy 100 dòng đầu tiên giữ nguyên thứ tự gốc (tương tự như detect_issues)
         # để tránh việc row nhảy vị trí liên tục khi user edit (Smart Preview cũ dùng nan_mask gây lộn xộn index)
         preview_df = cleaned_df.head(100).copy()
-        
+        # Capture labels BEFORE reset_index
+        preview_labels = list(preview_df.index)
+
         profile_data = cache.get_profile(current_user["user_id"], body.file_hash)
         column_semantics = {}
         if profile_data:
             for col in profile_data.get("columns", []):
                 column_semantics[col.get("name")] = col.get("semantic_type", "GENERAL_TEXT")
-        
+
         # Phân tích lỗi trên preview_df (giữ nguyên original index)
         error_cells = cleaner_service._get_error_cells(preview_df, {}, column_semantics)
-        
+
+        # Build edited_keys from BATCH_EDIT_CELLS actions
+        edited_keys: set = set()
+        for act in body.actions:
+            act_type = getattr(act, "action_type", None) or (act.get("action_type") if isinstance(act, dict) else None)
+            if act_type == "BATCH_EDIT_CELLS":
+                params = getattr(act, "params", {}) or (act.get("params", {}) if isinstance(act, dict) else {})
+                for edit in params.get("edits", []):
+                    r_id = edit.get("row_id")
+                    c_name = edit.get("column")
+                    if r_id is not None and c_name is not None:
+                        edited_keys.add((int(r_id), str(c_name)))
+
+        # Compute cell-level diff
+        changed_cells, changed_truncated = cleaner_service.compute_changed_cells(
+            original_df=df,
+            cleaned_df=cleaned_df,
+            preview_labels=preview_labels,
+            edited_keys=edited_keys,
+            cap=2000,
+        )
+        removed_rows = cleaner_service.compute_removed_rows(
+            original_df=df,
+            cleaned_df=cleaned_df,
+            window_size=100,
+        )
+
         preview_df = preview_df.replace({float('nan'): None, pd.NaT: None})
         for col in preview_df.columns:
             if pd.api.types.is_datetime64_any_dtype(preview_df[col]):
                 preview_df[col] = preview_df[col].dt.strftime('%Y-%m-%d %H:%M:%S')
-                
+
         # Lưu index gốc thành original_index
         preview_df = preview_df.reset_index(names="original_index")
-                
+
         return {
             "preview_data": preview_df.to_dict(orient="records"),
-            "error_cells": error_cells
+            "error_cells": error_cells,
+            "changed_cells": changed_cells,
+            "removed_rows": removed_rows,
+            "changed_truncated": changed_truncated,
         }
         
     except ValueError as ve:

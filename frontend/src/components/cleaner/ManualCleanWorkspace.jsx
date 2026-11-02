@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Plus, Trash2, CheckCircle2, ChevronRight, PlayCircle, ArrowLeft, MousePointerClick, ChevronDown, Edit2, AlignLeft, Save, X, AlertTriangle, Check, EyeOff } from "lucide-react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { Plus, Trash2, CheckCircle2, ChevronRight, PlayCircle, ArrowLeft, MousePointerClick, ChevronDown, Edit2, AlignLeft, Save, X, AlertTriangle, Check, EyeOff, ChevronLeft } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { TEXT, BTN, CARD } from "../../constants/ui";
 import { manualCleanPreview } from "../../services/cleanerService";
 import { useToast } from "../../contexts/ToastContext";
+import { getColumnWidth, getOrderedErrorCells, getNextError, getPrevError, scrollToCell } from "./tableUtils";
 
 // Từ điển ánh xạ sang Tiếng Việt
 const ACTION_LABELS = {
@@ -26,6 +27,9 @@ export default function ManualCleanWorkspace({ columns, fileHash, onConfirm, onB
   const [actions, setActions] = useState([]);
   const [previewData, setPreviewData] = useState(initialPreviewData || []);
   const [errorCells, setErrorCells] = useState(initialErrorCells || []); // Array of ErrorCell from backend preview
+  const [changedCells, setChangedCells] = useState([]);
+  const [removedRows, setRemovedRows] = useState([]);
+  const [changedTruncated, setChangedTruncated] = useState(false);
   
   // Rule 4: Keep the cell highlighted by state, using the ORIGINAL error_cells list (do not drop once fixed)
   const originalErrorCellsRef = useRef(initialErrorCells || []);
@@ -87,6 +91,9 @@ export default function ManualCleanWorkspace({ columns, fileHash, onConfirm, onB
       const res = await manualCleanPreview(fileHash, currentActions);
       setPreviewData(res.data.preview_data || []);
       setErrorCells(res.data.error_cells || []);
+      setChangedCells(res.data.changed_cells || []);
+      setRemovedRows(res.data.removed_rows || []);
+      setChangedTruncated(Boolean(res.data.changed_truncated));
       return true;
     } catch (err) {
       const detail = err?.response?.data?.detail;
@@ -192,6 +199,31 @@ export default function ManualCleanWorkspace({ columns, fileHash, onConfirm, onB
   const pendingCount = Math.max(0, totalErrorCells - reviewedCount);
   const ignoredCount = originalErrorList.filter(ec => cellReviewStates[`${ec.row_id}:${ec.column}`] === "ignored").length;
 
+  const [filterOnlyErrorCols, setFilterOnlyErrorCols] = useState(false);
+  const [filterOnlyErrorRows, setFilterOnlyErrorRows] = useState(false);
+  const [currentNavError, setCurrentNavError] = useState(null);
+  const tableContainerRef = useRef(null);
+
+  const handlePrevError = () => {
+    const ordered = getOrderedErrorCells(originalErrorList, previewData, columns);
+    if (ordered.length === 0) return;
+    const prev = getPrevError(ordered, currentNavError);
+    if (prev) {
+      setCurrentNavError(prev);
+      scrollToCell(tableContainerRef.current, prev.column, prev.row_id);
+    }
+  };
+
+  const handleNextError = () => {
+    const ordered = getOrderedErrorCells(originalErrorList, previewData, columns);
+    if (ordered.length === 0) return;
+    const next = getNextError(ordered, currentNavError);
+    if (next) {
+      setCurrentNavError(next);
+      scrollToCell(tableContainerRef.current, next.column, next.row_id);
+    }
+  };
+
   const handleFinalConfirm = () => {
     if (pendingCount > 0) {
       const proceed = window.confirm(t("cleaner.guided.warn_pending_cells", { count: pendingCount }));
@@ -213,11 +245,13 @@ export default function ManualCleanWorkspace({ columns, fileHash, onConfirm, onB
   };
 
   return (
-    <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
+    <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-20">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-2">
-        <div className="flex items-center gap-4">
-          {/* Rule 2: Removed duplicate "Back to original data" button here, keeping the persistent nav bar one */}
-          <label className="flex items-center gap-2 text-sm font-medium text-ink cursor-pointer">
+        <div className="flex flex-wrap items-center gap-4">
+          <label 
+            className="flex items-center gap-2 text-sm font-medium text-ink cursor-pointer select-none"
+            title={t("cleaner.tooltip_full_edit_mode")}
+          >
             <input 
               type="checkbox" 
               checked={isFullEditMode}
@@ -225,6 +259,35 @@ export default function ManualCleanWorkspace({ columns, fileHash, onConfirm, onB
               className="rounded border-border text-forest focus:ring-forest/30"
             />
             {t("cleaner.workspace.full_edit_mode")}
+            <HelpCircle className="w-3.5 h-3.5 text-muted hover:text-ink transition-colors" />
+          </label>
+
+          <label 
+            className="flex items-center gap-2 text-xs font-medium text-ink cursor-pointer select-none"
+            title={t("cleaner.tooltip_filter_error_cols")}
+          >
+            <input 
+              type="checkbox" 
+              checked={filterOnlyErrorCols}
+              onChange={(e) => setFilterOnlyErrorCols(e.target.checked)}
+              className="rounded border-border text-forest focus:ring-forest/30"
+            />
+            {t("cleaner.filter_only_error_cols")}
+            <HelpCircle className="w-3.5 h-3.5 text-muted hover:text-ink transition-colors" />
+          </label>
+
+          <label 
+            className="flex items-center gap-2 text-xs font-medium text-ink cursor-pointer select-none"
+            title={t("cleaner.tooltip_filter_error_rows")}
+          >
+            <input 
+              type="checkbox" 
+              checked={filterOnlyErrorRows}
+              onChange={(e) => setFilterOnlyErrorRows(e.target.checked)}
+              className="rounded border-border text-forest focus:ring-forest/30"
+            />
+            {t("cleaner.filter_only_error_rows")}
+            <HelpCircle className="w-3.5 h-3.5 text-muted hover:text-ink transition-colors" />
           </label>
         </div>
 
@@ -241,22 +304,6 @@ export default function ManualCleanWorkspace({ columns, fileHash, onConfirm, onB
               )}
             </div>
           )}
-
-          <button
-            onClick={handleSavePendingEdits}
-            disabled={pendingCellEdits.length === 0 || isPreviewing}
-            className={`${pendingCellEdits.length > 0 ? BTN.secondary : "rounded-md px-4 py-2 text-sm font-medium bg-[#EAEAEA] text-[#626C65] cursor-not-allowed"} flex items-center gap-2`}
-          >
-            <Save className="w-4 h-4" /> 
-            {t("cleaner.workspace.save_changes")} {pendingCellEdits.length > 0 && `(${pendingCellEdits.length})`}
-          </button>
-
-          <button
-            onClick={handleFinalConfirm}
-            className={`${BTN.primary} flex items-center gap-2`}
-          >
-            {t("cleaner.workspace.finalize_manual")} <ChevronRight className="w-4 h-4" />
-          </button>
         </div>
       </div>
 
@@ -271,9 +318,13 @@ export default function ManualCleanWorkspace({ columns, fileHash, onConfirm, onB
             pendingCellEdits={pendingCellEdits}
             errorCells={errorCells}
             originalErrorCells={originalErrorList}
+            changedCells={changedCells}
             cellReviewStates={cellReviewStates}
             onSetCellIgnored={handleSetCellIgnored}
             isFullEditMode={isFullEditMode}
+            filterOnlyErrorCols={filterOnlyErrorCols}
+            filterOnlyErrorRows={filterOnlyErrorRows}
+            containerRef={tableContainerRef}
             onAddPendingEdit={handleAddPendingEdit}
             onExecuteAction={executeAction}
             onFlushPendingEdits={async () => {
@@ -349,6 +400,58 @@ export default function ManualCleanWorkspace({ columns, fileHash, onConfirm, onB
             <div className="mt-4 pt-4 border-t border-border">
                <AdvancedActionForm columns={columns} onExecuteAction={executeAction} />
             </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Sticky Bottom Bar for Manual Workspace */}
+      <div className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-[#E5E5E3] shadow-[0_-4px_20px_rgba(0,0,0,0.06)]">
+        <div className="max-w-7xl mx-auto px-4 sm:px-8 py-3 flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-start">
+            <span className="text-xs font-semibold text-ink">
+              {t("cleaner.guided.reviewed_progress", { reviewed: reviewedCount, total: totalErrorCells })}
+            </span>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={handlePrevError}
+                title={t("cleaner.tooltip_btn_prev_error")}
+                aria-label={t("cleaner.tooltip_btn_prev_error")}
+                className="px-2.5 py-1 text-xs font-medium border border-border rounded-md bg-white hover:bg-neutral-50 text-ink transition-colors cursor-pointer"
+              >
+                {t("cleaner.bar_btn_prev_error")}
+              </button>
+              <button
+                type="button"
+                onClick={handleNextError}
+                title={t("cleaner.tooltip_btn_next_error")}
+                aria-label={t("cleaner.tooltip_btn_next_error")}
+                className="px-2.5 py-1 text-xs font-medium border border-border rounded-md bg-white hover:bg-neutral-50 text-ink transition-colors cursor-pointer"
+              >
+                {t("cleaner.bar_btn_next_error")}
+              </button>
+            </div>
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-center gap-2.5 w-full sm:w-auto">
+            <button
+              onClick={handleSavePendingEdits}
+              disabled={pendingCellEdits.length === 0 || isPreviewing}
+              title={t("cleaner.tooltip_btn_save_pending")}
+              aria-label={t("cleaner.tooltip_btn_save_pending")}
+              className={`${pendingCellEdits.length > 0 ? BTN.secondary : "rounded-md px-4 py-2 text-xs font-medium bg-[#EAEAEA] text-[#626C65] cursor-not-allowed"} w-full sm:w-auto flex items-center justify-center gap-1.5`}
+            >
+              <Save className="w-4 h-4" />
+              {t("cleaner.bar_btn_save_pending", { count: pendingCellEdits.length })}
+            </button>
+            <button
+              onClick={handleFinalConfirm}
+              title={t("cleaner.tooltip_btn_finalize")}
+              aria-label={t("cleaner.tooltip_btn_finalize")}
+              className={`${BTN.primary} w-full sm:w-auto px-4 py-2 text-xs flex items-center justify-center gap-1.5`}
+            >
+              {t("cleaner.bar_btn_finalize")} <ChevronRight className="w-4 h-4" />
+            </button>
           </div>
         </div>
       </div>
@@ -459,15 +562,18 @@ function PreviewTable({
   pendingCellEdits,
   errorCells,
   originalErrorCells,
+  changedCells = [],
   cellReviewStates,
   onSetCellIgnored,
   isFullEditMode,
+  filterOnlyErrorCols = false,
+  filterOnlyErrorRows = false,
+  containerRef,
   onAddPendingEdit,
   onExecuteAction,
   onFlushPendingEdits
 }) {
   const { t } = useTranslation();
-  const [page, setPage] = useState(1);
   const [editingCell, setEditingCell] = useState(null); // { rowIdx, col, isDirectEdit: boolean }
   const [editValue, setEditValue] = useState("");
   const [activeErrorPanel, setActiveErrorPanel] = useState(null); // { rowIdx, col, errorCell, currentValue }
@@ -475,7 +581,6 @@ function PreviewTable({
   const [renamingCol, setRenamingCol] = useState(null); // column name
   const [renameValue, setRenameValue] = useState("");
 
-  const rowsPerPage = 10;
   if (!data || data.length === 0) return (
      <div className={CARD + " h-full flex items-center justify-center min-h-[400px] relative"}>
        {isLoading ? (
@@ -489,9 +594,17 @@ function PreviewTable({
      </div>
   );
 
-  const totalPages = Math.ceil(data.length / rowsPerPage);
-  const currentData = data.slice((page - 1) * rowsPerPage, page * rowsPerPage);
+  const currentData = data;
   
+  // Changed cells map: `${row_id}:${col}` -> item
+  const changedMap = useMemo(() => {
+    const map = new Map();
+    changedCells.forEach(item => {
+      map.set(`${item.row_id}:${item.column}`, item);
+    });
+    return map;
+  }, [changedCells]);
+
   // Xác định các thay đổi
   const droppedCols = new Set(actions.filter(a => a.action_type === "DROP_COLUMN").map(a => a.column));
   const renamedCols = {};
@@ -504,12 +617,48 @@ function PreviewTable({
     .flatMap(a => a.params.edits || []);
 
   const activeCols = Object.keys(data[0] || {}).filter(c => c !== "original_index");
-  const displayCols = [...activeCols];
+  const allDisplayCols = [...activeCols];
   droppedCols.forEach(col => {
-    if (!displayCols.includes(col)) displayCols.push(col);
+    if (!allDisplayCols.includes(col)) allDisplayCols.push(col);
   });
 
   const errorList = originalErrorCells && originalErrorCells.length > 0 ? originalErrorCells : errorCells;
+
+  // Filter column & row sets
+  const errorColsSet = useMemo(() => {
+    const set = new Set();
+    errorList.forEach(e => { if (e.column) set.add(e.column); });
+    return set;
+  }, [errorList]);
+
+  const errorRowIdsSet = useMemo(() => {
+    const set = new Set();
+    errorList.forEach(e => {
+      if (e.row_id !== undefined && e.row_id !== null) set.add(e.row_id);
+    });
+    return set;
+  }, [errorList]);
+
+  const displayCols = useMemo(() => {
+    if (!filterOnlyErrorCols) return allDisplayCols;
+    const filtered = allDisplayCols.filter(c => errorColsSet.has(c));
+    return filtered.length > 0 ? filtered : allDisplayCols;
+  }, [allDisplayCols, filterOnlyErrorCols, errorColsSet]);
+
+  const visibleData = useMemo(() => {
+    if (!filterOnlyErrorRows) return currentData;
+    const filtered = currentData.filter(r => r.original_index !== undefined && errorRowIdsSet.has(r.original_index));
+    return filtered.length > 0 ? filtered : currentData;
+  }, [currentData, filterOnlyErrorRows, errorRowIdsSet]);
+
+  // Column widths
+  const colWidths = useMemo(() => {
+    const widths = {};
+    displayCols.forEach(col => {
+      widths[col] = getColumnWidth(col, data);
+    });
+    return widths;
+  }, [displayCols, data]);
 
   // Rule 4: Compute cell status using ORIGINAL error_cells list
   const getCellStatus = (rowId, col) => {
@@ -529,6 +678,9 @@ function PreviewTable({
 
     // Original error cell entry
     const err = errorList.find(e => e.row_id === rowId && e.column === col);
+
+    // Changed cell by backend action (e.g. FILL_MISSING_MEDIAN, etc.)
+    const changedByAction = changedMap.get(`${rowId}:${col}`);
 
     if (pending) {
       return {
@@ -558,37 +710,45 @@ function PreviewTable({
       };
     }
 
+    if (changedByAction) {
+      return {
+        type: "action_changed",
+        changedItem: changedByAction,
+        reviewState: "fixed"
+      };
+    }
+
     return { type: "normal" };
   };
 
   const handleCellClick = (idx, col, status, isDropped) => {
     if (isDropped) return;
     
-    const rowId = currentData[idx].original_index;
+    const rowId = visibleData[idx].original_index;
     const cellError = errorList.find(e => e.row_id === rowId && e.column === col);
 
     // In Guided Mode (not full edit mode), if it was an error cell
     if (!isFullEditMode && (cellError || status.reviewState === "fixed" || status.reviewState === "ignored")) {
       const pending = pendingCellEdits.find(e => e.row_id === rowId && e.column === col);
-      const val = pending ? pending.new_value : currentData[idx][col];
+      const val = pending ? pending.new_value : visibleData[idx][col];
       setActiveErrorPanel({
         rowIdx: idx,
         rowId,
         col,
-        errorCell: cellError || { issue_type: "manual", original_value: currentData[idx][col] },
+        errorCell: cellError || { issue_type: "manual", original_value: visibleData[idx][col] },
         currentValue: val
       });
       return;
     }
 
     // Full edit mode or non-error cells in full edit mode: allow inline editing
-    const canEdit = isFullEditMode || status.type === "error" || status.type === "fixed" || status.type === "pending_edit";
+    const canEdit = isFullEditMode || status.type === "error" || status.type === "fixed" || status.type === "pending_edit" || status.type === "action_changed";
     if (!canEdit) return;
 
     setEditingCell({ rowIdx: idx, col, isDirectEdit: true });
     
     const pending = pendingCellEdits.find(e => e.row_id === rowId && e.column === col);
-    setEditValue(pending ? pending.new_value : (currentData[idx][col] === null ? "" : currentData[idx][col]));
+    setEditValue(pending ? pending.new_value : (visibleData[idx][col] === null ? "" : visibleData[idx][col]));
   };
 
   // Rule 3: Null editing: empty input = real null, send JSON null, not string "null"
@@ -597,16 +757,13 @@ function PreviewTable({
     const cCol = targetCol !== null ? targetCol : editingCell?.col;
     if (rIdx === null || rIdx === undefined || !cCol) return;
 
-    const rowId = currentData[rIdx].original_index;
-    const originalVal = currentData[rIdx][cCol];
+    const rowId = visibleData[rIdx].original_index;
+    const originalVal = visibleData[rIdx][cCol];
 
     let valToSave;
     if (directVal !== undefined) {
       valToSave = directVal; // Can explicitly be null or string or number
     } else {
-      // Direct text editing:
-      // Empty input = real JSON null
-      // User typed "null" = keep string "null"
       if (editValue.trim() === "") {
         valToSave = null;
       } else {
@@ -614,7 +771,6 @@ function PreviewTable({
       }
     }
 
-    // Rule: A cell counts as "edited" ONLY if its value actually changed.
     const isValChanged = valToSave !== originalVal;
 
     if (rowId !== undefined && isValChanged) {
@@ -638,14 +794,6 @@ function PreviewTable({
        handleHeaderAction(col, "RENAME_COLUMN", { new_name: renameValue });
     }
     setRenamingCol(null);
-  };
-  
-  const handlePageChange = async (newPage) => {
-     if (pendingCellEdits.length > 0) {
-        const flushed = await onFlushPendingEdits();
-        if (!flushed) return;
-     }
-     setPage(newPage);
   };
 
   return (
@@ -677,37 +825,73 @@ function PreviewTable({
         )}
       </div>
 
-      {/* Rule 4: Small Legend above table with the three states */}
+      {/* Rule 4: Small Legend above table with the states */}
       <div className="flex flex-wrap items-center gap-4 py-2 px-3 mb-2 bg-[#F9F9F8] border border-border rounded-lg text-xs text-ink">
         <span className="font-semibold text-muted uppercase tracking-wider text-[10px]">
           {t("cleaner.guided.legend_title")}
         </span>
-        <div className="flex items-center gap-1.5">
+        <div 
+          className="flex items-center gap-1.5 cursor-help"
+          title={t("cleaner.tooltip_legend_pending")}
+        >
           <span className="w-3 h-3 rounded bg-red-100 border border-red-300 inline-block" />
           <span>{t("cleaner.guided.legend_pending")}</span>
+          <HelpCircle className="w-3 h-3 text-muted" />
         </div>
-        <div className="flex items-center gap-1.5">
+        <div 
+          className="flex items-center gap-1.5 cursor-help"
+          title={t("cleaner.tooltip_legend_fixed")}
+        >
           <span className="w-3 h-3 rounded bg-emerald-100 border border-emerald-300 inline-flex items-center justify-center text-[9px] text-emerald-800 font-bold">✓</span>
           <span>{t("cleaner.guided.legend_fixed")}</span>
+          <HelpCircle className="w-3 h-3 text-muted" />
         </div>
-        <div className="flex items-center gap-1.5">
+        <div 
+          className="flex items-center gap-1.5 cursor-help"
+          title={t("cleaner.tooltip_legend_action_changed")}
+        >
+          <span className="w-3 h-3 rounded bg-emerald-50 border border-emerald-200 inline-block" />
+          <span className="text-emerald-900 font-medium">{t("cleaner.legend_action_changed")}</span>
+          <HelpCircle className="w-3 h-3 text-muted" />
+        </div>
+        <div 
+          className="flex items-center gap-1.5 cursor-help"
+          title={t("cleaner.tooltip_legend_ignored")}
+        >
           <span className="w-3 h-3 rounded bg-gray-200 border border-gray-300 inline-block" />
           <span className="text-gray-500 line-through">{t("cleaner.guided.legend_ignored")}</span>
+          <HelpCircle className="w-3 h-3 text-muted" />
         </div>
       </div>
 
-      <div className="overflow-x-auto border border-border rounded-lg bg-white min-h-[400px] max-h-[600px] overflow-y-auto relative flex-1">
-        <table className="w-full text-left text-sm whitespace-nowrap">
-          <thead className="bg-[#F9F9F8] border-b border-border sticky top-0 z-10 shadow-sm">
+      <div
+        ref={containerRef}
+        className="overflow-x-auto border border-border rounded-lg bg-white min-h-[400px] max-h-[600px] overflow-y-auto relative flex-1"
+      >
+        <table className="w-full text-left text-sm table-fixed border-collapse">
+          <colgroup>
+            <col className="w-12" />
+            {displayCols.map(col => (
+              <col key={col} style={{ width: `${colWidths[col] || 120}px` }} />
+            ))}
+          </colgroup>
+          <thead className="bg-[#F9F9F8] border-b border-border sticky top-0 z-20 shadow-xs">
             <tr>
-              <th className="px-4 py-3 font-semibold text-ink w-12 text-center bg-[#F9F9F8]">#</th>
+              <th className="px-2.5 py-2.5 font-semibold text-ink w-12 text-center sticky left-0 z-30 bg-[#F9F9F8] border-r border-border">
+                #
+              </th>
               {displayCols.map(col => {
                 const isDropped = droppedCols.has(col);
                 const isRenamed = renamedCols[col];
                 
                 return (
-                  <th key={col} className={`px-4 py-2 font-semibold bg-[#F9F9F8] ${isDropped ? "text-gray-400" : "text-ink"}`}>
-                    <div className="flex items-center justify-between group/header min-w-[80px]">
+                  <th
+                    key={col}
+                    id={`th-col-${col}`}
+                    className={`px-2.5 py-2.5 font-semibold bg-[#F9F9F8] text-left align-top transition-all ${isDropped ? "text-gray-400" : "text-ink"}`}
+                    title={col}
+                  >
+                    <div className="flex items-start justify-between group/header gap-1">
                       {renamingCol === col ? (
                          <input 
                            autoFocus
@@ -716,18 +900,20 @@ function PreviewTable({
                            onChange={e => setRenameValue(e.target.value)}
                            onBlur={() => handleRenameSubmit(col)}
                            onKeyDown={e => { if(e.key === "Enter") handleRenameSubmit(col); if(e.key === "Escape") setRenamingCol(null); }}
-                           className="w-[120px] border border-forest rounded px-1 py-0.5 text-sm font-normal text-ink outline-none"
+                           className="w-full border border-forest rounded px-1 py-0.5 text-xs font-normal text-ink outline-none"
                          />
                       ) : (
-                         <div className="flex items-center gap-1">
-                           <span className={isDropped ? "line-through" : ""}>{col}</span>
-                           {isDropped && <span className="text-[10px] text-red-500 font-normal border border-red-200 bg-red-50 px-1 py-0.5 rounded">{t("cleaner.workspace.dropped_badge")}</span>}
-                           {isRenamed && <span className="text-[10px] text-blue-600 font-normal border border-blue-200 bg-blue-50 px-1 py-0.5 rounded" title={t("cleaner.workspace.old_name_tooltip", { name: isRenamed })}>{t("cleaner.workspace.renamed_badge")}</span>}
+                         <div className="min-w-0 flex-1">
+                           <span className={`line-clamp-2 break-words text-xs leading-snug ${isDropped ? "line-through" : ""}`}>
+                             {col}
+                           </span>
+                           {isDropped && <span className="text-[10px] text-red-500 font-normal border border-red-200 bg-red-50 px-1 py-0.5 rounded mt-0.5 inline-block">{t("cleaner.workspace.dropped_badge")}</span>}
+                           {isRenamed && <span className="text-[10px] text-blue-600 font-normal border border-blue-200 bg-blue-50 px-1 py-0.5 rounded mt-0.5 inline-block" title={t("cleaner.workspace.old_name_tooltip", { name: isRenamed })}>{t("cleaner.workspace.renamed_badge")}</span>}
                          </div>
                       )}
                       
                       {!isDropped && renamingCol !== col && (
-                         <div className="relative ml-2">
+                         <div className="relative shrink-0 mt-0.5">
                             <button 
                               onClick={() => setOpenHeaderMenu(openHeaderMenu === col ? null : col)}
                               className="p-1 rounded text-muted hover:bg-gray-200 hover:text-ink opacity-0 group-hover/header:opacity-100 transition-opacity"
@@ -738,18 +924,34 @@ function PreviewTable({
                                <>
                                  <div className="fixed inset-0 z-40" onClick={() => setOpenHeaderMenu(null)} />
                                  <div className="absolute top-full right-0 mt-1 w-48 bg-white border border-border rounded-lg shadow-xl py-1 z-50 animate-in fade-in zoom-in-95 font-normal">
-                                    <button onClick={() => { setRenamingCol(col); setRenameValue(col); setOpenHeaderMenu(null); }} className="w-full text-left px-3 py-2 text-xs hover:bg-sage/20 text-ink flex items-center gap-2">
+                                    <button 
+                                      onClick={() => { setRenamingCol(col); setRenameValue(col); setOpenHeaderMenu(null); }} 
+                                      title={t("cleaner.tooltip_menu_rename_col")}
+                                      className="w-full text-left px-3 py-2 text-xs hover:bg-sage/20 text-ink flex items-center gap-2"
+                                    >
                                        <Edit2 className="w-3.5 h-3.5 text-muted" /> {t("cleaner.workspace.menu_rename_col")}
                                     </button>
                                     <div className="h-px bg-border my-1" />
-                                    <button onClick={() => handleHeaderAction(col, "FILL_MISSING_MEAN")} className="w-full text-left px-3 py-2 text-xs hover:bg-sage/20 text-ink flex items-center gap-2">
+                                    <button 
+                                      onClick={() => handleHeaderAction(col, "FILL_MISSING_MEAN")} 
+                                      title={t("cleaner.tooltip_menu_fill_mean")}
+                                      className="w-full text-left px-3 py-2 text-xs hover:bg-sage/20 text-ink flex items-center gap-2"
+                                    >
                                        <AlignLeft className="w-3.5 h-3.5 text-muted" /> {t("cleaner.workspace.menu_fill_mean")}
                                     </button>
-                                    <button onClick={() => handleHeaderAction(col, "FILL_MISSING_UNKNOWN")} className="w-full text-left px-3 py-2 text-xs hover:bg-sage/20 text-ink flex items-center gap-2">
+                                    <button 
+                                      onClick={() => handleHeaderAction(col, "FILL_MISSING_UNKNOWN")} 
+                                      title={t("cleaner.tooltip_menu_fill_unknown")}
+                                      className="w-full text-left px-3 py-2 text-xs hover:bg-sage/20 text-ink flex items-center gap-2"
+                                    >
                                        <AlignLeft className="w-3.5 h-3.5 text-muted" /> {t("cleaner.workspace.menu_fill_unknown")}
                                     </button>
                                     <div className="h-px bg-border my-1" />
-                                    <button onClick={() => handleHeaderAction(col, "DROP_COLUMN")} className="w-full text-left px-3 py-2 text-xs hover:bg-red-50 text-red-600 flex items-center gap-2">
+                                    <button 
+                                      onClick={() => handleHeaderAction(col, "DROP_COLUMN")} 
+                                      title={t("cleaner.tooltip_menu_drop_col")}
+                                      className="w-full text-left px-3 py-2 text-xs hover:bg-red-50 text-red-600 flex items-center gap-2"
+                                    >
                                        <Trash2 className="w-3.5 h-3.5 text-red-500" /> {t("cleaner.workspace.menu_drop_col")}
                                     </button>
                                  </div>
@@ -763,129 +965,120 @@ function PreviewTable({
               })}
             </tr>
           </thead>
-          <tbody>
-            {currentData.map((row, idx) => (
-              <tr key={idx} className="border-b border-border last:border-0 hover:bg-sage/10 transition-colors">
-                <td className="px-4 py-2 text-muted text-center border-r border-border/50 bg-[#F9F9F8]/50">
-                  {row.original_index !== undefined ? row.original_index : (page - 1) * rowsPerPage + idx + 1}
-                </td>
-                {displayCols.map(col => {
-                  const isDropped = droppedCols.has(col);
-                  if (isDropped) {
-                    return <td key={col} className="px-4 py-2 text-gray-300 bg-gray-50/50 italic">-</td>;
-                  }
-                  
-                  const rowId = row.original_index;
-                  const status = getCellStatus(rowId, col);
-                  const isEditing = editingCell?.rowIdx === idx && editingCell?.col === col && editingCell?.isDirectEdit;
-                  
-                  // Value to display
-                  let displayVal = row[col];
-                  if (status.type === "pending_edit") displayVal = status.value;
-                  else if (status.type === "fixed" && status.value !== undefined) displayVal = status.value;
-                  
-                  const isNull = displayVal === null || displayVal === undefined;
-                  
-                  // Style logic according to Rule 4:
-                  // Pending: amber/red
-                  // Fixed: green with check icon, tooltip "old value → new value"
-                  // Ignored: grey line-through
-                  let cellClasses = "px-4 py-2 truncate max-w-[200px] transition-colors ";
-                  let tooltip = null;
-                  
-                  if (status.type === "ignored") {
-                    cellClasses += "bg-gray-100 text-gray-400 line-through cursor-pointer border border-transparent hover:border-gray-300";
-                    tooltip = t("cleaner.guided.ignored");
-                  } else if (status.type === "fixed" || status.type === "pending_edit") {
-                    cellClasses += "bg-emerald-50 text-emerald-900 border border-emerald-200 font-medium cursor-pointer hover:border-emerald-400";
-                    const oldStr = status.originalValue === null || status.originalValue === undefined ? "null" : String(status.originalValue);
-                    const newStr = isNull ? "null" : String(displayVal);
-                    tooltip = t("cleaner.guided.fixed_tooltip", { oldVal: oldStr, newVal: newStr });
-                  } else if (status.type === "error") {
-                    cellClasses += "bg-red-50 text-red-900 cursor-pointer border border-red-200 hover:border-red-300";
-                    tooltip = t(`cleaner.guided.reasons.${status.issue}`, { defaultValue: t("cleaner.guided.pending") });
-                  } else {
-                    cellClasses += "text-muted ";
-                    if (isFullEditMode) {
-                       cellClasses += "cursor-pointer border border-transparent hover:border-gray-300 hover:bg-gray-50";
-                       tooltip = t("cleaner.guided.btn_edit_value");
-                    } else {
-                       tooltip = !isNull ? String(displayVal) : null;
-                    }
-                  }
+          <tbody className="divide-y divide-border">
+            {visibleData.map((row, idx) => {
+              const rowId = row.original_index;
+              const hasErrorInRow = rowId !== undefined && errorRowIdsSet.has(rowId);
 
-                  return (
-                    <td 
-                      key={col} 
-                      onClick={() => handleCellClick(idx, col, status, isDropped)}
-                      className={cellClasses} 
-                      title={tooltip}
-                    >
-                      {isEditing ? (
-                        <input
-                          autoFocus
-                          type="text"
-                          value={editValue}
-                          onChange={(e) => setEditValue(e.target.value)}
-                          onBlur={() => handleCellSave()}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") handleCellSave();
-                            if (e.key === "Escape") setEditingCell(null);
-                          }}
-                          className="w-full bg-white border border-forest rounded px-1 py-0.5 text-ink outline-none text-sm"
-                        />
-                      ) : (
-                        <div className="flex items-center justify-between gap-1">
-                          <span className="truncate">
-                            {!isNull ? String(displayVal) : <span className="text-gray-400 italic">null</span>}
-                          </span>
-                          {status.type === "error" && status.reviewState === "pending" && (
-                            <span className="shrink-0 text-[10px] bg-red-100 text-red-700 px-1 py-0.2 rounded font-medium">
-                              !
+              return (
+                <tr
+                  key={rowId !== undefined ? rowId : idx}
+                  className={`hover:bg-sage/10 transition-colors ${hasErrorInRow ? "bg-amber-50/20" : ""}`}
+                >
+                  <td className="px-2.5 py-2 text-muted text-center border-r border-border/50 sticky left-0 z-10 bg-[#F9F9F8] font-mono text-xs select-none">
+                    {rowId !== undefined ? rowId : idx + 1}
+                  </td>
+                  {displayCols.map(col => {
+                    const isDropped = droppedCols.has(col);
+                    if (isDropped) {
+                      return <td key={col} className="px-2.5 py-2 text-gray-300 bg-gray-50/50 italic text-xs">-</td>;
+                    }
+                    
+                    const status = getCellStatus(rowId, col);
+                    const isEditing = editingCell?.rowIdx === idx && editingCell?.col === col && editingCell?.isDirectEdit;
+                    
+                    // Value to display
+                    let displayVal = row[col];
+                    if (status.type === "pending_edit") displayVal = status.value;
+                    else if (status.type === "fixed" && status.value !== undefined) displayVal = status.value;
+                    
+                    const isNull = displayVal === null || displayVal === undefined;
+                    
+                    let cellClasses = "px-2.5 py-2 truncate text-xs transition-colors border border-transparent ";
+                    let tooltip = null;
+                    
+                    if (status.type === "ignored") {
+                      cellClasses += "bg-gray-100 text-gray-400 line-through cursor-pointer hover:border-gray-300";
+                      tooltip = t("cleaner.guided.ignored");
+                    } else if (status.type === "fixed" || status.type === "pending_edit") {
+                      cellClasses += "bg-emerald-50 text-emerald-900 border-emerald-200 font-medium cursor-pointer hover:border-emerald-400";
+                      const oldStr = status.originalValue === null || status.originalValue === undefined ? "null" : String(status.originalValue);
+                      const newStr = isNull ? "null" : String(displayVal);
+                      tooltip = t("cleaner.guided.fixed_tooltip", { oldVal: oldStr, newVal: newStr });
+                    } else if (status.type === "action_changed") {
+                      cellClasses += "bg-emerald-50/70 text-emerald-900 border-emerald-200/80 font-medium cursor-pointer hover:border-emerald-400";
+                      const oldStr = status.changedItem.old === null || status.changedItem.old === undefined ? "null" : String(status.changedItem.old);
+                      const newStr = isNull ? "null" : String(displayVal);
+                      tooltip = `${oldStr} → ${newStr} (${t("cleaner.legend_action_changed")})`;
+                    } else if (status.type === "error") {
+                      cellClasses += "bg-red-50 text-red-900 cursor-pointer border-red-200 hover:border-red-300";
+                      tooltip = t(`cleaner.guided.reasons.${status.issue}`, { defaultValue: t("cleaner.guided.pending") });
+                    } else {
+                      cellClasses += "text-ink ";
+                      if (isFullEditMode) {
+                         cellClasses += "cursor-pointer hover:border-gray-300 hover:bg-gray-50";
+                         tooltip = t("cleaner.guided.btn_edit_value");
+                      } else {
+                         tooltip = !isNull ? String(displayVal) : null;
+                      }
+                    }
+
+                    return (
+                      <td 
+                        key={col} 
+                        data-cell-id={`${rowId}:${col}`}
+                        onClick={() => handleCellClick(idx, col, status, isDropped)}
+                        className={cellClasses} 
+                        title={tooltip}
+                      >
+                        {isEditing ? (
+                          <input
+                            autoFocus
+                            type="text"
+                            value={editValue}
+                            onChange={(e) => setEditValue(e.target.value)}
+                            onBlur={() => handleCellSave()}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") handleCellSave();
+                              if (e.key === "Escape") setEditingCell(null);
+                            }}
+                            className="w-full bg-white border border-forest rounded px-1 py-0.5 text-ink outline-none text-xs"
+                          />
+                        ) : (
+                          <div className="flex items-center justify-between gap-1">
+                            <span className="truncate">
+                              {!isNull ? String(displayVal) : <span className="text-gray-400 italic">null</span>}
                             </span>
-                          )}
-                          {(status.type === "fixed" || status.type === "pending_edit") && (
-                            <span className="shrink-0 text-[10px] bg-emerald-100 text-emerald-800 px-1 py-0.2 rounded font-semibold flex items-center">
-                              ✓
-                            </span>
-                          )}
-                          {status.type === "ignored" && (
-                            <span className="shrink-0 text-[10px] bg-gray-200 text-gray-600 px-1 py-0.2 rounded font-medium">
-                              {t("cleaner.guided.ignored")}
-                            </span>
-                          )}
-                        </div>
-                      )}
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
+                            {status.type === "error" && status.reviewState === "pending" && (
+                              <span className="shrink-0 text-[10px] bg-red-100 text-red-700 px-1 py-0.2 rounded font-medium">
+                                !
+                              </span>
+                            )}
+                            {(status.type === "fixed" || status.type === "pending_edit") && (
+                              <span className="shrink-0 text-[10px] bg-emerald-100 text-emerald-800 px-1 py-0.2 rounded font-semibold flex items-center">
+                                ✓
+                              </span>
+                            )}
+                            {status.type === "action_changed" && (
+                              <span className="shrink-0 text-[10px] bg-emerald-100 text-emerald-800 px-1 py-0.2 rounded font-medium">
+                                •
+                              </span>
+                            )}
+                            {status.type === "ignored" && (
+                              <span className="shrink-0 text-[10px] bg-gray-200 text-gray-600 px-1 py-0.2 rounded font-medium">
+                                {t("cleaner.guided.ignored")}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
-      </div>
-      
-      {/* Pagination */}
-      <div className="flex items-center justify-between mt-4">
-        <span className="text-xs text-muted">
-          {t("cleaner.pagination_info", { page, totalPages, total: data.length })}
-        </span>
-        <div className="flex gap-2">
-          <button
-            onClick={() => handlePageChange(Math.max(1, page - 1))}
-            disabled={page === 1}
-            className="px-3 py-1 bg-white border border-border rounded text-sm disabled:opacity-50 hover:bg-sage/20 transition-all text-ink font-medium"
-          >
-            {t("cleaner.prev_page")}
-          </button>
-          <button
-            onClick={() => handlePageChange(Math.min(totalPages, page + 1))}
-            disabled={page === totalPages}
-            className="px-3 py-1 bg-white border border-border rounded text-sm disabled:opacity-50 hover:bg-sage/20 transition-all text-ink font-medium"
-          >
-            {t("cleaner.next_page")}
-          </button>
-        </div>
       </div>
 
       {/* Guided Mode Cell Detail Modal/Panel - responsive, 375px+ compliant */}

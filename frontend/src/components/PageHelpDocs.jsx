@@ -20,12 +20,16 @@ export default function PageHelpDocs({ pageId }) {
       ]
     },
     cleaner: {
-      title: "Hướng dẫn: Cleaner (Làm sạch Dữ Liệu)",
-      description: "Tự động phát hiện và xử lý các lỗi dữ liệu phổ biến như giá trị trống, sai định dạng, dữ liệu trùng lặp.",
+      title: t("cleaner.help_docs_title"),
+      description: t("cleaner.help_docs_desc"),
       steps: [
-        { icon: ShieldAlert, title: "Quét lỗi tự động", text: "Hệ thống tự động phát hiện Missing values, Wrong types, Encoding errors và Duplicates." },
-        { icon: PlayCircle, title: "Xem trước (Auto-Clean)", text: "Click 'Tự động làm sạch' để xem trước các thay đổi. Dữ liệu chưa bị lưu đè." },
-        { icon: CheckCircle2, title: "Xác nhận làm sạch", text: "Nếu bạn đồng ý với kết quả, click 'Xác nhận & Chốt file' để lưu lại bản sạch." }
+        { icon: PlayCircle, title: t("cleaner.help_docs_step1_title"), text: t("cleaner.help_docs_step1_text") },
+        { icon: ShieldAlert, title: t("cleaner.help_docs_step2_title"), text: t("cleaner.help_docs_step2_text") },
+        { icon: Info, title: t("cleaner.help_docs_step3_title"), text: t("cleaner.help_docs_step3_text") },
+        { icon: Sparkles, title: t("cleaner.help_docs_step4_title"), text: t("cleaner.help_docs_step4_text") },
+        { icon: BarChart2, title: t("cleaner.help_docs_step5_title"), text: t("cleaner.help_docs_step5_text") },
+        { icon: HelpCircle, title: t("cleaner.help_docs_step6_title"), text: t("cleaner.help_docs_step6_text") },
+        { icon: CheckCircle2, title: t("cleaner.help_docs_step7_title"), text: t("cleaner.help_docs_step7_text") }
       ]
     },
     visualize: {

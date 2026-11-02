@@ -80,6 +80,19 @@ export default function Docs() {
     const sections = [
         ...STATIC_SECTIONS,
         {
+            id: "cleaner",
+            title: t("cleaner.help_docs_title"),
+            content: [
+                { heading: t("cleaner.help_docs_step1_title"), body: t("cleaner.help_docs_step1_text"), code: false },
+                { heading: t("cleaner.help_docs_step2_title"), body: t("cleaner.help_docs_step2_text"), code: false },
+                { heading: t("cleaner.help_docs_step3_title"), body: t("cleaner.help_docs_step3_text"), code: false },
+                { heading: t("cleaner.help_docs_step4_title"), body: t("cleaner.help_docs_step4_text"), code: false },
+                { heading: t("cleaner.help_docs_step5_title"), body: t("cleaner.help_docs_step5_text"), code: false },
+                { heading: t("cleaner.help_docs_step6_title"), body: t("cleaner.help_docs_step6_text"), code: false },
+                { heading: t("cleaner.help_docs_step7_title"), body: t("cleaner.help_docs_step7_text"), code: false },
+            ]
+        },
+        {
             id: "visualize",
             title: t("visualize.help_docs_title"),
             content: [

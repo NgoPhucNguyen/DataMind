@@ -138,6 +138,7 @@ class DiffReport(BaseModel):
     missing_filled: dict[str, int]            # {"age": 43, "income": 17}
     types_converted: dict[str, str]           # {"salary": "object → float64"}
     encoding_fixed: dict[str, int]            # {"name": 8}
+    columns_dropped: list[str] = []
 
 
 # ─── ValidationResult (kết quả validate 2 tầng) ──────────────────────────
@@ -175,6 +176,9 @@ class AutoCleanResponse(BaseModel):
     validation: ValidationResult | None = None
     preview_data: list[dict] = []
     error_cells: list[ErrorCell] = []     # Lỗi (như semantic_error) còn tồn đọng sau auto-clean
+    changed_cells: list[dict] = []        # Cell-level diff vs original
+    removed_rows: list[int] = []          # Index labels dropped by dedup/drop
+    changed_truncated: bool = False       # True when changed_cells hit cap
 
 
 # ─── summary_for_module3 ──────────────────────────────────────────────────

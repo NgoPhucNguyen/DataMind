@@ -22,6 +22,9 @@ async def lifespan(app: FastAPI):
     yield
     print("🛑 DataMind API Shutting down...")
 
+from app.core.errors import DataMindException
+from fastapi.responses import JSONResponse
+
 app = FastAPI(
     title="DataMind API",
     description="Excel/CSV Analysis Engine with AI Insights",
@@ -30,6 +33,14 @@ app = FastAPI(
 )
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+@app.exception_handler(DataMindException)
+async def datamind_exception_handler(request, exc: DataMindException):
+    status_code = 503 if exc.code == "ERR_AI_UNAVAILABLE" else 400
+    return JSONResponse(
+        status_code=status_code,
+        content=exc.to_schema().dict()
+    )
 raw_frontend_urls = os.getenv(
     "FRONTEND_URLS", 
     "http://localhost:3000,http://localhost:5173"

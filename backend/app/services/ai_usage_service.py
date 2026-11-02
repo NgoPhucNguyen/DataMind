@@ -76,6 +76,7 @@ def get_feature_breakdown(db: Session, user_id: int) -> dict[str, int]:
         "reanalyze": 0,
         "explain": 0,
         "re_explain": 0,
+        "report_intro": 0,
     }
     for feature, count in rows:
         breakdown[feature] = count

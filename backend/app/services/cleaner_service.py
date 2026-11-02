@@ -659,3 +659,155 @@ def apply_manual_actions(df: pd.DataFrame, actions: list) -> tuple[pd.DataFrame,
             logger.warning(f"Error applying action {action}: {e}")
             
     return cleaned, cleaning_log
+
+
+# ─── compute_changed_cells ──────────────────────────────────────────────────
+
+def _to_json_safe(val) -> object:
+    """Convert a single value to a JSON-serialisable Python type."""
+    if val is None:
+        return None
+    if isinstance(val, float) and (val != val):   # NaN
+        return None
+    try:
+        if pd.isna(val):
+            return None
+    except (TypeError, ValueError):
+        pass
+    if isinstance(val, pd.Timestamp):
+        return val.strftime('%Y-%m-%d %H:%M:%S')
+    if isinstance(val, (np.integer,)):
+        return int(val)
+    if isinstance(val, (np.floating,)):
+        f = float(val)
+        return None if (f != f) else f
+    if isinstance(val, (np.bool_,)):
+        return bool(val)
+    return val
+
+
+def _is_null(val) -> bool:
+    if val is None:
+        return True
+    if isinstance(val, float) and (val != val):
+        return True
+    try:
+        return bool(pd.isna(val))
+    except (TypeError, ValueError):
+        return False
+
+
+def _values_equal(old, new) -> bool:
+    """True when old and new are considered unchanged after normalization."""
+    # Both null → unchanged
+    if _is_null(old) and _is_null(new):
+        return True
+    if _is_null(old) or _is_null(new):
+        return False
+
+    # Numeric comparison: "25" vs 25.0
+    try:
+        fo, fn = float(old), float(new)
+        if fo == fn:
+            return True
+    except (TypeError, ValueError):
+        pass
+
+    # Datetime comparison
+    try:
+        to = pd.to_datetime(old, errors='coerce')
+        tn = pd.to_datetime(new, errors='coerce')
+        if not pd.isna(to) and not pd.isna(tn) and to == tn:
+            return True
+    except (TypeError, ValueError):
+        pass
+
+    # String comparison
+    return str(old) == str(new)
+
+
+def _change_reason(old, new, col: str, edited_keys: set) -> str:
+    """Infer why a cell changed."""
+    # Explicit user edit takes priority
+    # edited_keys elements: (row_id_int, col_str)
+    # caller passes label as int when building edited_keys — checked externally
+    if _is_null(old) and not _is_null(new):
+        return "missing_filled"
+    # Both strings → encoding fix
+    if isinstance(old, str) and isinstance(new, str):
+        return "encoding_fixed"
+    return "type_converted"
+
+
+def compute_changed_cells(
+    original_df: pd.DataFrame,
+    cleaned_df: pd.DataFrame,
+    preview_labels: list,
+    edited_keys: set | None = None,
+    cap: int = 2000,
+) -> tuple[list[dict], bool]:
+    """
+    Compare original_df vs cleaned_df for rows in preview_labels.
+
+    Returns (changed_cells, truncated).
+    Each item: {"row_id": int, "column": str, "old": json-safe, "new": json-safe, "reason": str}
+
+    Also separately compute removed_rows via compute_removed_rows().
+    """
+    if edited_keys is None:
+        edited_keys = set()
+
+    # Only compare columns present in both DataFrames
+    common_cols = [c for c in original_df.columns if c in cleaned_df.columns]
+
+    items: list[dict] = []
+    truncated = False
+
+    for label in preview_labels:
+        if label not in original_df.index:
+            continue
+        if label not in cleaned_df.index:
+            # Row was dropped — not a cell change; tracked by removed_rows
+            continue
+
+        for col in common_cols:
+            old_val = original_df.at[label, col]
+            new_val = cleaned_df.at[label, col]
+
+            if _values_equal(old_val, new_val):
+                continue
+
+            if len(items) >= cap:
+                truncated = True
+                return items, truncated
+
+            reason = (
+                "edited"
+                if (int(label), str(col)) in edited_keys
+                else _change_reason(old_val, new_val, col, edited_keys)
+            )
+
+            items.append({
+                "row_id": int(label),
+                "column": str(col),
+                "old": _to_json_safe(old_val),
+                "new": _to_json_safe(new_val),
+                "reason": reason,
+            })
+
+    return items, truncated
+
+
+def compute_removed_rows(
+    original_df: pd.DataFrame,
+    cleaned_df: pd.DataFrame,
+    window_size: int,
+    cap: int = 500,
+) -> list[int]:
+    """
+    Labels in original_df.index[:window_size] that are missing from cleaned_df.index.
+    """
+    orig_labels = original_df.index[:window_size]
+    clean_index_set = set(cleaned_df.index)
+    removed = [int(lbl) for lbl in orig_labels if lbl not in clean_index_set]
+    return removed[:cap]

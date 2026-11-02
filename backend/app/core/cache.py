@@ -436,3 +436,37 @@ def clear_active_session(user_id: int) -> None:
         client.delete(f"active_session:{user_id}")
     except Exception as e:
         logger.error(f"Redis DELETE active_session error: {e}")
+
+# --- Report Intro Cache (24h TTL) ---
+
+def set_report_intro(user_id: int, file_hash: str, lang: str, data: dict[str, Any], ttl: int = 86400) -> None:
+    """
+    Cache report intro per user + file_hash + lang.
+    TTL 24h.
+    Value: {"text": str, "source": "ai" | "user", "charts_hash": str, "generated_at": str}
+    """
+    client = _get_client()
+    if client is None: return
+    try:
+        norm_lang = lang if lang in ("vi", "en") else "vi"
+        key = f"report_intro:{user_id}:{file_hash}:{norm_lang}"
+        client.set(key, json.dumps(data), ex=ttl)
+    except Exception as e:
+        logger.warning("Redis SET report_intro lỗi: %s", e)
+
+def get_report_intro(user_id: int, file_hash: str, lang: str) -> dict[str, Any] | None:
+    """
+    Lấy report intro đã cache cho user + file_hash + lang.
+    """
+    client = _get_client()
+    if client is None: return None
+    try:
+        norm_lang = lang if lang in ("vi", "en") else "vi"
+        key = f"report_intro:{user_id}:{file_hash}:{norm_lang}"
+        raw = client.get(key)
+        if raw is None: return None
+        return json.loads(raw) if isinstance(raw, str) else json.loads(raw.decode())
+    except Exception as e:
+        logger.warning("Redis GET report_intro lỗi: %s", e)
+        return None
+

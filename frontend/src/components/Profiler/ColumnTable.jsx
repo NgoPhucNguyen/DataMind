@@ -95,11 +95,10 @@ export const ColumnTable = ({
                   : t("profiler.chip_filter_apply", "Bấm để lọc các cột cần xem")
               }
               aria-pressed={filterNeedsReview}
-              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold transition-all cursor-pointer ${
-                filterNeedsReview
-                  ? "bg-[#D97706] text-white ring-2 ring-[#D97706]/40 shadow-sm"
-                  : "bg-[#FEF6E6] text-[#854D0E] border border-[#FDE68A] hover:bg-[#FDF0D5]"
-              }`}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold transition-all cursor-pointer ${filterNeedsReview
+                ? "bg-[#D97706] text-white ring-2 ring-[#D97706]/40 shadow-sm"
+                : "bg-[#FEF6E6] text-[#854D0E] border border-[#FDE68A] hover:bg-[#FDF0D5]"
+                }`}
             >
               <AlertTriangle size={13} className={filterNeedsReview ? "text-white" : "text-[#D97706]"} aria-hidden="true" />
               <span>
@@ -193,34 +192,37 @@ export const ColumnTable = ({
       {/* ── 2. Desktop Table with vertical column borders ── */}
       <div className="hidden md:block border border-border rounded-xl overflow-hidden bg-white shadow-sm">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[720px] border-collapse">
-            <thead>
-              <tr className="bg-[#F9F9F8] border-b border-border text-muted text-xs uppercase tracking-wider">
-                {/* 1. Tên cột: align-left */}
-                <th className="text-left px-3.5 py-2.5 font-semibold text-ink border-r border-border/80">
+          <table className="w-full text-sm min-w-[720px] border-collapse table-fixed">
+            <colgroup>
+              {/* name: auto (takes all remaining space) */}
+              <col />
+              {/* type */}
+              <col className="w-[150px]" />
+              {/* unique */}
+              <col className="w-[120px]" />
+              {/* null% */}
+              <col className="w-[84px]" />
+              {/* charts */}
+              <col className="w-[230px]" />
+            </colgroup>
+            <thead className="bg-[#F7F7F6] border-b border-border">
+              <tr>
+                <th className="px-3.5 py-2.5 text-left font-semibold text-ink border-r border-border/80">
                   {t("profiler.col_header_name", "Tên cột")}
                 </th>
-
-                {/* 2. Loại dữ liệu: align-left */}
-                <th className="text-left px-3.5 py-2.5 font-semibold text-ink min-w-[170px] border-r border-border/80">
+                <th className="px-3.5 py-2.5 text-left font-semibold text-ink border-r border-border/80">
                   {t("profiler.col_header_type", "Loại dữ liệu")}
                 </th>
-
-                {/* 3. Giá trị khác nhau: 2 lines, align-middle (center) */}
-                <th className="text-center px-3.5 py-1.5 font-semibold text-ink w-[110px] leading-tight border-r border-border/80">
-                  <div className="flex flex-col items-center">
+                <th className="px-3.5 py-2.5 text-center font-semibold text-ink border-r border-border/80">
+                  <div className="flex flex-col items-center leading-tight">
                     <span>{t("profiler.col_header_unique_line1", "Giá trị")}</span>
                     <span>{t("profiler.col_header_unique_line2", "khác nhau")}</span>
                   </div>
                 </th>
-
-                {/* 4. Ô trống: align-middle (center) */}
-                <th className="text-center px-3.5 py-2.5 font-semibold text-ink w-[90px] border-r border-border/80">
+                <th className="px-3.5 py-2.5 text-center font-semibold text-ink border-r border-border/80">
                   {t("profiler.col_header_null_pct", "Ô trống")}
                 </th>
-
-                {/* 5. Gợi ý biểu đồ: align-left */}
-                <th className="text-left px-3.5 py-2.5 font-semibold text-ink">
+                <th className="px-3.5 py-2.5 text-left font-semibold text-ink">
                   {t("profiler.col_header_chart_hints", "Gợi ý biểu đồ")}
                 </th>
               </tr>
@@ -234,14 +236,13 @@ export const ColumnTable = ({
                 return (
                   <tr
                     key={col.name}
-                    className={`transition-colors hover:bg-neutral-50/70 ${
-                      idx % 2 === 0 ? "bg-white" : "bg-[#FAFAFA]"
-                    }`}
+                    className={`transition-colors hover:bg-neutral-50/70 ${idx % 2 === 0 ? "bg-white" : "bg-[#FAFAFA]"
+                      }`}
                   >
                     {/* 1. Tên cột: text-left, border-r */}
-                    <td className="px-3.5 py-2.5 text-left text-sm text-ink max-w-[220px] align-middle border-r border-border/80">
-                      <div className="flex items-start gap-1.5">
-                        <div className="font-medium text-ink max-w-[190px] break-words leading-snug">
+                    <td className="px-3.5 py-2.5 text-left text-sm text-ink align-middle border-r border-border/80">
+                      <div className="flex items-start gap-1.5 min-w-0">
+                        <div className="font-medium text-ink min-w-0 flex-1 break-words leading-snug">
                           <ExpandableText text={col.name} />
                         </div>
 
@@ -299,20 +300,20 @@ export const ColumnTable = ({
                     </td>
 
                     {/* 3. Giá trị khác nhau: text-center (align-middle), tabular-nums, border-r */}
-                    <td className="px-3.5 py-2.5 text-center font-mono text-sm text-ink align-middle tabular-nums w-[110px] border-r border-border/80">
+                    <td className="px-3.5 py-2.5 text-center font-mono text-sm text-ink align-middle tabular-nums border-r border-border/80">
                       {col.unique_count.toLocaleString(numberLocale)}
                     </td>
 
                     {/* 4. Ô trống: text-center (align-middle), tabular-nums, border-r */}
-                    <td className="px-3.5 py-2.5 text-center font-mono text-sm align-middle tabular-nums w-[90px] border-r border-border/80">
+                    <td className="px-3.5 py-2.5 text-center font-mono text-sm align-middle tabular-nums border-r border-border/80">
                       {col.null_pct > 0 ? (
                         <span
                           className={
                             col.null_pct > 60
                               ? "text-[#9F2F2D] font-semibold"
                               : col.null_pct > 30
-                              ? "text-[#B45309] font-medium"
-                              : "text-ink"
+                                ? "text-[#B45309] font-medium"
+                                : "text-ink"
                           }
                         >
                           {col.null_pct.toLocaleString(numberLocale)}%
@@ -355,138 +356,142 @@ export const ColumnTable = ({
               })}
             </tbody>
           </table>
-        </div>
-      </div>
+        </div >
+      </div >
 
       {/* ── 3. Mobile Cards View (< 768px) ── */}
-      <div className="block md:hidden space-y-3">
-        {visible.map((col) => {
-          const effectiveType = getEffectiveType(col);
-          const isOverridden = overrides[col.name] !== undefined && overrides[col.name] !== col.detected_type;
-          const suggestedCharts = getSuggestedChartsForType(effectiveType, col);
-          const isExpanded = Boolean(expandedMobileRows[col.name]);
+      < div className="block md:hidden space-y-3" >
+        {
+          visible.map((col) => {
+            const effectiveType = getEffectiveType(col);
+            const isOverridden = overrides[col.name] !== undefined && overrides[col.name] !== col.detected_type;
+            const suggestedCharts = getSuggestedChartsForType(effectiveType, col);
+            const isExpanded = Boolean(expandedMobileRows[col.name]);
 
-          return (
-            <div
-              key={col.name}
-              className="border border-border rounded-xl p-3 bg-white shadow-sm space-y-2.5"
-            >
-              {/* Card Header: Name + TypeDropdownButton */}
-              <div className="flex items-start justify-between gap-2">
-                <div className="font-semibold text-sm text-ink break-words flex-1 leading-snug">
-                  {col.name}
-                </div>
-                <TypeDropdownButton
-                  colName={col.name}
-                  effectiveType={effectiveType}
-                  detectedType={col.detected_type}
-                  isOverridden={isOverridden}
-                  onSelectType={handleOverride}
-                  onReset={handleOverride}
-                />
-              </div>
-
-              {/* Status Warning if any */}
-              {isAttentionColumn(col) && (
-                <div className="flex items-center gap-1.5 text-xs text-[#854D0E] bg-[#FEF6E6] px-2 py-1 rounded border border-[#FDE68A]">
-                  <AlertTriangle size={13} className="text-[#D97706] shrink-0" aria-hidden="true" />
-                  <span>
-                    {col.null_pct > 60
-                      ? t("profiler.col_alert_missing_60", "Thiếu hơn 60% dữ liệu")
-                      : col.unique_count === 1
-                      ? t("profiler.col_alert_unique_1", "Chỉ có 1 giá trị duy nhất")
-                      : col.disguised_numeric?.is_disguised
-                      ? t("profiler.col_alert_disguised_numeric", "Có thể là số")
-                      : t("profiler.col_unnamed_warning", "Cần đặt lại tên")}
-                  </span>
-                </div>
-              )}
-
-              {/* Quick stats row */}
-              <div className="grid grid-cols-2 gap-2 text-xs pt-1 border-t border-border/60">
-                <div className="text-center border-r border-border/60 pr-2">
-                  <span className="text-muted block text-[11px] uppercase tracking-wider">
-                    {t("profiler.col_header_unique_diff", "Khác nhau")}
-                  </span>
-                  <span className="font-mono font-medium text-ink tabular-nums">
-                    {col.unique_count.toLocaleString(numberLocale)}
-                  </span>
-                </div>
-                <div className="text-center pl-2">
-                  <span className="text-muted block text-[11px] uppercase tracking-wider">
-                    {t("profiler.col_header_null_pct", "Ô trống")}
-                  </span>
-                  <span className="font-mono font-medium text-ink tabular-nums">
-                    {col.null_pct > 0 ? `${col.null_pct.toLocaleString(numberLocale)}%` : "0%"}
-                  </span>
-                </div>
-              </div>
-
-              {/* Expand details for Chart suggestions on mobile */}
-              <button
-                type="button"
-                onClick={() => toggleMobileRow(col.name)}
-                className="w-full text-xs text-muted hover:text-ink flex items-center justify-between pt-1 border-t border-border/40 cursor-pointer"
+            return (
+              <div
+                key={col.name}
+                className="border border-border rounded-xl p-3 bg-white shadow-sm space-y-2.5"
               >
-                <span>{t("profiler.col_header_chart_hints", "Gợi ý biểu đồ")}</span>
-                {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-              </button>
-
-              {isExpanded && (
-                <div className="pt-1.5 flex gap-1.5 flex-wrap justify-start">
-                  {suggestedCharts.length > 0 ? (
-                    suggestedCharts.map((chart) => {
-                      const chartCfg = CHART_CONFIG[chart];
-                      const ChartIcon = chartCfg?.icon;
-                      return (
-                        <span
-                          key={chart}
-                          className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full bg-[#EAF2EB] text-[#1B4324] border border-[#C8E0CB]"
-                        >
-                          {ChartIcon && <ChartIcon size={12} />}
-                          <span>{t(chartCfg?.i18nKey || chart, { defaultValue: chart })}</span>
-                        </span>
-                      );
-                    })
-                  ) : (
-                    <span className="text-muted text-xs italic">
-                      {effectiveType === "text"
-                        ? t("profiler.chart_not_suitable", "Không phù hợp để vẽ biểu đồ")
-                        : "—"}
-                    </span>
-                  )}
+                {/* Card Header: Name + TypeDropdownButton */}
+                <div className="flex items-start justify-between gap-2">
+                  <div className="font-semibold text-sm text-ink break-words flex-1 leading-snug">
+                    {col.name}
+                  </div>
+                  <TypeDropdownButton
+                    colName={col.name}
+                    effectiveType={effectiveType}
+                    detectedType={col.detected_type}
+                    isOverridden={isOverridden}
+                    onSelectType={handleOverride}
+                    onReset={handleOverride}
+                  />
                 </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
+
+                {/* Status Warning if any */}
+                {isAttentionColumn(col) && (
+                  <div className="flex items-center gap-1.5 text-xs text-[#854D0E] bg-[#FEF6E6] px-2 py-1 rounded border border-[#FDE68A]">
+                    <AlertTriangle size={13} className="text-[#D97706] shrink-0" aria-hidden="true" />
+                    <span>
+                      {col.null_pct > 60
+                        ? t("profiler.col_alert_missing_60", "Thiếu hơn 60% dữ liệu")
+                        : col.unique_count === 1
+                          ? t("profiler.col_alert_unique_1", "Chỉ có 1 giá trị duy nhất")
+                          : col.disguised_numeric?.is_disguised
+                            ? t("profiler.col_alert_disguised_numeric", "Có thể là số")
+                            : t("profiler.col_unnamed_warning", "Cần đặt lại tên")}
+                    </span>
+                  </div>
+                )}
+
+                {/* Quick stats row */}
+                <div className="grid grid-cols-2 gap-2 text-xs pt-1 border-t border-border/60">
+                  <div className="text-center border-r border-border/60 pr-2">
+                    <span className="text-muted block text-[11px] uppercase tracking-wider">
+                      {t("profiler.col_header_unique_diff", "Khác nhau")}
+                    </span>
+                    <span className="font-mono font-medium text-ink tabular-nums">
+                      {col.unique_count.toLocaleString(numberLocale)}
+                    </span>
+                  </div>
+                  <div className="text-center pl-2">
+                    <span className="text-muted block text-[11px] uppercase tracking-wider">
+                      {t("profiler.col_header_null_pct", "Ô trống")}
+                    </span>
+                    <span className="font-mono font-medium text-ink tabular-nums">
+                      {col.null_pct > 0 ? `${col.null_pct.toLocaleString(numberLocale)}%` : "0%"}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Expand details for Chart suggestions on mobile */}
+                <button
+                  type="button"
+                  onClick={() => toggleMobileRow(col.name)}
+                  className="w-full text-xs text-muted hover:text-ink flex items-center justify-between pt-1 border-t border-border/40 cursor-pointer"
+                >
+                  <span>{t("profiler.col_header_chart_hints", "Gợi ý biểu đồ")}</span>
+                  {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                </button>
+
+                {isExpanded && (
+                  <div className="pt-1.5 flex gap-1.5 flex-wrap justify-start">
+                    {suggestedCharts.length > 0 ? (
+                      suggestedCharts.map((chart) => {
+                        const chartCfg = CHART_CONFIG[chart];
+                        const ChartIcon = chartCfg?.icon;
+                        return (
+                          <span
+                            key={chart}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full bg-[#EAF2EB] text-[#1B4324] border border-[#C8E0CB]"
+                          >
+                            {ChartIcon && <ChartIcon size={12} />}
+                            <span>{t(chartCfg?.i18nKey || chart, { defaultValue: chart })}</span>
+                          </span>
+                        );
+                      })
+                    ) : (
+                      <span className="text-muted text-xs italic">
+                        {effectiveType === "text"
+                          ? t("profiler.chart_not_suitable", "Không phù hợp để vẽ biểu đồ")
+                          : "—"}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })
+        }
+      </div >
 
       {/* ── 4. Show More / Show Less Toggle ── */}
-      {hasMore && (
-        <button
-          type="button"
-          onClick={() => setShowAll((v) => !v)}
-          className="mt-3 w-full flex items-center justify-center gap-1.5 text-xs font-medium text-muted hover:text-ink py-2 border border-dashed border-border rounded-lg transition-colors hover:border-forest hover:bg-sage/10 cursor-pointer"
-        >
-          {showAll ? (
-            <>
-              <ChevronUp size={14} aria-hidden="true" />
-              <span>{t("profiler.col_show_less", "Thu gọn bớt")}</span>
-            </>
-          ) : (
-            <>
-              <ChevronDown size={14} aria-hidden="true" />
-              <span>
-                {t("profiler.col_show_all", {
-                  count: filteredCols.length.toLocaleString(numberLocale),
-                  defaultValue: `Hiển thị toàn bộ ${filteredCols.length} cột`,
-                })}
-              </span>
-            </>
-          )}
-        </button>
-      )}
-    </div>
+      {
+        hasMore && (
+          <button
+            type="button"
+            onClick={() => setShowAll((v) => !v)}
+            className="mt-3 w-full flex items-center justify-center gap-1.5 text-xs font-medium text-muted hover:text-ink py-2 border border-dashed border-border rounded-lg transition-colors hover:border-forest hover:bg-sage/10 cursor-pointer"
+          >
+            {showAll ? (
+              <>
+                <ChevronUp size={14} aria-hidden="true" />
+                <span>{t("profiler.col_show_less", "Thu gọn bớt")}</span>
+              </>
+            ) : (
+              <>
+                <ChevronDown size={14} aria-hidden="true" />
+                <span>
+                  {t("profiler.col_show_all", {
+                    count: filteredCols.length.toLocaleString(numberLocale),
+                    defaultValue: `Hiển thị toàn bộ ${filteredCols.length} cột`,
+                  })}
+                </span>
+              </>
+            )}
+          </button>
+        )
+      }
+    </div >
   );
 };

@@ -342,7 +342,7 @@ async def explain_chart(
     
     # 5. Gọi AI 
     try:
-        explanation = await call_gemini_explain(prompt)
+        explanation = await call_gemini_explain(prompt, lang=body.lang)
     except Exception as e:
         record_ai_usage(db, current_user["user_id"], "explain-chart", "failed")
         raise e
@@ -369,6 +369,11 @@ async def explain_chart(
     
     if APP_ENV in ("development", "local"):
         response["_debug_prompt"] = prompt
+
+    from app.core.ai_client import get_dev_provider
+    dev_prov = get_dev_provider()
+    if dev_prov:
+        response["provider"] = dev_prov
 
     return response
 

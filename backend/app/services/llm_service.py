@@ -13,6 +13,8 @@ import asyncio
 import logging
 from typing import Any
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from app.core import ai_client
+from app.core.errors import DataMindException
 
 logger = logging.getLogger(__name__)
 
@@ -106,123 +108,118 @@ async def get_semantic_context(
     user_correction: str | None = None
 ) -> dict[str, Any]:
     """
-    Gọi Gemini để nhận diện lĩnh vực của dataset kèm theo tóm tắt và phân loại cột.
-    Nếu key không có hoặc lỗi → trả về fallback, không crash.
+    Nhận diện lĩnh vực của dataset kèm theo tóm tắt và phân loại cột qua ai_client.
     """
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        logger.warning("GEMINI_API_KEY chưa được set. Trả về fallback context.")
-        fallback = dict(_FALLBACK_CONTEXT)
-        fallback["draft_summary"] = (
-            "Dataset overview not available." if lang == "en" else "Chưa có mô tả tổng quan dataset."
-        )
-        return fallback
+    prompt = _build_prompt(columns, lang=lang, user_correction=user_correction)
+    parsed, _ = await ai_client.generate_json(
+        prompt,
+        feature="semantic_context",
+        lang=lang,
+        required_keys=["domain", "confidence", "reasoning", "column_semantics"]
+    )
 
-    try:
-        from google import genai
+    column_semantics = parsed.get("column_semantics", {})
+    for col_name, info in column_semantics.items():
+        conf = float(info.get("confidence", 0.0))
+        stype = info.get("semantic_type", "GENERAL_TEXT")
+        if conf < 0.75:
+            info["semantic_type"] = "GENERAL_TEXT"
 
-        client = genai.Client(api_key=api_key)
-        prompt = _build_prompt(columns, lang=lang, user_correction=user_correction)
+    VALID_DOMAINS = {"Marketing", "HR", "Finance", "Education", "Healthcare", "E-commerce", "Logistics", "Other"}
+    raw_dom = str(parsed.get("domain", "Other")).strip()
+    # Canonical normalization
+    domain_mapping = {
+        "khác": "Other", "other": "Other", "tài chính": "Finance", "finance": "Finance",
+        "nhân sự": "HR", "hr": "HR", "giáo dục": "Education", "education": "Education",
+        "y tế": "Healthcare", "healthcare": "Healthcare", "thương mại điện tử": "E-commerce",
+        "e-commerce": "E-commerce", "ecommerce": "E-commerce", "vận tải": "Logistics",
+        "logistics": "Logistics", "marketing": "Marketing"
+    }
+    domain = domain_mapping.get(raw_dom.lower(), raw_dom if raw_dom in VALID_DOMAINS else "Other")
+    reasoning = str(parsed.get("reasoning", ""))
+    draft_summary = str(parsed.get("draft_summary", "")).strip()
+    if not draft_summary:
+        draft_summary = f"{domain}. {reasoning}" if reasoning else domain
 
-        response = await _call_gemini_with_retry(client, prompt)
-        raw_text = response.text.strip()
+    return {
+        "domain": domain,
+        "confidence": float(parsed.get("confidence", 0.0)),
+        "reasoning": reasoning,
+        "draft_summary": draft_summary,
+        "column_semantics": column_semantics,
+    }
 
-        if raw_text.startswith("```"):
-            raw_text = raw_text.split("```")[1]
-            if raw_text.startswith("json"):
-                raw_text = raw_text[4:]
-            raw_text = raw_text.strip()
+analyze_semantic_context = get_semantic_context
 
-        parsed = json.loads(raw_text)
-
-        column_semantics = parsed.get("column_semantics", {})
-        for col_name, info in column_semantics.items():
-            conf = float(info.get("confidence", 0.0))
-            stype = info.get("semantic_type", "GENERAL_TEXT")
-            if conf < 0.75:
-                info["semantic_type"] = "GENERAL_TEXT"
-
-        VALID_DOMAINS = {"Marketing", "HR", "Finance", "Education", "Healthcare", "E-commerce", "Logistics", "Other"}
-        raw_dom = str(parsed.get("domain", "Other")).strip()
-        # Canonical normalization
-        domain_mapping = {
-            "khác": "Other", "other": "Other", "tài chính": "Finance", "finance": "Finance",
-            "nhân sự": "HR", "hr": "HR", "giáo dục": "Education", "education": "Education",
-            "y tế": "Healthcare", "healthcare": "Healthcare", "thương mại điện tử": "E-commerce",
-            "e-commerce": "E-commerce", "ecommerce": "E-commerce", "vận tải": "Logistics",
-            "logistics": "Logistics", "marketing": "Marketing"
-        }
-        domain = domain_mapping.get(raw_dom.lower(), raw_dom if raw_dom in VALID_DOMAINS else "Other")
-        reasoning = str(parsed.get("reasoning", ""))
-        draft_summary = str(parsed.get("draft_summary", "")).strip()
-        if not draft_summary:
-            draft_summary = f"{domain}. {reasoning}" if reasoning else domain
-
-        return {
-            "domain": domain,
-            "confidence": float(parsed.get("confidence", 0.0)),
-            "reasoning": reasoning,
-            "draft_summary": draft_summary,
-            "column_semantics": column_semantics,
-        }
-
-    except asyncio.TimeoutError:
-        logger.warning("Gemini API timeout sau %ds.", _LLM_TIMEOUT_SECONDS)
-        fallback = dict(_FALLBACK_CONTEXT)
-        fallback["draft_summary"] = (
-            "Dataset overview timed out." if lang == "en" else "Hết thời gian phân tích mô tả dataset."
-        )
-        return fallback
-    except json.JSONDecodeError as e:
-        logger.warning("Gemini trả về JSON không hợp lệ: %s", e)
-        fallback = dict(_FALLBACK_CONTEXT)
-        fallback["draft_summary"] = (
-            "Unable to parse dataset overview." if lang == "en" else "Không thể phân tích mô tả dataset."
-        )
-        return fallback
-    except Exception as e:
-        import traceback
-        logger.error(f"Gemini thất bại sau 3 lần thử: {e}")
-        logger.error(f"Traceback: {traceback.format_exc()}")
-        return _FALLBACK_CONTEXT
-
-async def generate_report_intro(metadata: dict, charts: list) -> str:
+async def generate_report_intro(metadata: dict, charts: list, lang: str = "vi") -> tuple[str, bool]:
     """
     Sử dụng Gemini để sinh đoạn intro 4-5 câu cho báo cáo phân tích.
+    Trả về: (text, is_fallback: bool)
     """
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        return "Tập dữ liệu đã sẵn sàng để phân tích. Hệ thống hiện không thể tự động tổng hợp"
+    norm_lang = lang if lang in ("vi", "en") else "vi"
+    fallback_text = (
+        "The dataset has been successfully processed. Below are detailed analyses and visual insights based on your selection."
+        if norm_lang == "en"
+        else "Tập dữ liệu đã được xử lý thành công. Dưới đây là các phân tích chi tiết dựa trên lựa chọn của bạn."
+    )
 
     try:
-        from google import genai
-        client = genai.Client(api_key=api_key)
-        
         schema_summary = ", ".join([f"{c.get('name')} ({c.get('detected_type')})" for c in metadata.get('schema', [])[:10]])
-        chart_summary = ", ".join([c.get('user_title', c.get('title', '')) for c in charts[:5]])
+        
+        # Format chart summary including titles and any available auto insights
+        chart_lines = []
+        for c in charts[:6]:
+            t_name = c.get('user_title') or c.get('title') or c.get('auto_title') or c.get('column') or ''
+            insights = c.get('auto_insights') or []
+            ins_text = "; ".join([str(i.get('text', '')) for i in insights if i.get('text')])
+            if ins_text:
+                chart_lines.append(f"{t_name} (insights: {ins_text})")
+            else:
+                chart_lines.append(t_name)
+        chart_summary = ", ".join(chart_lines)
 
         user_ctx_str = ""
         user_ctx = metadata.get('user_context')
         if user_ctx and (user_ctx.get('description') or user_ctx.get('purpose')):
-            user_ctx_str = f"- Ngữ cảnh từ người dùng: Mô tả: {user_ctx.get('description', '')}, Mục đích: {user_ctx.get('purpose', '')}\n"
+            if norm_lang == "en":
+                user_ctx_str = f"- User context: Description: {user_ctx.get('description', '')}, Purpose: {user_ctx.get('purpose', '')}\n"
+            else:
+                user_ctx_str = f"- Ngữ cảnh từ người dùng: Mô tả: {user_ctx.get('description', '')}, Mục đích: {user_ctx.get('purpose', '')}\n"
 
         cleaner_ctx_str = ""
         cleaner_summary = metadata.get("cleaner_summary")
         if cleaner_summary and "stats" in cleaner_summary:
             stats = cleaner_summary["stats"]
-            cleaner_ctx_str = f"- Quá trình làm sạch: đã xóa {stats.get('duplicate_rows_removed', 0)} dòng trùng, xử lý {sum(stats.get('missing_filled', {}).values())} ô trống.\n"
+            if norm_lang == "en":
+                cleaner_ctx_str = f"- Data cleaning process: removed {stats.get('duplicate_rows_removed', 0)} duplicates, filled {sum(stats.get('missing_filled', {}).values())} empty cells.\n"
+            else:
+                cleaner_ctx_str = f"- Quá trình làm sạch: đã xóa {stats.get('duplicate_rows_removed', 0)} dòng trùng, xử lý {sum(stats.get('missing_filled', {}).values())} ô trống.\n"
 
-        prompt = f"""Bạn là chuyên gia phân tích dữ liệu. Dựa vào metadata của bộ dữ liệu sau:
+        if norm_lang == "en":
+            prompt = f"""You are a professional data analyst. Based on the following dataset metadata:
+- File name: {metadata.get('file_name', 'Unknown')}
+- Row count: {metadata.get('row_count', 0)}, Column count: {metadata.get('col_count', 0)}
+- Key columns: {schema_summary}
+- Selected notable charts: {chart_summary}
+{user_ctx_str}{cleaner_ctx_str}
+Write EXACTLY 4-5 concise sentences introducing this dataset and highlighting 1-2 key insights based on the selected charts. Connect with the user context (if provided) and briefly summarize the cleaning process.
+DO NOT provide conversational fluff, DO NOT use markdown or bullet points, write a single coherent paragraph in ENGLISH."""
+        else:
+            prompt = f"""Bạn là chuyên gia phân tích dữ liệu. Dựa vào metadata của bộ dữ liệu sau:
 - Tên file: {metadata.get('file_name', 'Unknown')}
 - Số dòng: {metadata.get('row_count', 0)}, Số cột: {metadata.get('col_count', 0)}
 - Một số cột chính: {schema_summary}
 - Các biểu đồ đáng chú ý được chọn: {chart_summary}
 {user_ctx_str}{cleaner_ctx_str}
 Hãy viết CHÍNH XÁC 4-5 câu súc tích để giới thiệu bộ dữ liệu này và nêu bật 1-2 điểm đáng chú ý nhất dựa trên các biểu đồ đã chọn. Đặc biệt cần liên kết với 'Ngữ cảnh từ người dùng' (nếu có) và tóm tắt ngắn về 'Quá trình làm sạch'.
-KHÔNG giải thích dông dài, KHÔNG dùng markdown, KHÔNG liệt kê bullet points, chỉ viết một đoạn văn duy nhất."""
+KHÔNG giải thích dông dài, KHÔNG dùng markdown, KHÔNG liệt kê bullet points, chỉ viết một đoạn văn duy nhất bằng TIẾNG VIỆT."""
 
-        response = await _call_gemini_with_retry(client, prompt)
-        return response.text.strip()
+        intro_text, _ = await ai_client.generate_text(prompt, feature="report_intro", lang=norm_lang)
+        if not intro_text:
+            return fallback_text, True
+        return intro_text, False
+    except DataMindException:
+        return fallback_text, True
     except Exception as e:
         logger.error(f"Lỗi khi sinh intro: {e}")
-        return "Tập dữ liệu đã được xử lý thành công. Dưới đây là các phân tích chi tiết dựa trên lựa chọn của bạn."
+        return fallback_text, True

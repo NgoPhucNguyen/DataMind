@@ -81,7 +81,7 @@ export function TypeDropdownButton({
   };
 
   return (
-    <div className="relative inline-flex flex-col items-start gap-1" ref={containerRef}>
+    <div className="relative flex flex-col items-start gap-1 w-full max-w-full" ref={containerRef}>
       {/* ── Main Dropdown Button ── */}
       <button
         ref={buttonRef}
@@ -99,7 +99,7 @@ export function TypeDropdownButton({
         }}
         onKeyDown={handleKeyDown}
         title={t("profiler.col_header_override", "Ghi đè kiểu")}
-        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all cursor-pointer outline-none focus:ring-2 focus:ring-forest/30 ${
+        className={`inline-flex w-full max-w-full items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all cursor-pointer outline-none focus:ring-2 focus:ring-forest/30 ${
           isOverridden
             ? "bg-[#FEF6E6] text-[#854D0E] border border-[#FDE68A] hover:bg-[#FDF0D5]"
             : "bg-[#F4F4F3] text-[#242424] border border-[#E5E5E3] hover:bg-[#ECECEB] hover:border-[#DCDCDA]"
@@ -107,14 +107,14 @@ export function TypeDropdownButton({
       >
         <span
           aria-hidden="true"
-          className="flex items-center justify-center w-4 h-4 rounded border border-[#1B4324]/30 bg-white text-[#1B4324]"
+          className="flex items-center justify-center w-4 h-4 shrink-0 rounded border border-[#1B4324]/30 bg-white text-[#1B4324]"
         >
           <CurrentIcon size={10} strokeWidth={2.2} />
         </span>
-        <span className="font-medium">{currentLabel}</span>
+        <span className="font-medium truncate">{currentLabel}</span>
         <ChevronDown
           size={13}
-          className={`text-muted transition-transform duration-150 ${isOpen ? "rotate-180" : ""}`}
+          className={`text-muted shrink-0 transition-transform duration-150 ${isOpen ? "rotate-180" : ""}`}
           aria-hidden="true"
         />
       </button>
@@ -180,7 +180,7 @@ export function TypeDropdownButton({
                 <div className="flex items-center gap-2">
                   <span
                     aria-hidden="true"
-                    className="flex items-center justify-center w-4 h-4 rounded border border-[#1B4324]/30 bg-white text-[#1B4324]"
+                    className="flex items-center justify-center w-4 h-4 shrink-0 rounded border border-[#1B4324]/30 bg-white text-[#1B4324]"
                   >
                     <ItemIcon size={10} strokeWidth={2.2} />
                   </span>
