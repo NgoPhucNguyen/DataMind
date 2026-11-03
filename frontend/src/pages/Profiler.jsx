@@ -120,6 +120,9 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
 
   const [fileExpired, setFileExpired] = useState(false);
   const [fileExpiresAt, setFileExpiresAt] = useState(fileSession.fileExpiresAt || null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
 
   // Check session-status on mount if fileSession exists
   useEffect(() => {
