@@ -506,7 +506,15 @@
     "sticky_selected_count": "{{count}} charts selected",
     "selected_panel_title": "Selected charts — will appear in AI report",
     "selected_panel_empty": "No charts selected yet. Click \"Add to report\" on any chart to select.",
-    "btn_confirm_proceed": "Confirm & Proceed",
+    "btn_confirm_proceed": "Continue: Create report →",
+    "badge_suggested_tooltip": "Suggested because it has few empty cells and a notable insight. You can unselect it.",
+    "scale_subtitle": "Scale {{min}}–{{max}} · {{n}} respondents",
+    "discrete_subtitle": "{{n}} respondents",
+    "skipped_panel_title": "{{n}} columns without a chart",
+    "skipped_missing_high": "{{pct}}% empty — too little data to chart.",
+    "skipped_single_value": "All rows have the same value — nothing to compare.",
+    "skipped_free_text_prefix": "Free text cannot be charted. If this is actually a category, ",
+    "skipped_free_text_link": "change type in Profiler step.",
     "empty_selection_warning_title": "No charts selected",
     "empty_selection_warning_desc": "You haven't selected any charts for the report. The AI report will be generated without visual charts. Do you want to continue?",
     "btn_stay_and_select": "Go back and select",
@@ -575,6 +583,9 @@
     "scatter_error_hint": "Please re-upload file or try again later.",
     "scatter_downsample": "Showing {{count}} / {{total}} data points (randomly sampled)",
     "scatter_empty": "No valid data for this column pair (all values are missing).",
+    "insight_tooltip_mean": "Average rounded to 2 decimals, same rounding as Excel.",
+    "insight_tooltip_pct": "{{count}} of {{n}} respondents. Percentage rounded to whole number.",
+    "insight_tooltip_pct_fallback": "Percentage rounded to whole number.",
     "insight": {
       "top_value": "Most common value is \"{{value}}\" (accounts for {{pct}}%).",
       "top3_share": "Top 3 values account for {{pct}}% of total.",
@@ -584,7 +595,11 @@
       "outliers": "Detected {{n}} outliers.",
       "trend_up": "Upward trend of {{pct}}% compared to first period.",
       "trend_down": "Downward trend of {{pct}}% compared to first period.",
-      "peak": "Peaked in period {{period}}."
+      "peak": "Peaked in period {{period}}.",
+      "scale_mean": "Average score {{mean}} / {{max}} ({{n}} respondents)",
+      "scale_top_box": "{{pct}}% chose the top levels ({{low}}–{{high}})",
+      "discrete_mean": "Average value {{mean}} ({{n}} respondents)",
+      "discrete_top": "Most common: {{value}} ({{pct}}%)"
     },
     "insights": {
       "top_value": "Most common value is \"{{value}}\" (accounts for {{pct}}%).",
@@ -595,7 +610,11 @@
       "outliers": "Detected {{n}} outliers.",
       "trend_up": "Upward trend of {{pct}}% compared to first period.",
       "trend_down": "Downward trend of {{pct}}% compared to first period.",
-      "peak": "Peaked in period {{period}}."
+      "peak": "Peaked in period {{period}}.",
+      "scale_mean": "Average score {{mean}} / {{max}} ({{n}} respondents)",
+      "scale_top_box": "{{pct}}% chose the top levels ({{low}}–{{high}})",
+      "discrete_mean": "Average value {{mean}} ({{n}} respondents)",
+      "discrete_top": "Most common: {{value}} ({{pct}}%)"
     },
     "help_docs_title": "Guide: Visualize",
     "help_docs_desc": "Select and customize the most meaningful charts to include in the final AI report.",

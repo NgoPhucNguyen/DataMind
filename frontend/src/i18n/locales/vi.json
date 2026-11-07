@@ -506,7 +506,15 @@
     "sticky_selected_count": "{{count}} biểu đồ đã chọn",
     "selected_panel_title": "Biểu đồ đã chọn — sẽ xuất hiện trong báo cáo AI",
     "selected_panel_empty": "Chưa có biểu đồ nào được chọn. Nhấn \"Thêm vào báo cáo\" trên biểu đồ để chọn.",
-    "btn_confirm_proceed": "Chốt danh sách & Chuyển tiếp",
+    "btn_confirm_proceed": "Tiếp tục: Tạo báo cáo →",
+    "badge_suggested_tooltip": "Gợi ý vì ít ô trống và có nhận xét đáng chú ý. Bạn có thể bỏ chọn.",
+    "scale_subtitle": "Thang {{min}}–{{max}} · trên {{n}} người trả lời",
+    "discrete_subtitle": "Trên {{n}} người trả lời",
+    "skipped_panel_title": "{{n}} cột không có biểu đồ",
+    "skipped_missing_high": "Trống {{pct}}% — quá ít dữ liệu để vẽ.",
+    "skipped_single_value": "Mọi dòng có cùng một giá trị, không có gì để so sánh.",
+    "skipped_free_text_prefix": "Câu trả lời tự do không vẽ được. Nếu thực ra là danh mục, ",
+    "skipped_free_text_link": "đổi kiểu ở bước Kiểm tra dữ liệu.",
     "empty_selection_warning_title": "Chưa chọn biểu đồ nào",
     "empty_selection_warning_desc": "Bạn chưa chọn biểu đồ nào để đưa vào báo cáo. Báo cáo AI sẽ được tạo mà không có biểu đồ trực quan hóa. Bạn có chắc muốn tiếp tục không?",
     "btn_stay_and_select": "Quay lại chọn",
@@ -575,6 +583,9 @@
     "scatter_error_hint": "Vui lòng tải lại file hoặc thử lại sau.",
     "scatter_downsample": "Hiển thị {{count}} / {{total}} điểm dữ liệu (lấy mẫu ngẫu nhiên)",
     "scatter_empty": "Không có dữ liệu hợp lệ cho cặp cột này (toàn bộ giá trị bị thiếu).",
+    "insight_tooltip_mean": "Trung bình làm tròn 2 chữ số thập phân, cùng cách làm tròn với Excel.",
+    "insight_tooltip_pct": "{{count}} / {{n}} người. Phần trăm làm tròn số nguyên.",
+    "insight_tooltip_pct_fallback": "Phần trăm làm tròn số nguyên.",
     "insight": {
       "top_value": "Giá trị phổ biến nhất là \"{{value}}\" (chiếm {{pct}}%).",
       "top3_share": "Top 3 giá trị chiếm {{pct}}% tổng số.",
@@ -584,7 +595,11 @@
       "outliers": "Phát hiện {{n}} giá trị ngoại lệ (outliers).",
       "trend_up": "Xu hướng tăng {{pct}}% so với kỳ đầu.",
       "trend_down": "Xu hướng giảm {{pct}}% so với kỳ đầu.",
-      "peak": "Đạt đỉnh vào kỳ {{period}}."
+      "peak": "Đạt đỉnh vào kỳ {{period}}.",
+      "scale_mean": "Điểm trung bình {{mean}} / {{max}} (trên {{n}} người trả lời)",
+      "scale_top_box": "{{pct}}% chọn mức cao ({{low}}–{{high}})",
+      "discrete_mean": "Giá trị trung bình {{mean}} (trên {{n}} người trả lời)",
+      "discrete_top": "Phổ biến nhất: {{value}} ({{pct}}%)"
     },
     "insights": {
       "top_value": "Giá trị phổ biến nhất là \"{{value}}\" (chiếm {{pct}}%).",
@@ -595,7 +610,11 @@
       "outliers": "Phát hiện {{n}} giá trị ngoại lệ (outliers).",
       "trend_up": "Xu hướng tăng {{pct}}% so với kỳ đầu.",
       "trend_down": "Xu hướng giảm {{pct}}% so với kỳ đầu.",
-      "peak": "Đạt đỉnh vào kỳ {{period}}."
+      "peak": "Đạt đỉnh vào kỳ {{period}}.",
+      "scale_mean": "Điểm trung bình {{mean}} / {{max}} (trên {{n}} người trả lời)",
+      "scale_top_box": "{{pct}}% chọn mức cao ({{low}}–{{high}})",
+      "discrete_mean": "Giá trị trung bình {{mean}} (trên {{n}} người trả lời)",
+      "discrete_top": "Phổ biến nhất: {{value}} ({{pct}}%)"
     },
     "help_docs_title": "Hướng dẫn: Visualize (Trực quan hóa)",
     "help_docs_desc": "Chọn và tùy chỉnh các biểu đồ ý nghĩa nhất để đưa vào báo cáo phân tích AI cuối cùng.",

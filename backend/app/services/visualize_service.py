@@ -123,7 +123,7 @@ def _compute_column_stats(
     elif dtype == "text":
         col_summary["skip_chart"] = True
         col_summary["skip_key"] = "free_text"
-        col_summary["skip_reason"] = "Văn bản tự do (free_text)"
+        col_summary["skip_reason"] = "free_text"
 
     if not col_summary.get("skip_chart"):
         valid_series = series.dropna()
@@ -163,41 +163,75 @@ def _compute_column_stats(
             col_summary["unique_count"] = num_unique
             if 2 <= num_unique <= VIZ_DISCRETE_MAX_UNIQUE:
                 is_integer = cleaner_service.is_integer_numeric(valid_series)
+                val_min_f = float(val_min)
+                val_max_f = float(val_max)
+                is_max_scale = any(abs(val_max_f - bound) < 1e-9 for bound in VIZ_SCALE_MAX_VALUES)
                 is_scale = bool(
                     is_integer
-                    and int(val_min) in (0, 1)
-                    and int(val_max) in VIZ_SCALE_MAX_VALUES
-                    and (val_max - val_min) <= VIZ_DISCRETE_MAX_RANGE
+                    and val_min_f >= 0
+                    and is_max_scale
+                    and (val_max_f - val_min_f) <= VIZ_DISCRETE_MAX_RANGE
                 )
 
-                val_counts = valid_series.value_counts().sort_index()
-                bins = []
-                discrete_vals = []
-                for val, count in val_counts.items():
-                    v = int(val) if is_integer else float(val)
-                    discrete_vals.append(v)
-                    lbl = str(v) if is_integer else f"{v:g}"
-                    pct = round(float(count / respondents * 100), 1) if respondents > 0 else 0.0
-                    bins.append({
-                        "label": lbl,
-                        "value": v,
-                        "count": int(count),
-                        "pct": pct,
-                        "bin_start": float(val),
-                        "bin_end": float(val),
-                    })
+                if is_scale:
+                    scale_min = 0 if abs(val_min_f) < 1e-9 else 1
+                    scale_max = int(round(val_max_f))
+                    bins = []
+                    discrete_vals = []
+                    int_counts = valid_series.round().astype(int).value_counts().to_dict()
+                    for v in range(scale_min, scale_max + 1):
+                        discrete_vals.append(v)
+                        cnt = int_counts.get(v, 0)
+                        pct = chart_insights._round_half_up(cnt / respondents * 100, 1) if respondents > 0 else 0.0
+                        bins.append({
+                            "label": str(v),
+                            "value": v,
+                            "count": cnt,
+                            "pct": pct,
+                            "bin_start": float(v),
+                            "bin_end": float(v),
+                        })
 
-                col_summary.update({
-                    "is_discrete": True,
-                    "is_scale": is_scale,
-                    "scale_min": int(val_min) if is_scale else None,
-                    "scale_max": int(val_max) if is_scale else None,
-                    "respondents": respondents,
-                    "discrete_values": discrete_vals,
-                    "distribution_bins": bins,
-                    "skip_chart": False,
-                    "skip_key": None,
-                })
+                    col_summary.update({
+                        "is_discrete": True,
+                        "is_scale": True,
+                        "scale_min": scale_min,
+                        "scale_max": scale_max,
+                        "respondents": respondents,
+                        "discrete_values": discrete_vals,
+                        "distribution_bins": bins,
+                        "skip_chart": False,
+                        "skip_key": None,
+                    })
+                else:
+                    val_counts = valid_series.value_counts().sort_index()
+                    bins = []
+                    discrete_vals = []
+                    for val, count in val_counts.items():
+                        v = int(round(val)) if is_integer else float(val)
+                        discrete_vals.append(v)
+                        lbl = str(v) if is_integer else f"{v:g}"
+                        pct = chart_insights._round_half_up(float(count / respondents * 100), 1) if respondents > 0 else 0.0
+                        bins.append({
+                            "label": lbl,
+                            "value": v,
+                            "count": int(count),
+                            "pct": pct,
+                            "bin_start": float(val),
+                            "bin_end": float(val),
+                        })
+
+                    col_summary.update({
+                        "is_discrete": True,
+                        "is_scale": False,
+                        "scale_min": None,
+                        "scale_max": None,
+                        "respondents": respondents,
+                        "discrete_values": discrete_vals,
+                        "distribution_bins": bins,
+                        "skip_chart": False,
+                        "skip_key": None,
+                    })
             else:
                 col_summary["is_discrete"] = False
                 if num_unique > VIZ_DISCRETE_MAX_UNIQUE:

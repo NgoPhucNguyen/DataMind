@@ -22,15 +22,124 @@ import { detectIssues, autoClean, confirmClean } from "../services/cleanerServic
 import PageHeader from "../components/PageHeader";
 import { BTN } from "../constants/ui";
 
-const CURRENT_SUMMARY_VERSION = 2;
+const CURRENT_SUMMARY_VERSION = 3;
 const ENABLE_CHART_EDIT = false; // bật lại khi xử lý xong cache-invalidation cho edit chart
 
-export function formatInsight(insight, t) {
+function LazyChart({ height, children }) {
+  const [isVisible, setIsVisible] = useState(() => {
+    return typeof window === "undefined" || !("IntersectionObserver" in window);
+  });
+  const containerRef = useRef(null);
+
+  useEffect(() => {
+    if (isVisible) return;
+    const el = containerRef.current;
+    if (!el) return;
+
+    if (!("IntersectionObserver" in window)) {
+      setIsVisible(true);
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setIsVisible(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "200px" }
+    );
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [isVisible]);
+
+  return (
+    <div ref={containerRef} style={{ height }} className="w-full">
+      {isVisible ? children : (
+        <div
+          className="w-full h-full bg-[#F9F9F8] rounded-lg animate-pulse flex items-center justify-center border border-[#EAEAEA]"
+          aria-hidden="true"
+        />
+      )}
+    </div>
+  );
+}
+
+export function formatInsight(insight, t, lang) {
   if (!insight) return "";
   if (insight.text) return insight.text;
   const { key, params = {} } = insight;
   if (!key) return "";
-  return t(`visualize.insight.${key}`, params);
+
+  const currentLang = lang || (t?.i18n ? t.i18n.language : "vi");
+  const locale = currentLang.startsWith("en") ? "en-US" : "vi-VN";
+
+  const formattedParams = {};
+  for (const [k, v] of Object.entries(params)) {
+    if (typeof v === "number") {
+      if (k === "mean") {
+        formattedParams[k] = v.toLocaleString(locale, {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        });
+      } else if (k === "pct") {
+        formattedParams[k] = v.toLocaleString(locale, {
+          minimumFractionDigits: 0,
+          maximumFractionDigits: 0,
+        });
+      } else {
+        formattedParams[k] = v.toLocaleString(locale, {
+          maximumFractionDigits: Number.isInteger(v) ? 0 : 1,
+          minimumFractionDigits: Number.isInteger(v) ? 0 : 1,
+        });
+      }
+    } else {
+      formattedParams[k] = v;
+    }
+  }
+
+  const translationKey = `visualize.insight.${key}`;
+  const translated = t(translationKey, formattedParams);
+  if (!translated || translated === translationKey) {
+    return "";
+  }
+  return translated;
+}
+
+export function getInsightTooltip(insight, t, lang) {
+  if (!insight) return undefined;
+  const { key, params = {} } = insight;
+
+  // Mean insights
+  if (key === "scale_mean" || key === "discrete_mean" || params.mean !== undefined) {
+    return t("visualize.insight_tooltip_mean");
+  }
+
+  // Pct insights
+  if (
+    params.pct !== undefined ||
+    key === "scale_top_box" ||
+    key === "discrete_top" ||
+    key === "top_value" ||
+    key === "top3_share" ||
+    key === "mc_top" ||
+    key === "trend_up" ||
+    key === "trend_down"
+  ) {
+    if (params.count !== undefined && params.n !== undefined) {
+      const currentLang = lang || (t?.i18n ? t.i18n.language : "vi");
+      const locale = currentLang.startsWith("en") ? "en-US" : "vi-VN";
+      return t("visualize.insight_tooltip_pct", {
+        count: typeof params.count === "number" ? params.count.toLocaleString(locale) : params.count,
+        n: typeof params.n === "number" ? params.n.toLocaleString(locale) : params.n,
+      });
+    }
+    return t("visualize.insight_tooltip_pct_fallback");
+  }
+
+  return undefined;
 }
 
 function getSubtitle(chart, stats, summary, t) {
@@ -161,7 +270,10 @@ const ChartCard = ({
           {/* Top-Right Toolbar */}
           <div className="flex items-center gap-1.5 shrink-0">
             {isSuggested && (
-              <span className="text-[10px] font-semibold bg-[#EAF2EB] text-[#1B4324] px-2 py-0.5 rounded-full border border-[#c8e0cb]/50">
+              <span
+                className="text-[10px] font-semibold bg-[#EAF2EB] text-[#1B4324] px-2 py-0.5 rounded-full border border-[#c8e0cb]/50 cursor-help"
+                title={t("visualize.badge_suggested_tooltip")}
+              >
                 {t("visualize.badge_suggested")}
               </span>
             )}
@@ -175,18 +287,31 @@ const ChartCard = ({
           </div>
         </div>
 
-        {/* Chart Canvas */}
-        <div
-          className={chart.type === "heatmap" ? "h-[500px] lg:h-[65vh] flex flex-col w-full my-2" : "w-full my-2"}
-          style={chart.type === "bar" ? { height: `${barHeight}px` } : (chart.type !== "heatmap" ? { height: "260px" } : undefined)}
-        >
-          {chart.type === "histogram" && <DistributionChart data={chart.data} color={chart.color} />}
-          {chart.type === "bar" && <CategoricalChart data={chart.data} color={chart.color} />}
-          {chart.type === "line" && <TrendChart data={chart.data} color={chart.color} />}
-          {chart.type === "heatmap" && <CorrelationHeatmap matrix={chart.matrix} topCorr={chart.topCorr} onCellClick={onCellClick} anchorPair={anchorPair} />}
-          {chart.type === "pie" && <PieChartComponent data={chart.data} color={chart.color} />}
-          {chart.type === "box" && <BoxPlotChart stats={stats} color={chart.color} />}
+        {/* Chart Canvas with Lazy Render */}
+        <div className="w-full my-2">
+          <LazyChart height={chart.type === "heatmap" ? "auto" : (chart.type === "bar" ? `${barHeight}px` : "260px")}>
+            <div
+              className={chart.type === "heatmap" ? "w-full" : "w-full h-full"}
+            >
+              {chart.type === "histogram" && <DistributionChart data={chart.data} color={chart.color} isDiscrete={stats?.is_discrete} />}
+              {chart.type === "bar" && <CategoricalChart data={chart.data} color={chart.color} />}
+              {chart.type === "line" && <TrendChart data={chart.data} color={chart.color} />}
+              {chart.type === "heatmap" && <CorrelationHeatmap matrix={chart.matrix} topCorr={chart.topCorr} onCellClick={onCellClick} anchorPair={anchorPair} />}
+              {chart.type === "pie" && <PieChartComponent data={chart.data} color={chart.color} />}
+              {chart.type === "box" && <BoxPlotChart stats={stats} color={chart.color} />}
+            </div>
+          </LazyChart>
         </div>
+
+        {/* Discrete scale / rating subtitle */}
+        {stats?.is_discrete && (
+          <p className="text-[11px] text-[#626C65] mt-1">
+            {stats.is_scale
+              ? t("visualize.scale_subtitle", { min: stats.scale_min, max: stats.scale_max, n: stats.respondents })
+              : t("visualize.discrete_subtitle", { n: stats.respondents })
+            }
+          </p>
+        )}
 
         {/* Multiple choice note */}
         {stats?.dtype === "multiple_choice" && (
@@ -202,11 +327,20 @@ const ChartCard = ({
               <Lightbulb className="w-3.5 h-3.5 text-[#1B4324]" /> {t("visualize.auto_insights_title")}
             </p>
             <ul className="space-y-1">
-              {insights.slice(0, 2).map((ins, idx) => (
-                <li key={idx} className="text-xs text-[#2A342D] leading-snug line-clamp-2">
-                  • {formatInsight(ins, t)}
-                </li>
-              ))}
+              {insights.slice(0, 2).map((ins, idx) => {
+                const text = formatInsight(ins, t);
+                if (!text) return null;
+                const tooltip = getInsightTooltip(ins, t);
+                return (
+                  <li
+                    key={idx}
+                    className={`text-xs text-[#2A342D] leading-snug line-clamp-2 ${tooltip ? "cursor-help" : ""}`}
+                    title={tooltip}
+                  >
+                    • {text}
+                  </li>
+                );
+              })}
             </ul>
           </div>
         )}
@@ -299,10 +433,10 @@ const EnlargedChartModal = ({
 
         {/* Modal Body */}
         <div className="p-6 overflow-y-auto space-y-6 flex-1">
-          <div className={chart.type === "heatmap" ? "h-[500px]" : "w-full"}>
+          <div className="w-full">
             {chart.type === "histogram" && (
               <div className="h-[360px]">
-                <DistributionChart data={modalData} color={chart.color} />
+                <DistributionChart data={modalData} color={chart.color} isDiscrete={stats?.is_discrete} />
               </div>
             )}
             {chart.type === "bar" && (
@@ -330,6 +464,16 @@ const EnlargedChartModal = ({
             )}
           </div>
 
+          {/* Discrete scale / rating subtitle */}
+          {stats?.is_discrete && (
+            <p className="text-xs text-[#626C65]">
+              {stats.is_scale
+                ? t("visualize.scale_subtitle", { min: stats.scale_min, max: stats.scale_max, n: stats.respondents })
+                : t("visualize.discrete_subtitle", { n: stats.respondents })
+              }
+            </p>
+          )}
+
           {stats?.dtype === "multiple_choice" && (
             <p className="text-xs text-[#626C65] italic">
               {t("visualize.mc_disclaimer")}
@@ -342,11 +486,20 @@ const EnlargedChartModal = ({
                 <Lightbulb className="w-4 h-4 text-[#1B4324]" /> {t("visualize.auto_insights_title")}
               </p>
               <ul className="space-y-1.5">
-                {insights.map((ins, idx) => (
-                  <li key={idx} className="text-xs text-[#2A342D]">
-                    • {formatInsight(ins, t)}
-                  </li>
-                ))}
+                {insights.map((ins, idx) => {
+                  const text = formatInsight(ins, t);
+                  if (!text) return null;
+                  const tooltip = getInsightTooltip(ins, t);
+                  return (
+                    <li
+                      key={idx}
+                      className={`text-xs text-[#2A342D] ${tooltip ? "cursor-help" : ""}`}
+                      title={tooltip}
+                    >
+                      • {text}
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           )}
@@ -398,7 +551,7 @@ const generateCharts = (summary, t) => {
   if (!summary || !summary.columns) return charts;
 
   Object.entries(summary.columns).forEach(([colName, info]) => {
-    if (info.skip_chart || info.missing_pct >= 60) return;
+    if (info.skip_chart) return;
 
     if (info.dtype === "numeric" && info.distribution_bins) {
       charts.distribution.push({
@@ -407,7 +560,7 @@ const generateCharts = (summary, t) => {
         col: colName,
         title: colName,
         data: info.distribution_bins,
-        score: (1 - info.missing_pct / 100) + (info.std / (Math.abs(info.mean) || 1) * 0.5)
+        score: (1 - (info.missing_pct || 0) / 100) + ((info.std || 0) / (Math.abs(info.mean) || 1) * 0.5)
       });
     } else if ((info.dtype === "categorical" || info.dtype === "boolean" || info.dtype === "multiple_choice") && info.top_values) {
       charts.distribution.push({
@@ -447,6 +600,79 @@ const generateCharts = (summary, t) => {
 
   return charts;
 };
+
+function SkippedColumnsPanel({ skippedColumns = [], pipelineMode, navigate }) {
+  const { t } = useTranslation();
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  if (!skippedColumns || skippedColumns.length === 0) return null;
+
+  return (
+    <div className="mt-8 border border-[#E5E5E3] bg-white rounded-xl overflow-hidden shadow-sm">
+      <button
+        type="button"
+        onClick={() => setIsExpanded(prev => !prev)}
+        className="w-full px-5 py-3.5 flex items-center justify-between text-left hover:bg-[#F9F9F8] transition-colors"
+      >
+        <span className="text-sm font-semibold text-[#121A14] flex items-center gap-1.5">
+          {t("visualize.skipped_panel_title", { n: skippedColumns.length })}
+          <span className="text-[#626C65] text-sm font-normal">
+            {isExpanded ? "▴" : "▾"}
+          </span>
+        </span>
+        <span className="text-xs text-[#626C65]">
+          {isExpanded ? t("visualize.title_collapse") : t("visualize.title_expand")}
+        </span>
+      </button>
+
+      {isExpanded && (
+        <div className="border-t border-[#E5E5E3] divide-y divide-[#EAEAEA] px-5 py-1">
+          {skippedColumns.map((item, idx) => {
+            let reasonText = null;
+            if (item.reason === "missing_high") {
+              reasonText = t("visualize.skipped_missing_high", { pct: item.missing_pct });
+            } else if (item.reason === "single_value") {
+              reasonText = t("visualize.skipped_single_value");
+            } else if (item.reason === "free_text") {
+              reasonText = (
+                <span>
+                  {t("visualize.skipped_free_text_prefix")}
+                  <button
+                    type="button"
+                    onClick={() => navigate(pipelineMode ? "/dashboard/pipeline/profiler" : "/dashboard/profiler")}
+                    className="text-[#1B4324] hover:underline font-medium inline"
+                  >
+                    {t("visualize.skipped_free_text_link")}
+                  </button>
+                </span>
+              );
+            } else {
+              reasonText = item.reason || "";
+            }
+
+            return (
+              <div key={idx} className="py-2.5 flex items-center justify-between gap-4 text-sm">
+                <div className="flex items-center gap-2 min-w-0">
+                  {item.letter && (
+                    <span className="font-mono text-xs font-semibold px-1.5 py-0.5 bg-[#F3F4F2] text-[#2A342D] border border-[#E5E5E3] rounded">
+                      {item.letter}
+                    </span>
+                  )}
+                  <span className="font-semibold text-[#121A14] truncate">
+                    {item.column}
+                  </span>
+                </div>
+                <div className="text-[#626C65] text-xs shrink-0 text-right">
+                  {reasonText}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function Visualize({ pipelineMode, onComplete, onError }) {
   const navigate = useNavigate();
@@ -1057,6 +1283,15 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
             </div>
           )}
 
+          {/* Columns without a chart panel (end of Distribution tab) */}
+          {activeTab === "distribution" && (
+            <SkippedColumnsPanel
+              skippedColumns={fileSession.statisticalSummary?.skipped_columns || []}
+              pipelineMode={pipelineMode}
+              navigate={navigate}
+            />
+          )}
+
           {/* Anchor Scatter Panel */}
           {activeTab === "correlation" && anchorPair && (
             <AnchorScatterPanel
@@ -1182,7 +1417,7 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
             onClick={handleConfirm}
             className={`${BTN.primary} px-5 py-2 flex items-center gap-2 text-xs font-semibold`}
           >
-            {t("visualize.btn_confirm_proceed")} <ArrowRight className="w-4 h-4" />
+            {t("visualize.btn_confirm_proceed")}
           </button>
         </div>
       </div>

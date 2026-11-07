@@ -31,7 +31,7 @@ import {
   DistributionChart, CategoricalChart, TrendChart,
   CorrelationHeatmap, PieChartComponent, BoxPlotChart
 } from "../components/charts/ChartComponents";
-import { formatInsight } from "./Visualize";
+import { formatInsight, getInsightTooltip } from "./Visualize";
 import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
 import { Document, Packer, Paragraph, TextRun, ImageRun, HeadingLevel, AlignmentType } from "docx";
@@ -835,13 +835,23 @@ export default function Report({ pipelineMode, onComplete }) {
 
                       {/* Chart Container */}
                       <div className="h-72 mb-4" ref={(el) => (chartRefs.current[cid] = el)}>
-                        {chart.type === "histogram" && <DistributionChart data={chartData} color={color} />}
+                        {chart.type === "histogram" && <DistributionChart data={chartData} color={color} isDiscrete={colStats?.is_discrete} />}
                         {chart.type === "bar" && <CategoricalChart data={chartData} color={color} />}
                         {chart.type === "line" && <TrendChart data={chartData} color={color} />}
                         {chart.type === "heatmap" && <CorrelationHeatmap matrix={matrix} topCorr={topCorr} />}
                         {chart.type === "pie" && <PieChartComponent data={chartData} color={color} />}
                         {chart.type === "box" && <BoxPlotChart stats={colStats} color={color} />}
                       </div>
+
+                      {/* Discrete scale / rating subtitle */}
+                      {colStats?.is_discrete && (
+                        <p className="text-[11px] text-[#626C65] mt-1 mb-3">
+                          {colStats.is_scale
+                            ? t("visualize.scale_subtitle", { min: colStats.scale_min, max: colStats.scale_max, n: colStats.respondents })
+                            : t("visualize.discrete_subtitle", { n: colStats.respondents })
+                          }
+                        </p>
+                      )}
 
                       {/* Multiple choice note */}
                       {colStats.dtype === "multiple_choice" && (
@@ -858,11 +868,20 @@ export default function Report({ pipelineMode, onComplete }) {
                             {t("report.auto_insights_title")}
                           </p>
                           <ul className="space-y-1">
-                            {autoInsights.slice(0, 2).map((ins, insIdx) => (
-                              <li key={insIdx} className="text-xs text-[#2A342D] leading-snug line-clamp-2">
-                                • {formatInsight(ins, t)}
-                              </li>
-                            ))}
+                            {autoInsights.slice(0, 2).map((ins, insIdx) => {
+                              const text = formatInsight(ins, t);
+                              if (!text) return null;
+                              const tooltip = getInsightTooltip(ins, t);
+                              return (
+                                <li
+                                  key={insIdx}
+                                  className={`text-xs text-[#2A342D] leading-snug line-clamp-2 ${tooltip ? "cursor-help" : ""}`}
+                                  title={tooltip}
+                                >
+                                  • {text}
+                                </li>
+                              );
+                            })}
                           </ul>
                         </div>
                       )}

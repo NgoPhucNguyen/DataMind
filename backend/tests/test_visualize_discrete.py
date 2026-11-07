@@ -134,7 +134,9 @@ def test_6i_scale_insights():
     top_box_ins = next(ins for ins in insights if ins["key"] == "scale_top_box")
     assert top_box_ins["params"]["low"] == 4
     assert top_box_ins["params"]["high"] == 5
-    assert top_box_ins["params"]["pct"] == 40.0
+    assert top_box_ins["params"]["pct"] == 40
+    assert top_box_ins["params"]["count"] == 12
+    assert top_box_ins["params"]["n"] == 30
 
 
 def test_6j_continuous_insights_regression():
@@ -166,4 +168,68 @@ def test_skipped_columns_order_and_letters():
     assert skipped[1]["column"] == "single_col"
     assert skipped[1]["letter"] == "C"
     assert skipped[1]["reason"] == "single_value"
+
+
+def test_scale_detection_missing_level_one_float64():
+    """Real survey scale: values {2, 3, 4, 5} (level 1 has 0 count) + NaN as float64."""
+    import numpy as np
+    data = [2, 3, 4, 5] * 50 + [np.nan] * 32
+    df = pd.DataFrame({"q": pd.Series(data, dtype="float64")})
+    stats = _compute_column_stats(df, "q")
+    assert stats["is_discrete"] is True
+    assert stats["is_scale"] is True
+    assert stats["scale_min"] == 1
+    assert stats["scale_max"] == 5
+    assert stats["discrete_values"] == [1, 2, 3, 4, 5]
+    assert len(stats["distribution_bins"]) == 5
+    bin_1 = stats["distribution_bins"][0]
+    assert bin_1["label"] == "1"
+    assert bin_1["value"] == 1
+    assert bin_1["count"] == 0
+    assert bin_1["pct"] == 0.0
+
+    insights = stats["auto_insights"]
+    keys = [ins["key"] for ins in insights]
+    assert "scale_mean" in keys
+    assert "scale_top_box" in keys
+
+
+def test_scale_detection_missing_level_one_int64_nullable():
+    """Real survey scale: values {2, 3, 4, 5} + pd.NA as Int64."""
+    data = [2, 3, 4, 5] * 50 + [pd.NA] * 32
+    df = pd.DataFrame({"q": pd.Series(data, dtype="Int64")})
+    stats = _compute_column_stats(df, "q")
+    assert stats["is_discrete"] is True
+    assert stats["is_scale"] is True
+    assert stats["scale_min"] == 1
+    assert stats["scale_max"] == 5
+    assert stats["discrete_values"] == [1, 2, 3, 4, 5]
+    assert len(stats["distribution_bins"]) == 5
+    bin_1 = stats["distribution_bins"][0]
+    assert bin_1["count"] == 0
+
+    insights = stats["auto_insights"]
+    keys = [ins["key"] for ins in insights]
+    assert "scale_mean" in keys
+    assert "scale_top_box" in keys
+
+
+def test_scale_detection_missing_level_one_float64_nullable():
+    """Real survey scale: values {2.0, 3.0, 4.0, 5.0} + pd.NA as Float64."""
+    data = [2.0, 3.0, 4.0, 5.0] * 50 + [pd.NA] * 32
+    df = pd.DataFrame({"q": pd.Series(data, dtype="Float64")})
+    stats = _compute_column_stats(df, "q")
+    assert stats["is_discrete"] is True
+    assert stats["is_scale"] is True
+    assert stats["scale_min"] == 1
+    assert stats["scale_max"] == 5
+    assert stats["discrete_values"] == [1, 2, 3, 4, 5]
+    assert len(stats["distribution_bins"]) == 5
+    bin_1 = stats["distribution_bins"][0]
+    assert bin_1["count"] == 0
+
+    insights = stats["auto_insights"]
+    keys = [ins["key"] for ins in insights]
+    assert "scale_mean" in keys
+    assert "scale_top_box" in keys
 

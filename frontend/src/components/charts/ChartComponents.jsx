@@ -6,25 +6,78 @@ import {
   LineChart, Line, PieChart, Pie, Cell
 } from "recharts";
 
-export const DistributionChart = ({ data = [], color = "#1B4324" }) => {
-  const chartData = data.map(d => ({
-    name: `${d.bin_start.toFixed(1)} - ${d.bin_end.toFixed(1)}`,
-    count: d.count
-  }));
+export const CHART_THEME = {
+  primary: "#1B4324",
+  textMuted: "#626C65",
+  textDark: "#121A14",
+  borderGrid: "#EAEAEA",
+  borderCard: "#E5E5E3",
+  otherCategory: "#9CA3AF",
+  tooltipCursor: "rgba(0,0,0,0.02)",
+  piePalette: ["#1B4324", "#2C6E3B", "#4A8C57", "#73AB7D", "#A1C9A7", "#D1E6D5"],
+};
+
+export const DistributionChart = ({ data = [], color = CHART_THEME.primary, isDiscrete = false }) => {
+  const isDiscreteMode = Boolean(isDiscrete || (data.length > 0 && data[0]?.label !== undefined));
+
+  const chartData = data.map(d => {
+    if (isDiscreteMode) {
+      return {
+        name: String(d.label ?? d.value ?? ""),
+        count: d.count ?? 0,
+        pct: d.pct,
+      };
+    }
+    const start = typeof d.bin_start === "number" ? d.bin_start.toFixed(1) : (d.bin_start ?? "");
+    const end = typeof d.bin_end === "number" ? d.bin_end.toFixed(1) : (d.bin_end ?? "");
+    return {
+      name: `${start} - ${end}`,
+      count: d.count ?? 0,
+      pct: d.pct,
+    };
+  });
+
+  const CustomTooltip = ({ active, payload }) => {
+    if (active && payload && payload.length) {
+      const item = payload[0].payload;
+      return (
+        <div className="bg-white border border-[#E5E5E3] rounded-lg p-2.5 shadow-md text-xs z-50 pointer-events-none">
+          <p className="font-semibold text-[#121A14] mb-1">{item.name}</p>
+          <p className="text-[#626C65]">
+            {isDiscreteMode && item.pct !== undefined
+              ? `${item.count} (${item.pct}%)`
+              : item.count
+            }
+          </p>
+        </div>
+      );
+    }
+    return null;
+  };
+
   return (
     <ResponsiveContainer width="100%" height="100%">
       <BarChart data={chartData}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#EAEAEA" vertical={false} />
-        <XAxis dataKey="name" stroke="#626C65" fontSize={10} tickFormatter={(val) => val.split(" - ")[0]} />
-        <YAxis stroke="#626C65" fontSize={10} />
-        <Tooltip cursor={{ fill: "rgba(0,0,0,0.02)" }} contentStyle={{ backgroundColor: "#ffffff", border: "1px solid #EAEAEA", borderRadius: 8, color: "#121A14" }} wrapperStyle={{ zIndex: 1000 }} />
+        <CartesianGrid strokeDasharray="3 3" stroke={CHART_THEME.borderGrid} vertical={false} />
+        <XAxis
+          dataKey="name"
+          stroke={CHART_THEME.textMuted}
+          fontSize={10}
+          tickFormatter={isDiscreteMode ? undefined : (val) => val.split(" - ")[0]}
+        />
+        <YAxis stroke={CHART_THEME.textMuted} fontSize={10} />
+        <Tooltip
+          content={<CustomTooltip />}
+          cursor={{ fill: CHART_THEME.tooltipCursor }}
+          wrapperStyle={{ zIndex: 1000 }}
+        />
         <Bar dataKey="count" fill={color} radius={[4, 4, 0, 0]} />
       </BarChart>
     </ResponsiveContainer>
   );
 };
 
-export const CategoricalChart = ({ data = [], color = "#1B4324" }) => {
+export const CategoricalChart = ({ data = [], color = CHART_THEME.primary }) => {
   const { t } = useTranslation();
 
   const getLabel = (val, entry) => {
@@ -56,7 +109,7 @@ export const CategoricalChart = ({ data = [], color = "#1B4324" }) => {
 
     return (
       <g transform={`translate(${x},${y})`}>
-        <text x={-6} y={line2 ? -4 : 3} textAnchor="end" fill="#626C65" fontSize={10} className="select-none">
+        <text x={-6} y={line2 ? -4 : 3} textAnchor="end" fill={CHART_THEME.textMuted} fontSize={10} className="select-none">
           <title>{fullText}</title>
           <tspan x={-6}>{line1}</tspan>
           {line2 && <tspan x={-6} dy={12}>{line2}</tspan>}
@@ -90,20 +143,20 @@ export const CategoricalChart = ({ data = [], color = "#1B4324" }) => {
   return (
     <ResponsiveContainer width="100%" height="100%">
       <BarChart data={data} layout="vertical" margin={{ left: 10, right: 20, top: 4, bottom: 4 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#EAEAEA" horizontal={false} />
-        <XAxis type="number" stroke="#626C65" fontSize={10} />
+        <CartesianGrid strokeDasharray="3 3" stroke={CHART_THEME.borderGrid} horizontal={false} />
+        <XAxis type="number" stroke={CHART_THEME.textMuted} fontSize={10} />
         <YAxis 
           dataKey="value" 
           type="category" 
           width={130} 
           tick={renderYTick}
         />
-        <Tooltip content={<CustomTooltip />} cursor={{ fill: "rgba(0,0,0,0.02)" }} wrapperStyle={{ zIndex: 1000 }} />
+        <Tooltip content={<CustomTooltip />} cursor={{ fill: CHART_THEME.tooltipCursor }} wrapperStyle={{ zIndex: 1000 }} />
         <Bar dataKey="count" radius={[0, 4, 4, 0]}>
           {data.map((entry, index) => (
             <Cell
               key={`cell-${index}`}
-              fill={entry.value === "__other__" ? "#9CA3AF" : color}
+              fill={entry.value === "__other__" ? CHART_THEME.otherCategory : color}
             />
           ))}
         </Bar>
@@ -112,14 +165,14 @@ export const CategoricalChart = ({ data = [], color = "#1B4324" }) => {
   );
 };
 
-export const TrendChart = ({ data = [], color = "#1B4324" }) => {
+export const TrendChart = ({ data = [], color = CHART_THEME.primary }) => {
   return (
     <ResponsiveContainer width="100%" height="100%">
       <LineChart data={data}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#EAEAEA" vertical={false} />
-        <XAxis dataKey="period" stroke="#626C65" fontSize={10} />
-        <YAxis stroke="#626C65" fontSize={10} />
-        <Tooltip contentStyle={{ backgroundColor: "#ffffff", border: "1px solid #EAEAEA", borderRadius: 8, color: "#121A14" }} wrapperStyle={{ zIndex: 1000 }} />
+        <CartesianGrid strokeDasharray="3 3" stroke={CHART_THEME.borderGrid} vertical={false} />
+        <XAxis dataKey="period" stroke={CHART_THEME.textMuted} fontSize={10} />
+        <YAxis stroke={CHART_THEME.textMuted} fontSize={10} />
+        <Tooltip contentStyle={{ backgroundColor: "#ffffff", border: `1px solid ${CHART_THEME.borderGrid}`, borderRadius: 8, color: CHART_THEME.textDark }} wrapperStyle={{ zIndex: 1000 }} />
         <Line type="monotone" dataKey="count" stroke={color} strokeWidth={2} dot={{ r: 3, fill: color }} />
       </LineChart>
     </ResponsiveContainer>
@@ -127,10 +180,13 @@ export const TrendChart = ({ data = [], color = "#1B4324" }) => {
 };
 
 export const CorrelationHeatmap = ({ matrix, topCorr, onCellClick, anchorPair }) => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [zoom, setZoom] = useState(1);
 
   if (!matrix || Object.keys(matrix).length === 0) return <p className="text-muted text-sm">{t("visualize.heatmap_insufficient")}</p>;
+
+  const currentLang = i18n?.language || "vi";
+  const locale = currentLang.startsWith("en") ? "en-US" : "vi-VN";
 
   const cols = Object.keys(matrix);
 
@@ -152,7 +208,7 @@ export const CorrelationHeatmap = ({ matrix, topCorr, onCellClick, anchorPair })
   const isDiagonal = (row, col) => row === col;
 
   return (
-    <div className="flex flex-col h-full w-full">
+    <div className="flex flex-col w-full">
       <div className="flex justify-end gap-2 mb-2 shrink-0">
         <button onClick={() => setZoom(z => Math.max(0.4, z - 0.2))} className="p-1.5 border border-[#EAEAEA] bg-white text-[#626C65] hover:bg-[#EAF2EB] hover:text-[#1B4324] rounded-md transition-colors" title={t("visualize.btn_zoom_out")}>
           <ZoomOut size={16} strokeWidth={1.5} />
@@ -163,7 +219,7 @@ export const CorrelationHeatmap = ({ matrix, topCorr, onCellClick, anchorPair })
         </button>
       </div>
       
-      <div className="overflow-auto flex-1 relative border border-[#EAEAEA] rounded-lg bg-[#F9F9F8]">
+      <div className="overflow-auto max-h-[420px] relative border border-[#EAEAEA] rounded-lg bg-[#F9F9F8]">
         <div style={{ transform: `scale(${zoom})`, transformOrigin: 'top left', minWidth: 'max-content' }} className="p-2 transition-transform duration-200">
           <table className="w-full text-xs text-center border-collapse bg-white shadow-sm">
             <thead>
@@ -227,14 +283,31 @@ export const CorrelationHeatmap = ({ matrix, topCorr, onCellClick, anchorPair })
       )}
 
       {topCorr && topCorr.length > 0 && (
-        <div className="mt-4">
-          <p className="text-sm font-semibold mb-2 text-ink">{t("visualize.heatmap_top_corr")}</p>
-          <div className="flex flex-wrap gap-2">
-            {topCorr.slice(0, 5).map((tc, idx) => (
-              <span key={idx} className="text-xs px-2.5 py-1 rounded-full bg-[#F9F9F8] border border-border text-ink">
-                {tc.col_a} ↔ {tc.col_b}: <span className={tc.r > 0 ? "text-forest font-semibold" : "text-[#9F2F2D] font-semibold"}>{tc.r}</span>
-              </span>
-            ))}
+        <div className="mt-4 pt-3 border-t border-[#EAEAEA]">
+          <p className="text-xs font-semibold mb-2 text-[#121A14]">{t("visualize.heatmap_top_corr")}</p>
+          <div className="space-y-1.5">
+            {topCorr.slice(0, 5).map((tc, idx) => {
+              const pairLabel = `${tc.col_a} ↔ ${tc.col_b}`;
+              const rNum = typeof tc.r === "number" ? tc.r : parseFloat(tc.r);
+              const rVal = !isNaN(rNum)
+                ? rNum.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                : tc.r;
+              const isPositive = !isNaN(rNum) ? rNum >= 0 : true;
+              return (
+                <div
+                  key={idx}
+                  className="flex items-center justify-between text-xs py-1.5 px-3 rounded-lg bg-[#F9F9F8] border border-[#EAEAEA] gap-2"
+                  title={`${pairLabel}: ${rVal}`}
+                >
+                  <span className="truncate text-[#2A342D]" title={pairLabel}>
+                    {pairLabel}
+                  </span>
+                  <span className={`font-mono font-semibold shrink-0 ${isPositive ? "text-[#1B4324]" : "text-[#9F2F2D]"}`}>
+                    {rVal}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -242,8 +315,8 @@ export const CorrelationHeatmap = ({ matrix, topCorr, onCellClick, anchorPair })
   );
 };
 
-export const PieChartComponent = ({ data = [], color = "#1B4324" }) => {
-  const COLORS = [color, "#2C6E3B", "#4A8C57", "#73AB7D", "#A1C9A7", "#D1E6D5"];
+export const PieChartComponent = ({ data = [], color = CHART_THEME.primary }) => {
+  const COLORS = [color, ...CHART_THEME.piePalette.slice(1)];
   return (
     <ResponsiveContainer width="100%" height="100%">
       <PieChart>
@@ -261,13 +334,13 @@ export const PieChartComponent = ({ data = [], color = "#1B4324" }) => {
             <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
           ))}
         </Pie>
-        <Tooltip contentStyle={{ backgroundColor: "#ffffff", border: "1px solid #EAEAEA", borderRadius: 8, color: "#121A14" }} />
+        <Tooltip contentStyle={{ backgroundColor: "#ffffff", border: `1px solid ${CHART_THEME.borderGrid}`, borderRadius: 8, color: CHART_THEME.textDark }} />
       </PieChart>
     </ResponsiveContainer>
   );
 };
 
-export const BoxPlotChart = ({ stats, color = "#1B4324" }) => {
+export const BoxPlotChart = ({ stats, color = CHART_THEME.primary }) => {
   const { t } = useTranslation();
   if (!stats) return null;
   const data = [
@@ -276,12 +349,12 @@ export const BoxPlotChart = ({ stats, color = "#1B4324" }) => {
   return (
     <ResponsiveContainer width="100%" height="100%">
       <BarChart data={data} layout="vertical">
-        <CartesianGrid strokeDasharray="3 3" stroke="#EAEAEA" horizontal={false} />
-        <XAxis type="number" stroke="#626C65" fontSize={10} domain={[stats.min || 0, stats.max || 0]} />
-        <YAxis dataKey="name" type="category" width={80} stroke="#626C65" fontSize={10} />
+        <CartesianGrid strokeDasharray="3 3" stroke={CHART_THEME.borderGrid} horizontal={false} />
+        <XAxis type="number" stroke={CHART_THEME.textMuted} fontSize={10} domain={[stats.min || 0, stats.max || 0]} />
+        <YAxis dataKey="name" type="category" width={80} stroke={CHART_THEME.textMuted} fontSize={10} />
         <Tooltip 
-          cursor={{ fill: "rgba(0,0,0,0.02)" }} 
-          contentStyle={{ backgroundColor: "#ffffff", border: "1px solid #EAEAEA", borderRadius: 8, color: "#121A14" }} 
+          cursor={{ fill: CHART_THEME.tooltipCursor }} 
+          contentStyle={{ backgroundColor: "#ffffff", border: `1px solid ${CHART_THEME.borderGrid}`, borderRadius: 8, color: CHART_THEME.textDark }} 
           formatter={(value, name, props) => {
             if (name === "box") return `p25: ${props.payload.box[0].toFixed(2)}, p75: ${props.payload.box[1].toFixed(2)}`;
             return value;

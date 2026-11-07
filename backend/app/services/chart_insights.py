@@ -1,3 +1,18 @@
+from decimal import Decimal, ROUND_HALF_UP
+
+
+def _round_half_up(val: float | int | str, decimals: int = 1) -> float:
+    """Làm tròn số theo quy tắc half-up (ví dụ 3.25 -> 3.3 thay vì 3.2 của bankers rounding)."""
+    if val is None:
+        return 0.0
+    try:
+        d = Decimal(str(val))
+        target = Decimal("10") ** -decimals
+        return float(d.quantize(target, rounding=ROUND_HALF_UP))
+    except Exception:
+        return round(float(val), decimals)
+
+
 def generate_insights(stats: dict) -> list[dict]:
     """
     Tạo danh sách các nhận xét tự động (auto insights) cho biểu đồ dưới dạng có cấu trúc:
@@ -58,7 +73,7 @@ def generate_insights(stats: dict) -> list[dict]:
                         "key": "scale_mean",
                         "type": "scale_mean",
                         "params": {
-                            "mean": round(float(mean_val), 1),
+                            "mean": _round_half_up(mean_val, 2),
                             "max": int(scale_max),
                             "n": int(n)
                         }
@@ -74,14 +89,16 @@ def generate_insights(stats: dict) -> list[dict]:
                         for b in bins
                         if low <= b.get("value", float("-inf")) <= high
                     )
-                    pct = round(top_box_count / n * 100, 1) if n > 0 else 0.0
+                    pct = (top_box_count / n * 100) if n > 0 else 0.0
                     insights.append({
                         "key": "scale_top_box",
                         "type": "scale_top_box",
                         "params": {
-                            "pct": pct,
+                            "pct": int(_round_half_up(pct, 0)),
                             "low": int(low),
-                            "high": int(high)
+                            "high": int(high),
+                            "count": int(top_box_count),
+                            "n": int(n)
                         }
                     })
             else:
@@ -92,7 +109,7 @@ def generate_insights(stats: dict) -> list[dict]:
                         "key": "discrete_mean",
                         "type": "discrete_mean",
                         "params": {
-                            "mean": round(float(mean_val), 1),
+                            "mean": _round_half_up(mean_val, 2),
                             "n": int(n)
                         }
                     })
@@ -100,12 +117,16 @@ def generate_insights(stats: dict) -> list[dict]:
                 bins = stats.get("distribution_bins", [])
                 if bins:
                     top_bin = max(bins, key=lambda b: b.get("count", 0))
+                    top_count = int(top_bin.get("count", 0))
+                    top_pct = (top_count / n * 100) if n > 0 else top_bin.get("pct", 0.0)
                     insights.append({
                         "key": "discrete_top",
                         "type": "discrete_top",
                         "params": {
                             "value": top_bin.get("value"),
-                            "pct": top_bin.get("pct", 0.0)
+                            "pct": int(_round_half_up(top_pct, 0)),
+                            "count": top_count,
+                            "n": int(n)
                         }
                     })
         else:

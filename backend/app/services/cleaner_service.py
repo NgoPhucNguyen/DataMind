@@ -78,16 +78,12 @@ def resolve_column_type(
 
 def is_integer_numeric(series: pd.Series) -> bool:
     """Check if all non-empty values of a numeric series are whole numbers."""
-    non_empty = series.dropna()
-    if len(non_empty) == 0:
-        return False
-    if pd.api.types.is_integer_dtype(non_empty.dtype):
-        return True
     try:
-        numeric_vals = pd.to_numeric(non_empty, errors="coerce")
-        if numeric_vals.isna().any():
+        numeric_vals = pd.to_numeric(series, errors="coerce").dropna()
+        if len(numeric_vals) == 0:
             return False
-        return bool((numeric_vals % 1 == 0).all())
+        diff = (numeric_vals - numeric_vals.round()).abs()
+        return bool((diff < 1e-9).all())
     except Exception:
         return False
 

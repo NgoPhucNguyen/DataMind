@@ -13,7 +13,15 @@ const MAX_PLOTTED_POINTS = 30;
 
 function getPlottedData(chart) {
   if (!chart || !chart.data || !Array.isArray(chart.data)) return [];
-  return chart.data.slice(0, MAX_PLOTTED_POINTS);
+  const points = chart.data.slice(0, MAX_PLOTTED_POINTS);
+  return points.map(item => {
+    if (item && typeof item === "object" && item.label !== undefined) {
+      const res = { label: String(item.label), count: item.count };
+      if (item.pct !== undefined) res.pct = item.pct;
+      return res;
+    }
+    return item;
+  });
 }
 
 function getChartConfig(chart) {
