@@ -68,6 +68,13 @@ VIZ_DISCRETE_MAX_RANGE_DESC = "Khoảng giá trị tối đa (max - min) để �
 VIZ_SCALE_MAX_VALUES = (5, 7, 10) # max value that looks like a rating scale
 VIZ_SCALE_MAX_VALUES_DESC = "Các giá trị cực đại điển hình của thang đo đánh giá (5, 7, 10 điểm)"
 
+# Ngưỡng tương quan Correlation Matrix Visualize (Phase 3a)
+VIZ_CORR_MAX_COLS = 40            # replaces the hardcoded 20
+VIZ_CORR_MAX_COLS_DESC = "Số lượng cột số tối đa đưa vào ma trận tương quan (tối đa 40)"
+
+VIZ_CORR_MIN_PAIR_N = 10          # pairs with fewer complete rows get r = null
+VIZ_CORR_MIN_PAIR_N_DESC = "Số dòng quan sát hoàn chỉnh tối thiểu của một cặp biến để tính hệ số tương quan (>= 10)"
+
 # Số lượng mẫu hiển thị
 SAMPLE_VALUE_LIMIT = 5
 SAMPLE_VALUE_LIMIT_DESC = "Số lượng giá trị mẫu đại diện tối đa trả về cho mỗi cột"
@@ -280,6 +287,16 @@ def get_all_rules_metadata() -> dict[str, Any]:
                 "value": HIGH_MISSING_PCT,
                 "unit": "percent",
                 "description": "Tỷ lệ ô trống tối đa để hiển thị biểu đồ trực quan hóa"
+            },
+            "corr_max_cols": {
+                "value": VIZ_CORR_MAX_COLS,
+                "unit": "columns",
+                "description": VIZ_CORR_MAX_COLS_DESC
+            },
+            "corr_min_pair_n": {
+                "value": VIZ_CORR_MIN_PAIR_N,
+                "unit": "rows",
+                "description": VIZ_CORR_MIN_PAIR_N_DESC
             }
         }
     }

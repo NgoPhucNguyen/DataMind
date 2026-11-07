@@ -32,6 +32,7 @@ import {
   CorrelationHeatmap, PieChartComponent, BoxPlotChart
 } from "../components/charts/ChartComponents";
 import { formatInsight, getInsightTooltip } from "./Visualize";
+import { computeEffectiveChart } from "../utils/chartView";
 import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
 import { Document, Packer, Paragraph, TextRun, ImageRun, HeadingLevel, AlignmentType } from "docx";
@@ -164,6 +165,12 @@ export default function Report({ pipelineMode, onComplete }) {
 
         // Cleaner
         setCleanerState(data.cleaner || null);
+
+        // Visualize: restore confirmed charts if not already in session
+        if (!fileSession.confirmedCharts && data.visualize?.charts) {
+          setCharts(data.visualize.charts);
+          updateFileSession({ confirmedCharts: data.visualize.charts });
+        }
 
         // Intro initialization logic:
         // a. Cached intro from /report/state (ai or user)
@@ -764,19 +771,25 @@ export default function Report({ pipelineMode, onComplete }) {
                   const colName = chart.column || chart.col;
                   const colStats = statsMap[colName] || {};
 
-                  let chartData = [];
+                  // Resolve settings: live chartSettings in fileSession takes priority, else chart.settings, else defaults
+                  const chartSettings = fileSession.chartSettings?.[cid] ?? chart.settings ?? {};
+                  const effective = computeEffectiveChart(
+                    chart,
+                    colStats,
+                    chartSettings,
+                    fileSession.statisticalSummary,
+                    t,
+                    lang
+                  );
+
+                  const displayType = effective.displayType;
+                  const effectiveData = effective.effectiveData;
+                  const effectiveStats = effective.effectiveStats || colStats;
+
                   let matrix = null;
                   let topCorr = null;
 
-                  if (chart.type === "histogram") {
-                    chartData = colStats.distribution_bins || [];
-                  } else if (chart.type === "bar" || chart.type === "pie") {
-                    chartData = colStats.top_values || [];
-                  } else if (chart.type === "line") {
-                    chartData = colStats.trend_data || [];
-                  }
-
-                  if (chart.type === "heatmap") {
+                  if (displayType === "heatmap") {
                     matrix = fileSession.statisticalSummary?.correlation_matrix ||
                       fileSession.statisticalSummary?.correlation?.matrix;
                     topCorr = fileSession.statisticalSummary?.top_correlations ||
@@ -785,12 +798,18 @@ export default function Report({ pipelineMode, onComplete }) {
 
                   const color = chart.color || "#1B4324";
 
-                  if (chart.type === "heatmap" && (!matrix || Object.keys(matrix).length === 0)) return null;
-                  if (chart.type !== "heatmap" && chart.type !== "box" && chartData.length === 0) return null;
-                  if (chart.type === "box" && !colStats.min) return null;
+                  if (displayType === "heatmap" && (!matrix || Object.keys(matrix).length === 0)) return null;
+                  if (displayType !== "heatmap" && displayType !== "box" && effectiveData.length === 0) return null;
+                  if (displayType === "box" && !effectiveStats.min) return null;
 
                   const autoInsights = colStats.auto_insights || [];
                   const aiExplanation = chart.ai_explanation || fileSession.chartExplanations?.[cid]?.content;
+
+                  const containerHeight = displayType === "bar"
+                    ? Math.max(288, effective.calculatedBarHeight || 0)
+                    : (displayType === "heatmap" || displayType === "pie")
+                    ? "auto"
+                    : 288;
 
                   return (
                     <div
@@ -834,21 +853,49 @@ export default function Report({ pipelineMode, onComplete }) {
                       </h3>
 
                       {/* Chart Container */}
-                      <div className="h-72 mb-4" ref={(el) => (chartRefs.current[cid] = el)}>
-                        {chart.type === "histogram" && <DistributionChart data={chartData} color={color} isDiscrete={colStats?.is_discrete} />}
-                        {chart.type === "bar" && <CategoricalChart data={chartData} color={color} />}
-                        {chart.type === "line" && <TrendChart data={chartData} color={color} />}
-                        {chart.type === "heatmap" && <CorrelationHeatmap matrix={matrix} topCorr={topCorr} />}
-                        {chart.type === "pie" && <PieChartComponent data={chartData} color={color} />}
-                        {chart.type === "box" && <BoxPlotChart stats={colStats} color={color} />}
+                      <div
+                        className="mb-4 w-full"
+                        style={{
+                          minHeight: displayType === "pie" ? "auto" : "288px",
+                          height: typeof containerHeight === "number" ? `${containerHeight}px` : containerHeight
+                        }}
+                        ref={(el) => (chartRefs.current[cid] = el)}
+                      >
+                        {displayType === "histogram" && (
+                          <DistributionChart
+                            data={effectiveData}
+                            color={color}
+                            isDiscrete={effectiveStats?.is_discrete}
+                          />
+                        )}
+                        {displayType === "bar" && (
+                          <CategoricalChart data={effectiveData} color={color} />
+                        )}
+                        {displayType === "line" && (
+                          <TrendChart data={effectiveData} color={color} />
+                        )}
+                        {displayType === "heatmap" && (
+                          <CorrelationHeatmap matrix={matrix} topCorr={topCorr} />
+                        )}
+                        {displayType === "pie" && (
+                          <PieChartComponent
+                            data={effectiveData}
+                            color={color}
+                            isDiscrete={effectiveStats?.is_discrete}
+                            isScale={effectiveStats?.is_scale}
+                          />
+                        )}
+                        {displayType === "box" && (
+                          <BoxPlotChart stats={effectiveStats} color={color} />
+                        )}
                       </div>
 
                       {/* Discrete scale / rating subtitle */}
-                      {colStats?.is_discrete && (
+                      {effectiveStats?.is_discrete && (
                         <p className="text-[11px] text-[#626C65] mt-1 mb-3">
-                          {colStats.is_scale
-                            ? t("visualize.scale_subtitle", { min: colStats.scale_min, max: colStats.scale_max, n: colStats.respondents })
-                            : t("visualize.discrete_subtitle", { n: colStats.respondents })
+                          {effectiveStats.is_scale
+                            ? t("visualize.scale_subtitle", { min: effectiveStats.scale_min, max: effectiveStats.scale_max, n: effectiveStats.respondents })
+                            : t("visualize.discrete_subtitle", { n: effectiveStats.respondents })
                           }
                         </p>
                       )}
@@ -861,7 +908,7 @@ export default function Report({ pipelineMode, onComplete }) {
                       )}
 
                       {/* Auto Insights (Lightbulb) - Same formatting as Visualize */}
-                      {chart.type !== "heatmap" && autoInsights.length > 0 && (
+                      {displayType !== "heatmap" && autoInsights.length > 0 && (
                         <div className="mt-3 pt-3 border-t border-[#EAEAEA]">
                           <p className="text-xs font-semibold text-[#1B4324] mb-1.5 flex items-center gap-1.5">
                             <Lightbulb className="w-3.5 h-3.5 text-[#1B4324]" />

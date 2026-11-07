@@ -12,7 +12,69 @@ from app.core.rules import (
     VIZ_DISCRETE_MAX_RANGE,
     VIZ_SCALE_MAX_VALUES,
     HIGH_MISSING_PCT,
+    VIZ_CORR_MAX_COLS,
+    VIZ_CORR_MIN_PAIR_N,
 )
+
+
+def _get_column_letter(df: pd.DataFrame, col: str, default_idx: int = 0) -> str:
+    """Trả về ký tự chữ cái (A, B, ..., AA) của cột trong DataFrame."""
+    column_letters = getattr(df, "attrs", {}).get("column_letters", {}) if hasattr(df, "attrs") else {}
+    if col in column_letters:
+        return column_letters[col]
+    try:
+        col_list = list(df.columns)
+        idx = col_list.index(col) if col in col_list else default_idx
+        return cleaner_service.col_index_to_letter(idx)
+    except Exception:
+        return cleaner_service.col_index_to_letter(default_idx)
+
+
+def _inspect_discrete(series: pd.Series) -> dict:
+    """
+    Xác định một series số có phải dạng rời rạc (discrete / scale) hay không,
+    và trả về danh sách đầy đủ các bậc (levels), bao gồm cả các bậc khuyết nếu là thang đo (scale).
+    """
+    valid = pd.to_numeric(series, errors="coerce").dropna()
+    if valid.empty:
+        return {"is_discrete": False, "is_scale": False, "levels": [], "scale_min": None, "scale_max": None}
+
+    num_unique = int(valid.nunique())
+    if not (2 <= num_unique <= VIZ_DISCRETE_MAX_UNIQUE):
+        return {"is_discrete": False, "is_scale": False, "levels": [], "scale_min": None, "scale_max": None}
+
+    val_min_f = float(valid.min())
+    val_max_f = float(valid.max())
+    is_integer = cleaner_service.is_integer_numeric(valid)
+    is_max_scale = any(abs(val_max_f - bound) < 1e-9 for bound in VIZ_SCALE_MAX_VALUES)
+    is_scale = bool(
+        is_integer
+        and val_min_f >= 0
+        and is_max_scale
+        and (val_max_f - val_min_f) <= VIZ_DISCRETE_MAX_RANGE
+    )
+
+    if is_scale:
+        scale_min = 0 if abs(val_min_f) < 1e-9 else 1
+        scale_max = int(round(val_max_f))
+        levels = list(range(scale_min, scale_max + 1))
+        return {
+            "is_discrete": True,
+            "is_scale": True,
+            "levels": levels,
+            "scale_min": scale_min,
+            "scale_max": scale_max,
+        }
+    else:
+        val_counts = valid.value_counts().sort_index()
+        levels = [int(round(val)) if is_integer else float(val) for val in val_counts.index]
+        return {
+            "is_discrete": True,
+            "is_scale": False,
+            "levels": levels,
+            "scale_min": None,
+            "scale_max": None,
+        }
 
 
 def _compute_column_stats(
@@ -161,26 +223,16 @@ def _compute_column_stats(
 
             num_unique = int(valid_series.nunique())
             col_summary["unique_count"] = num_unique
-            if 2 <= num_unique <= VIZ_DISCRETE_MAX_UNIQUE:
+            disc_info = _inspect_discrete(valid_series)
+            if disc_info["is_discrete"]:
                 is_integer = cleaner_service.is_integer_numeric(valid_series)
-                val_min_f = float(val_min)
-                val_max_f = float(val_max)
-                is_max_scale = any(abs(val_max_f - bound) < 1e-9 for bound in VIZ_SCALE_MAX_VALUES)
-                is_scale = bool(
-                    is_integer
-                    and val_min_f >= 0
-                    and is_max_scale
-                    and (val_max_f - val_min_f) <= VIZ_DISCRETE_MAX_RANGE
-                )
-
-                if is_scale:
-                    scale_min = 0 if abs(val_min_f) < 1e-9 else 1
-                    scale_max = int(round(val_max_f))
+                if disc_info["is_scale"]:
+                    scale_min = disc_info["scale_min"]
+                    scale_max = disc_info["scale_max"]
                     bins = []
-                    discrete_vals = []
+                    discrete_vals = disc_info["levels"]
                     int_counts = valid_series.round().astype(int).value_counts().to_dict()
-                    for v in range(scale_min, scale_max + 1):
-                        discrete_vals.append(v)
+                    for v in discrete_vals:
                         cnt = int_counts.get(v, 0)
                         pct = chart_insights._round_half_up(cnt / respondents * 100, 1) if respondents > 0 else 0.0
                         bins.append({
@@ -206,10 +258,9 @@ def _compute_column_stats(
                 else:
                     val_counts = valid_series.value_counts().sort_index()
                     bins = []
-                    discrete_vals = []
+                    discrete_vals = disc_info["levels"]
                     for val, count in val_counts.items():
                         v = int(round(val)) if is_integer else float(val)
-                        discrete_vals.append(v)
                         lbl = str(v) if is_integer else f"{v:g}"
                         pct = chart_insights._round_half_up(float(count / respondents * 100), 1) if respondents > 0 else 0.0
                         bins.append({
@@ -392,6 +443,8 @@ def compute_statistics_df(
     column_letters = getattr(df, "attrs", {}).get("column_letters", {}) if hasattr(df, "attrs") else {}
     numeric_cols = []
     skipped_columns = []
+    numeric_candidates = []
+    dropped_columns = []
 
     for col_idx, col in enumerate(df.columns):
         col_stats = _compute_column_stats(
@@ -403,12 +456,9 @@ def compute_statistics_df(
             col_idx=col_idx
         )
         summary["columns"][col] = col_stats
-
-        if col_stats.get("dtype") == "numeric" and not col_stats.get("skip_chart"):
-            numeric_cols.append(col)
+        letter = column_letters.get(col) or cleaner_service.col_index_to_letter(col_idx)
 
         if col_stats.get("skip_chart"):
-            letter = column_letters.get(col) or cleaner_service.col_index_to_letter(col_idx)
             skipped_columns.append({
                 "column": str(col),
                 "reason": col_stats.get("skip_key"),
@@ -416,34 +466,131 @@ def compute_statistics_df(
                 "letter": letter
             })
 
+        if col_stats.get("dtype") == "numeric":
+            is_constant = (
+                col_stats.get("skip_key") == "single_value"
+                or col_stats.get("unique_count", 0) <= 1
+                or (not col_stats.get("skip_chart") and col_stats.get("std", 0.0) <= 0)
+            )
+            if is_constant:
+                dropped_columns.append({"name": str(col), "reason": "no_variance"})
+            elif not col_stats.get("skip_chart") and col_stats.get("std", 0.0) > 0:
+                numeric_cols.append(col)
+                numeric_candidates.append({
+                    "name": str(col),
+                    "file_idx": col_idx,
+                    "letter": letter,
+                    "missing_pct": float(col_stats.get("missing_pct", 0.0)),
+                    "is_discrete": bool(col_stats.get("is_discrete", False)),
+                    "is_scale": bool(col_stats.get("is_scale", False)),
+                })
+
     summary["skipped_columns"] = skipped_columns
 
-    # Correlation
-    if len(numeric_cols) < 2:
+    # Column selection for correlation
+    # If more than VIZ_CORR_MAX_COLS: keep the ones with lowest missing_pct (tie: file order).
+    # Output order = original file order.
+    if len(numeric_candidates) > VIZ_CORR_MAX_COLS:
+        sorted_candidates = sorted(numeric_candidates, key=lambda c: (c["missing_pct"], c["file_idx"]))
+        kept_candidates = sorted_candidates[:VIZ_CORR_MAX_COLS]
+        dropped_excess = sorted_candidates[VIZ_CORR_MAX_COLS:]
+
+        kept_candidates.sort(key=lambda c: c["file_idx"])
+        dropped_excess.sort(key=lambda c: c["file_idx"])
+        for d in dropped_excess:
+            dropped_columns.append({"name": d["name"], "reason": "too_many_columns"})
+    else:
+        kept_candidates = numeric_candidates
+
+    # If fewer than 2 columns: correlation_v2 = null and keep the existing correlation_error behavior
+    if len(kept_candidates) < 2:
         summary["correlation_error"] = "Dữ liệu không đủ cột dạng số để vẽ biểu đồ tương quan (cần tối thiểu 2 cột)."
+        summary["correlation_v2"] = None
+        summary["correlation_matrix"] = {}
+        summary["top_correlations"] = []
         return summary
 
-    # Limit to top 20 numeric cols (len(numeric_cols) >= 2 is guaranteed here)
+    # Correlation V2
+    v2_columns = [
+        {
+            "name": c["name"],
+            "letter": c["letter"],
+            "is_discrete": c["is_discrete"],
+            "is_scale": c["is_scale"],
+            "missing_pct": c["missing_pct"],
+        }
+        for c in kept_candidates
+    ]
+
+    discrete_count = sum(1 for c in kept_candidates if c["is_discrete"])
+    default_method = "spearman" if discrete_count >= len(kept_candidates) / 2.0 else "pearson"
+
+    selected_names = [c["name"] for c in kept_candidates]
+    corr_num_df = df[selected_names].apply(pd.to_numeric, errors="coerce")
+
+    # Pairwise correlations with min_periods
+    corr_pearson = corr_num_df.corr(method="pearson", min_periods=VIZ_CORR_MIN_PAIR_N)
+    corr_spearman = corr_num_df.corr(method="spearman", min_periods=VIZ_CORR_MIN_PAIR_N)
+
+    notna_mat = corr_num_df.notna().astype(int)
+    n_matrix = notna_mat.T.dot(notna_mat)
+
+    pairs = []
+    for i in range(len(selected_names)):
+        for j in range(i + 1, len(selected_names)):
+            col_a = selected_names[i]
+            col_b = selected_names[j]
+            pair_n = int(n_matrix.loc[col_a, col_b])
+
+            val_p = corr_pearson.loc[col_a, col_b]
+            val_s = corr_spearman.loc[col_a, col_b]
+
+            p_clean = None if (pair_n < VIZ_CORR_MIN_PAIR_N or pd.isna(val_p)) else round(float(val_p), 4)
+            s_clean = None if (pair_n < VIZ_CORR_MIN_PAIR_N or pd.isna(val_s)) else round(float(val_s), 4)
+
+            pairs.append({
+                "a": col_a,
+                "b": col_b,
+                "pearson": p_clean,
+                "spearman": s_clean,
+                "n": pair_n,
+            })
+
+    def _pair_sort_key(p):
+        p_abs = abs(p["pearson"]) if p["pearson"] is not None else -1.0
+        s_abs = abs(p["spearman"]) if p["spearman"] is not None else -1.0
+        return max(p_abs, s_abs)
+
+    pairs.sort(key=_pair_sort_key, reverse=True)
+
+    summary["correlation_v2"] = {
+        "columns": v2_columns,
+        "default_method": default_method,
+        "pairs": pairs,
+        "dropped_columns": dropped_columns,
+    }
+
+    # Existing correlation response fields (correlation_matrix, top_correlations)
     corr_cols = numeric_cols[:20]
-    corr_df = df[corr_cols].apply(pd.to_numeric, errors="coerce").astype(float).corr()
-
-    corr_matrix = {}
-    top_correlations = []
-    for i, col_a in enumerate(corr_cols):
-        corr_matrix[col_a] = {}
-        for j, col_b in enumerate(corr_cols):
-            val = corr_df.loc[col_a, col_b]
-            if pd.isna(val):
-                val = 0.0
-            val = float(val)
-            corr_matrix[col_a][col_b] = val
-
-            # Add to top correlations if |r| > 0.5 and i < j
-            if i < j and abs(val) > 0.5:
-                top_correlations.append({"col_a": col_a, "col_b": col_b, "r": round(val, 4)})
-
-    summary["correlation_matrix"] = corr_matrix
-    summary["top_correlations"] = sorted(top_correlations, key=lambda x: abs(x["r"]), reverse=True)
+    if len(corr_cols) >= 2:
+        legacy_corr_df = df[corr_cols].apply(pd.to_numeric, errors="coerce").astype(float).corr()
+        corr_matrix = {}
+        top_correlations = []
+        for i, col_a in enumerate(corr_cols):
+            corr_matrix[col_a] = {}
+            for j, col_b in enumerate(corr_cols):
+                val = legacy_corr_df.loc[col_a, col_b]
+                if pd.isna(val):
+                    val = 0.0
+                val = float(val)
+                corr_matrix[col_a][col_b] = val
+                if i < j and abs(val) > 0.5:
+                    top_correlations.append({"col_a": col_a, "col_b": col_b, "r": round(val, 4)})
+        summary["correlation_matrix"] = corr_matrix
+        summary["top_correlations"] = sorted(top_correlations, key=lambda x: abs(x["r"]), reverse=True)
+    else:
+        summary["correlation_matrix"] = {}
+        summary["top_correlations"] = []
 
     return summary
 
@@ -493,12 +640,14 @@ def compute_statistics(user_id: int, session_id: str, warnings: list = None, ove
 
 def get_scatter_data(df: pd.DataFrame, col_x: str, col_y: str, max_points: int = 500) -> dict:
     """
-    Trích xuất dữ liệu điểm phân tán cho cặp cột đã chọn (anchor).
+    Trích xuất dữ liệu phân tán cho cặp cột đã chọn (anchor).
     
-    - Validate cột tồn tại và là numeric
-    - Drop NaN ở cả hai cột
-    - Downsample bằng seeded random (seed=42) nếu vượt max_points
-    - Không tính lại r — frontend đọc từ correlation_matrix có sẵn
+    - Hỗ trợ bất kỳ cột số nào trong DataFrame.
+    - Trả về 'letter_x', 'letter_y'.
+    - Nếu cả 2 cột đều là dạng số rời rạc (is_discrete):
+        trả về mode: "grid", x_levels, y_levels, grid, n (complete rows).
+        Đồng thời giữ points để đảm bảo tương thích ngược với UI hiện tại.
+    - Ngược lại: trả về mode: "points", points (tối đa max_points), count, total, n.
     """
     # Validate columns exist
     if col_x not in df.columns:
@@ -525,46 +674,67 @@ def get_scatter_data(df: pd.DataFrame, col_x: str, col_y: str, max_points: int =
             },
             suggested_action=None
         )
-    
-    # Validate columns are numeric
-    if not pd.api.types.is_numeric_dtype(df[col_x]):
-        raise DataMindException(
-            code="ERR_VIZ_SCATTER_INVALID_COL",
-            severity=ErrorSeverity.BLOCKING,
-            user_message=f"Cột '{col_x}' không phải kiểu số.",
-            technical_detail={
-                "module": "visualize_service",
-                "location": "get_scatter_data",
-                "root_cause": f"col_x='{col_x}' dtype={df[col_x].dtype}, expected numeric"
-            },
-            suggested_action=None
-        )
-    if not pd.api.types.is_numeric_dtype(df[col_y]):
-        raise DataMindException(
-            code="ERR_VIZ_SCATTER_INVALID_COL",
-            severity=ErrorSeverity.BLOCKING,
-            user_message=f"Cột '{col_y}' không phải kiểu số.",
-            technical_detail={
-                "module": "visualize_service",
-                "location": "get_scatter_data",
-                "root_cause": f"col_y='{col_y}' dtype={df[col_y].dtype}, expected numeric"
-            },
-            suggested_action=None
-        )
-    
+
+    # Validate columns are numeric (hoặc có thể ép kiểu thành numeric)
+    s_x_raw = df[col_x]
+    s_y_raw = df[col_y]
+    if not pd.api.types.is_numeric_dtype(s_x_raw):
+        s_x_num = pd.to_numeric(s_x_raw, errors="coerce")
+        if s_x_num.dropna().empty:
+            raise DataMindException(
+                code="ERR_VIZ_SCATTER_INVALID_COL",
+                severity=ErrorSeverity.BLOCKING,
+                user_message=f"Cột '{col_x}' không phải kiểu số.",
+                technical_detail={
+                    "module": "visualize_service",
+                    "location": "get_scatter_data",
+                    "root_cause": f"col_x='{col_x}' dtype={df[col_x].dtype}, không thể ép thành số"
+                },
+                suggested_action=None
+            )
+        s_x = s_x_num
+    else:
+        s_x = pd.to_numeric(s_x_raw, errors="coerce")
+
+    if not pd.api.types.is_numeric_dtype(s_y_raw):
+        s_y_num = pd.to_numeric(s_y_raw, errors="coerce")
+        if s_y_num.dropna().empty:
+            raise DataMindException(
+                code="ERR_VIZ_SCATTER_INVALID_COL",
+                severity=ErrorSeverity.BLOCKING,
+                user_message=f"Cột '{col_y}' không phải kiểu số.",
+                technical_detail={
+                    "module": "visualize_service",
+                    "location": "get_scatter_data",
+                    "root_cause": f"col_y='{col_y}' dtype={df[col_y].dtype}, không thể ép thành số"
+                },
+                suggested_action=None
+            )
+        s_y = s_y_num
+    else:
+        s_y = pd.to_numeric(s_y_raw, errors="coerce")
+
     # Drop rows where either column is NaN
-    valid_df = df[[col_x, col_y]].dropna()
+    valid_mask = s_x.notna() & s_y.notna()
+    valid_df = pd.DataFrame({"x": s_x[valid_mask], "y": s_y[valid_mask]})
     total = len(valid_df)
-    
+
+    letter_x = _get_column_letter(df, col_x)
+    letter_y = _get_column_letter(df, col_y)
+
     if total == 0:
         return {
+            "mode": "points",
             "col_x": col_x,
             "col_y": col_y,
+            "letter_x": letter_x,
+            "letter_y": letter_y,
             "points": [],
             "count": 0,
             "total": 0,
+            "n": 0,
         }
-    
+
     # Downsample via seeded random sampling if necessary
     if total > max_points:
         random.seed(42)
@@ -572,17 +742,62 @@ def get_scatter_data(df: pd.DataFrame, col_x: str, col_y: str, max_points: int =
         sampled = valid_df.iloc[indices]
     else:
         sampled = valid_df
-    
+
     points = [
-        {"x": float(row[col_x]), "y": float(row[col_y])}
+        {"x": float(row["x"]), "y": float(row["y"])}
         for _, row in sampled.iterrows()
     ]
-    
+
+    # Kiểm tra nếu cả 2 cột đều là dạng rời rạc (is_discrete)
+    info_x = _inspect_discrete(df[col_x])
+    info_y = _inspect_discrete(df[col_y])
+
+    if info_x["is_discrete"] and info_y["is_discrete"]:
+        x_levels = info_x["levels"]
+        y_levels = info_y["levels"]
+
+        s_x_grid = valid_df["x"]
+        s_y_grid = valid_df["y"]
+        if info_x["is_scale"] or cleaner_service.is_integer_numeric(s_x_grid):
+            s_x_grid = s_x_grid.round().astype(int)
+        if info_y["is_scale"] or cleaner_service.is_integer_numeric(s_y_grid):
+            s_y_grid = s_y_grid.round().astype(int)
+
+        pair_counts = pd.DataFrame({"x": s_x_grid, "y": s_y_grid}).groupby(["x", "y"]).size().to_dict()
+
+        grid = []
+        for x in x_levels:
+            for y in y_levels:
+                grid.append({
+                    "x": x,
+                    "y": y,
+                    "count": int(pair_counts.get((x, y), 0))
+                })
+
+        return {
+            "mode": "grid",
+            "col_x": col_x,
+            "col_y": col_y,
+            "letter_x": letter_x,
+            "letter_y": letter_y,
+            "points": points,
+            "count": len(points),
+            "total": total,
+            "x_levels": x_levels,
+            "y_levels": y_levels,
+            "grid": grid,
+            "n": total,
+        }
+
     return {
+        "mode": "points",
         "col_x": col_x,
         "col_y": col_y,
+        "letter_x": letter_x,
+        "letter_y": letter_y,
         "points": points,
         "count": len(points),
         "total": total,
+        "n": total,
     }
 

@@ -72,9 +72,10 @@ def get_report_state(
     user_id = current_user["user_id"]
     cached_intro = cache.get_report_intro(user_id, file_hash, lang)
     
-    # Cleaner section từ report_sections
+    # Cleaner & Visualize sections từ report_sections
     sections = cache.get_all_report_sections(user_id, file_hash) or {}
     cleaner_section = sections.get("cleaner")
+    visualize_section = sections.get("visualize")
     
     # Profiler context
     p_ctx = cache.get_profiler_context(user_id, file_hash)
@@ -90,6 +91,7 @@ def get_report_state(
     return {
         "intro": cached_intro,
         "cleaner": cleaner_section,
+        "visualize": visualize_section,
         "context": context_data
     }
 

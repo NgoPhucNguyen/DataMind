@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, memo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useFileSession } from "../contexts/FileSessionContext";
@@ -6,17 +6,22 @@ import { useToast } from "../contexts/ToastContext";
 import api from "../services/axiosClient";
 import {
   Check, X, AlertTriangle, ArrowLeft, ArrowRight, Lock, FolderUp, Upload,
-  Info, Edit2, ChevronUp, ChevronDown, Lightbulb, Maximize2, FilePlus2, FileCheck2
+  Info, Edit2, ChevronUp, ChevronDown, Lightbulb, Maximize2, FilePlus2, FileCheck2, Settings
 } from "lucide-react";
 import {
   DistributionChart, CategoricalChart, TrendChart,
   CorrelationHeatmap, PieChartComponent, BoxPlotChart
 } from "../components/charts/ChartComponents";
+import {
+  parseSortKey,
+  sortCategories,
+  computeEffectiveChart,
+} from "../utils/chartView";
 import PageHelpDocs from "../components/PageHelpDocs";
 import AnchorScatterPanel from "../components/charts/AnchorScatterPanel";
 import AIInsightsCard from "../components/charts/AIInsightsCard";
 import { getUser } from "../services/authService";
-import { profileFile, getSessionStatus } from "../services/profilerService";
+import { profileFile, getSessionStatus, getAIUsage } from "../services/profilerService";
 import FileExpiredBanner from "../components/FileExpiredBanner";
 import { detectIssues, autoClean, confirmClean } from "../services/cleanerService";
 import PageHeader from "../components/PageHeader";
@@ -24,6 +29,7 @@ import { BTN } from "../constants/ui";
 
 const CURRENT_SUMMARY_VERSION = 3;
 const ENABLE_CHART_EDIT = false; // bật lại khi xử lý xong cache-invalidation cho edit chart
+const EMPTY_SETTINGS = Object.freeze({});
 
 function LazyChart({ height, children }) {
   const [isVisible, setIsVisible] = useState(() => {
@@ -194,7 +200,299 @@ function isSummaryStale(summary, currentOverrides) {
   return false;
 }
 
-const ChartCard = ({
+export function getSuggestedReason(chart, stats, summary, t, currentLang = "vi") {
+  const isEn = currentLang.startsWith("en");
+
+  if (chart.type === "heatmap") {
+    const strongCorrPairs = (summary?.top_correlations || []).filter(
+      tc => Math.abs(typeof tc.r === "number" ? tc.r : parseFloat(tc.r)) >= 0.5
+    );
+    const n = strongCorrPairs.length;
+    return t("visualize.badge_suggested_reason_heatmap", {
+      n,
+      defaultValue: isEn
+        ? `Pre-selected: ${n} pairs with fairly strong correlation (|r| ≥ 0.5). Click 'Added to report' to deselect.`
+        : `Chọn sẵn vì có ${n} cặp cột liên quan khá mạnh (r ≥ 0,5). Bấm 'Đã thêm vào báo cáo' để bỏ chọn.`
+    });
+  }
+
+  if (chart.type === "line" || stats?.dtype === "datetime") {
+    return t("visualize.badge_suggested_reason_time", {
+      defaultValue: isEn
+        ? "Pre-selected for report based on time trend. Click 'Added to report' to deselect."
+        : "Chọn sẵn cho báo cáo theo xu hướng thời gian. Bấm 'Đã thêm vào báo cáo' để bỏ chọn."
+    });
+  }
+
+  // Distribution / categorical
+  const missing = typeof stats?.missing_pct === "number"
+    ? (Number.isInteger(stats.missing_pct) ? stats.missing_pct : stats.missing_pct.toFixed(1))
+    : 0;
+
+  const insights = stats?.auto_insights || [];
+  let insightPart = "";
+  if (insights.length > 0) {
+    const firstText = formatInsight(insights[0], t, currentLang);
+    if (firstText) {
+      const lowerFirst = firstText.charAt(0).toLowerCase() + firstText.slice(1);
+      const andWord = isEn ? ", and " : ", và ";
+      insightPart = `${andWord}${lowerFirst}`;
+    }
+  }
+
+  return t("visualize.badge_suggested_reason_dist", {
+    missing,
+    insight_part: insightPart,
+    defaultValue: isEn
+      ? `Pre-selected for report: only ${missing}% missing${insightPart}. Click 'Added to report' to deselect.`
+      : `Chọn sẵn cho báo cáo vì chỉ trống ${missing}%${insightPart}. Bấm 'Đã thêm vào báo cáo' để bỏ chọn.`
+  });
+}
+
+export function ChartSettingsPopover({ chart, stats, settings = {}, onUpdateSettings, onResetSettings }) {
+  const { t } = useTranslation();
+  const [isOpen, setIsOpen] = useState(false);
+  const popoverRef = useRef(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleClickOutside = (e) => {
+      if (popoverRef.current && !popoverRef.current.contains(e.target)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [isOpen]);
+
+  if (!chart || chart.type === "heatmap" || chart.type === "line" || stats?.dtype === "datetime") {
+    return null;
+  }
+
+  const isCategorical = stats?.dtype === "categorical" || (chart.type === "bar" && stats?.dtype !== "multiple_choice");
+  const isMultipleChoice = stats?.dtype === "multiple_choice";
+  const isDiscrete = stats?.is_discrete;
+  const isScale = stats?.is_discrete && stats?.is_scale;
+  const isContinuous = stats?.dtype === "numeric" && !stats?.is_discrete;
+
+  const canBox = isContinuous &&
+    stats?.min !== undefined &&
+    stats?.p25 !== undefined &&
+    stats?.median !== undefined &&
+    stats?.p75 !== undefined &&
+    stats?.max !== undefined;
+
+  const showDisplayType = (isCategorical || isDiscrete) || (isContinuous && canBox);
+  const showTopN = isCategorical || isMultipleChoice;
+  const showSort = isCategorical;
+  const showHideZero = isScale;
+
+  if (!showDisplayType && !showTopN && !showSort && !showHideZero) {
+    return null;
+  }
+
+  const displayType = settings.display_type || (isContinuous ? "histogram" : "bar");
+  const topN = settings.top_n || "auto";
+  const sort = settings.sort || "by_count";
+  const hideZero = Boolean(settings.hide_zero);
+
+  const isCustomized = Boolean(
+    (settings.display_type && settings.display_type !== (isContinuous ? "histogram" : "bar")) ||
+    (settings.top_n && settings.top_n !== "auto") ||
+    (settings.sort && settings.sort !== "by_count") ||
+    settings.hide_zero
+  );
+
+  return (
+    <div className="relative inline-block" ref={popoverRef}>
+      <button
+        type="button"
+        onClick={() => setIsOpen(prev => !prev)}
+        className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
+          isOpen || isCustomized
+            ? "bg-[#EAF2EB] text-[#1B4324] border border-[#1B4324]/30"
+            : "text-[#626C65] hover:text-[#121A14] hover:bg-[#F3F4F2]"
+        }`}
+        title={t("visualize.settings_btn_tooltip")}
+      >
+        <Settings className="w-4 h-4" />
+      </button>
+
+      {isOpen && (
+        <div className="absolute right-0 top-full mt-1.5 w-64 bg-white border border-[#E5E5E3] rounded-xl shadow-xl p-3.5 z-[100] text-xs space-y-3.5">
+          <div className="flex items-center justify-between pb-2 border-b border-[#EAEAEA]">
+            <span className="font-semibold text-[#121A14]">
+              {t("visualize.settings_title")}
+            </span>
+            <button
+              type="button"
+              onClick={() => setIsOpen(false)}
+              className="text-[#626C65] hover:text-[#121A14] p-0.5 rounded"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          {/* display_type */}
+          {showDisplayType && (
+            <div>
+              <label className="block text-[11px] font-medium text-[#626C65] mb-1.5">
+                {t("visualize.settings_display_type")}
+              </label>
+              <div className="grid grid-cols-2 gap-1.5">
+                {(isCategorical || isDiscrete) && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => onUpdateSettings({ display_type: "bar" })}
+                      className={`py-1 px-2 rounded-md text-xs font-medium border text-center transition-colors ${
+                        displayType === "bar"
+                          ? "bg-[#EAF2EB] text-[#1B4324] border-[#1B4324]/30 font-semibold"
+                          : "bg-[#F9F9F8] text-[#626C65] border-[#E5E5E3] hover:text-[#121A14]"
+                      }`}
+                    >
+                      {t("visualize.settings_type_bar")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onUpdateSettings({ display_type: "pie" })}
+                      className={`py-1 px-2 rounded-md text-xs font-medium border text-center transition-colors ${
+                        displayType === "pie"
+                          ? "bg-[#EAF2EB] text-[#1B4324] border-[#1B4324]/30 font-semibold"
+                          : "bg-[#F9F9F8] text-[#626C65] border-[#E5E5E3] hover:text-[#121A14]"
+                      }`}
+                    >
+                      {t("visualize.settings_type_pie")}
+                    </button>
+                  </>
+                )}
+                {isContinuous && canBox && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => onUpdateSettings({ display_type: "histogram" })}
+                      className={`py-1 px-2 rounded-md text-xs font-medium border text-center transition-colors ${
+                        displayType === "histogram"
+                          ? "bg-[#EAF2EB] text-[#1B4324] border-[#1B4324]/30 font-semibold"
+                          : "bg-[#F9F9F8] text-[#626C65] border-[#E5E5E3] hover:text-[#121A14]"
+                      }`}
+                    >
+                      {t("visualize.settings_type_histogram")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onUpdateSettings({ display_type: "box" })}
+                      className={`py-1 px-2 rounded-md text-xs font-medium border text-center transition-colors ${
+                        displayType === "box"
+                          ? "bg-[#EAF2EB] text-[#1B4324] border-[#1B4324]/30 font-semibold"
+                          : "bg-[#F9F9F8] text-[#626C65] border-[#E5E5E3] hover:text-[#121A14]"
+                      }`}
+                    >
+                      {t("visualize.settings_type_box")}
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* top_n */}
+          {showTopN && displayType !== "pie" && (
+            <div>
+              <label className="block text-[11px] font-medium text-[#626C65] mb-1.5">
+                {t("visualize.settings_top_n")}
+              </label>
+              <div className="grid grid-cols-4 gap-1">
+                {[
+                  { id: "auto", label: t("visualize.settings_top_auto") },
+                  { id: 10, label: "10" },
+                  { id: 15, label: "15" },
+                  { id: "all", label: t("visualize.settings_top_all") },
+                ].map(opt => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => onUpdateSettings({ top_n: opt.id })}
+                    className={`py-1 px-1 rounded-md text-[11px] font-medium border text-center transition-colors ${
+                      String(topN) === String(opt.id)
+                        ? "bg-[#EAF2EB] text-[#1B4324] border-[#1B4324]/30 font-semibold"
+                        : "bg-[#F9F9F8] text-[#626C65] border-[#E5E5E3] hover:text-[#121A14]"
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* sort */}
+          {showSort && displayType !== "pie" && (
+            <div>
+              <label className="block text-[11px] font-medium text-[#626C65] mb-1.5">
+                {t("visualize.settings_sort")}
+              </label>
+              <div className="grid grid-cols-2 gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => onUpdateSettings({ sort: "by_count" })}
+                  className={`py-1 px-1.5 rounded-md text-[11px] font-medium border text-center transition-colors ${
+                    sort === "by_count"
+                      ? "bg-[#EAF2EB] text-[#1B4324] border-[#1B4324]/30 font-semibold"
+                      : "bg-[#F9F9F8] text-[#626C65] border-[#E5E5E3] hover:text-[#121A14]"
+                  }`}
+                >
+                  {t("visualize.settings_sort_count")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onUpdateSettings({ sort: "by_value" })}
+                  className={`py-1 px-1.5 rounded-md text-[11px] font-medium border text-center transition-colors ${
+                    sort === "by_value"
+                      ? "bg-[#EAF2EB] text-[#1B4324] border-[#1B4324]/30 font-semibold"
+                      : "bg-[#F9F9F8] text-[#626C65] border-[#E5E5E3] hover:text-[#121A14]"
+                  }`}
+                >
+                  {t("visualize.settings_sort_value")}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* hide_zero */}
+          {showHideZero && displayType !== "pie" && (
+            <div className="pt-1">
+              <label className="flex items-center gap-2 cursor-pointer select-none text-xs text-[#2A342D]">
+                <input
+                  type="checkbox"
+                  checked={hideZero}
+                  onChange={e => onUpdateSettings({ hide_zero: e.target.checked })}
+                  className="rounded border-[#E5E5E3] text-[#1B4324] focus:ring-[#1B4324] w-3.5 h-3.5"
+                />
+                <span>{t("visualize.settings_hide_zero")}</span>
+              </label>
+            </div>
+          )}
+
+          {/* Reset to default */}
+          <div className="pt-2 border-t border-[#EAEAEA] flex justify-end">
+            <button
+              type="button"
+              onClick={() => {
+                onResetSettings();
+              }}
+              className="text-[11px] text-[#626C65] hover:text-[#1B4324] hover:underline"
+            >
+              {t("visualize.settings_reset")}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const ChartCard = memo(({
   chart,
   isSelected,
   toggleChart,
@@ -205,7 +503,12 @@ const ChartCard = ({
   sessionId,
   fileHash,
   onMaximize,
-  isSuggested
+  isSuggested,
+  settings = EMPTY_SETTINGS,
+  onUpdateSettings,
+  onResetSettings,
+  aiUsage,
+  onUsageUpdated,
 }) => {
   const { t } = useTranslation();
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -214,57 +517,81 @@ const ChartCard = ({
 
   const stats = summary?.columns?.[chart.col];
   const insights = stats?.auto_insights || [];
-  const subtitle = getSubtitle(chart, stats, summary, t);
   const displayTitle = chart.user_title || chart.title;
   const isLongTitle = (displayTitle || "").length > 40;
+
+  const currentLang = t?.i18n ? t.i18n.language : "vi";
+  const effective = useMemo(() => {
+    return computeEffectiveChart(chart, stats, settings, summary, t, currentLang);
+  }, [chart, stats, settings, summary, t, currentLang]);
+
+  const displayType = effective.displayType;
+  const effectiveData = effective.effectiveData;
+  const barHeight = effective.calculatedBarHeight;
+  const isCapped200 = effective.isCapped200;
+
+  const subtitle = useMemo(() => getSubtitle(chart, stats, summary, t), [chart, stats, summary, t]);
+  const suggestedReason = useMemo(() => {
+    return isSuggested ? getSuggestedReason(chart, stats, summary, t, currentLang) : "";
+  }, [isSuggested, chart, stats, summary, t, currentLang]);
 
   const handleTitleBlur = () => {
     setIsEditingTitle(false);
     onUpdate(chart.id, { user_title: localTitle });
   };
 
-  const barHeight = Math.min(380, Math.max(220, (chart.data?.length || 5) * 28 + 40));
-
   return (
-    <div className={`bg-white rounded-xl border transition-all flex flex-col justify-between p-5 ${isSelected ? "border-[#1B4324] ring-1 ring-[#1B4324]/20 shadow-sm" : "border-[#E5E5E3] hover:border-[#1B4324]/40"
-      }`}>
+    <div className={`bg-white rounded-xl border transition-all p-5 ${isSelected ? "border-[#1B4324] ring-1 ring-[#1B4324]/20 shadow-sm" : "border-[#E5E5E3] hover:border-[#1B4324]/40"}`}>
       <div>
-        {/* Header: Title + Subtitle + Toolbar */}
+        {/* Header: Checkbox + Title + Subtitle + Toolbar */}
         <div className="flex items-start justify-between gap-3 mb-3">
-          <div className="flex-1 min-w-0">
-            {isEditingTitle ? (
-              <input
-                autoFocus
-                className="px-2 py-1 border border-[#1B4324] rounded text-sm font-semibold outline-none w-full max-w-sm"
-                value={localTitle}
-                onChange={e => setLocalTitle(e.target.value)}
-                onBlur={handleTitleBlur}
-                onKeyDown={e => e.key === "Enter" && handleTitleBlur()}
-              />
-            ) : (
-              <div className="group/title flex items-start gap-1.5">
-                <h3 className={`text-sm font-semibold text-[#121A14] leading-snug break-words ${isTitleExpanded ? "" : "line-clamp-2"
-                  }`}>
-                  {displayTitle}
-                </h3>
-                {isLongTitle && (
+          <div className="flex items-start gap-2.5 flex-1 min-w-0">
+            <input
+              type="checkbox"
+              checked={isSelected}
+              onChange={(e) => {
+                e.stopPropagation();
+                toggleChart(chart.id);
+              }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-[18px] h-[18px] rounded border-[#87938B] text-[#1B4324] accent-[#1B4324] focus:ring-[#1B4324]/30 cursor-pointer shrink-0 mt-0.5"
+              aria-label={isSelected ? t("visualize.btn_added_to_report") : t("visualize.btn_add_to_report")}
+              title={isSelected ? t("visualize.btn_added_to_report") : t("visualize.btn_add_to_report")}
+            />
+            <div className="flex-1 min-w-0">
+              {isEditingTitle ? (
+                <input
+                  autoFocus
+                  className="px-2 py-1 border border-[#1B4324] rounded text-sm font-semibold outline-none w-full max-w-sm"
+                  value={localTitle}
+                  onChange={e => setLocalTitle(e.target.value)}
+                  onBlur={handleTitleBlur}
+                  onKeyDown={e => e.key === "Enter" && handleTitleBlur()}
+                />
+              ) : (
+                <div className="group/title flex items-start gap-1.5">
+                  <h3 className={`text-sm font-semibold text-[#121A14] leading-snug break-words ${isTitleExpanded ? "" : "line-clamp-2"}`}>
+                    {displayTitle}
+                  </h3>
+                  {isLongTitle && (
+                    <button
+                      onClick={() => setIsTitleExpanded(!isTitleExpanded)}
+                      className="text-[11px] text-[#1B4324] hover:underline font-medium shrink-0 ml-1"
+                    >
+                      {isTitleExpanded ? t("visualize.title_collapse") : t("visualize.title_expand")}
+                    </button>
+                  )}
                   <button
-                    onClick={() => setIsTitleExpanded(!isTitleExpanded)}
-                    className="text-[11px] text-[#1B4324] hover:underline font-medium shrink-0 ml-1"
+                    onClick={() => setIsEditingTitle(true)}
+                    className="opacity-0 group-hover/title:opacity-100 p-0.5 text-[#626C65] hover:text-[#121A14] transition-opacity shrink-0"
+                    title={t("visualize.title_edit_tooltip")}
                   >
-                    {isTitleExpanded ? t("visualize.title_collapse") : t("visualize.title_expand")}
+                    <Edit2 className="w-3.5 h-3.5" />
                   </button>
-                )}
-                <button
-                  onClick={() => setIsEditingTitle(true)}
-                  className="opacity-0 group-hover/title:opacity-100 p-0.5 text-[#626C65] hover:text-[#121A14] transition-opacity shrink-0"
-                  title={t("visualize.title_edit_tooltip")}
-                >
-                  <Edit2 className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            )}
-            <p className="text-xs text-[#626C65] mt-1 truncate">{subtitle}</p>
+                </div>
+              )}
+              <p className="text-xs text-[#626C65] mt-1 truncate">{subtitle}</p>
+            </div>
           </div>
 
           {/* Top-Right Toolbar */}
@@ -272,10 +599,19 @@ const ChartCard = ({
             {isSuggested && (
               <span
                 className="text-[10px] font-semibold bg-[#EAF2EB] text-[#1B4324] px-2 py-0.5 rounded-full border border-[#c8e0cb]/50 cursor-help"
-                title={t("visualize.badge_suggested_tooltip")}
+                title={suggestedReason}
               >
                 {t("visualize.badge_suggested")}
               </span>
+            )}
+            {effective.hasSettings && (
+              <ChartSettingsPopover
+                chart={chart}
+                stats={stats}
+                settings={settings}
+                onUpdateSettings={newSettings => onUpdateSettings(chart.id, newSettings)}
+                onResetSettings={() => onResetSettings(chart.id)}
+              />
             )}
             <button
               onClick={() => onMaximize(chart)}
@@ -289,18 +625,48 @@ const ChartCard = ({
 
         {/* Chart Canvas with Lazy Render */}
         <div className="w-full my-2">
-          <LazyChart height={chart.type === "heatmap" ? "auto" : (chart.type === "bar" ? `${barHeight}px` : "260px")}>
+          <LazyChart height={chart.type === "heatmap" || displayType === "pie" ? "auto" : (displayType === "bar" ? `${Math.min(600, barHeight)}px` : "260px")}>
             <div
-              className={chart.type === "heatmap" ? "w-full" : "w-full h-full"}
+              className={
+                chart.type === "heatmap"
+                  ? "w-full"
+                  : displayType === "bar" && barHeight > 600
+                  ? "w-full max-h-[600px] overflow-y-auto pr-1"
+                  : "w-full h-full"
+              }
             >
-              {chart.type === "histogram" && <DistributionChart data={chart.data} color={chart.color} isDiscrete={stats?.is_discrete} />}
-              {chart.type === "bar" && <CategoricalChart data={chart.data} color={chart.color} />}
-              {chart.type === "line" && <TrendChart data={chart.data} color={chart.color} />}
+              {displayType === "histogram" && (
+                <DistributionChart data={effectiveData} color={chart.color} isDiscrete={stats?.is_discrete} />
+              )}
+              {displayType === "bar" && (
+                <div style={{ height: `${barHeight}px` }}>
+                  <CategoricalChart data={effectiveData} color={chart.color} />
+                </div>
+              )}
+              {displayType === "pie" && (
+                <div className="w-full py-1 flex items-center justify-center">
+                  <PieChartComponent
+                    data={effectiveData}
+                    color={chart.color}
+                    isDiscrete={stats?.is_discrete}
+                    isScale={stats?.is_scale}
+                  />
+                </div>
+              )}
+              {displayType === "box" && (
+                <div className="h-[260px]">
+                  <BoxPlotChart stats={stats} color={chart.color} />
+                </div>
+              )}
+              {chart.type === "line" && <TrendChart data={effectiveData} color={chart.color} />}
               {chart.type === "heatmap" && <CorrelationHeatmap matrix={chart.matrix} topCorr={chart.topCorr} onCellClick={onCellClick} anchorPair={anchorPair} />}
-              {chart.type === "pie" && <PieChartComponent data={chart.data} color={chart.color} />}
-              {chart.type === "box" && <BoxPlotChart stats={stats} color={chart.color} />}
             </div>
           </LazyChart>
+          {isCapped200 && (
+            <p className="text-[11px] text-[#8C948D] mt-1.5 italic text-center">
+              {t("visualize.capped_200_note")}
+            </p>
+          )}
         </div>
 
         {/* Discrete scale / rating subtitle */}
@@ -352,30 +718,13 @@ const ChartCard = ({
           chart={chart}
           autoInsights={insights}
           anchorPair={anchorPair}
+          aiUsage={aiUsage}
+          onUsageUpdated={onUsageUpdated}
         />
-      </div>
-
-      {/* Footer Button: Toggle Add to Report */}
-      <div className="mt-4 pt-3 border-t border-[#E5E5E3]">
-        {isSelected ? (
-          <button
-            onClick={() => toggleChart(chart.id)}
-            className="w-full py-2 px-3 bg-[#EAF2EB] border border-[#1B4324]/30 text-[#1B4324] text-xs font-semibold rounded-lg flex items-center justify-center gap-1.5 transition-colors hover:bg-[#dbece0]"
-          >
-            <FileCheck2 className="w-4 h-4 text-[#1B4324]" /> {t("visualize.btn_added_to_report")}
-          </button>
-        ) : (
-          <button
-            onClick={() => toggleChart(chart.id)}
-            className="w-full py-2 px-3 border border-[#E5E5E3] hover:border-[#1B4324] hover:bg-[#F3F4F2] text-[#2A342D] text-xs font-medium rounded-lg flex items-center justify-center gap-1.5 transition-colors"
-          >
-            <FilePlus2 className="w-4 h-4 text-[#626C65]" /> {t("visualize.btn_add_to_report")}
-          </button>
-        )}
       </div>
     </div>
   );
-};
+});
 
 const EnlargedChartModal = ({
   chart,
@@ -386,9 +735,15 @@ const EnlargedChartModal = ({
   sessionId,
   fileHash,
   anchorPair,
-  onCellClick
+  onCellClick,
+  settings = EMPTY_SETTINGS,
+  onUpdateSettings,
+  onResetSettings,
+  aiUsage,
+  onUsageUpdated,
 }) => {
   const { t } = useTranslation();
+  const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -398,17 +753,26 @@ const EnlargedChartModal = ({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [onClose]);
 
+  useEffect(() => {
+    setIsReady(false);
+    if (!chart) return;
+    const timer = setTimeout(() => {
+      setIsReady(true);
+    }, 180);
+    return () => clearTimeout(timer);
+  }, [chart?.id]);
+
   if (!chart) return null;
   const stats = summary?.columns?.[chart.col];
   const insights = stats?.auto_insights || [];
   const subtitle = getSubtitle(chart, stats, summary, t);
 
-  // Use all_values for modal if available (cap 200)
-  const modalData = (chart.type === "bar" && stats?.all_values && stats.all_values.length > 0)
-    ? stats.all_values
-    : chart.data;
-
-  const barHeight = Math.min(600, Math.max(300, (modalData?.length || 5) * 26 + 40));
+  const currentLang = t?.i18n ? t.i18n.language : "vi";
+  const effective = computeEffectiveChart(chart, stats, settings, summary, t, currentLang);
+  const displayType = effective.displayType;
+  const effectiveData = effective.effectiveData;
+  const isCapped200 = effective.isCapped200;
+  const modalBarHeight = Math.max(300, (effectiveData?.length || 5) * 26 + 40);
 
   return (
     <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-2 sm:p-6" onClick={onClose}>
@@ -418,51 +782,102 @@ const EnlargedChartModal = ({
       >
         {/* Modal Header */}
         <div className="px-6 py-4 border-b border-[#E5E5E3] flex items-center justify-between bg-white shrink-0">
-          <div className="pr-4">
-            <h2 className="text-base sm:lg font-bold text-[#121A14]">{chart.user_title || chart.title}</h2>
-            <p className="text-xs text-[#626C65] mt-0.5">{subtitle}</p>
+          <div className="flex items-center gap-3 pr-4">
+            <input
+              type="checkbox"
+              checked={isSelected}
+              onChange={(e) => {
+                e.stopPropagation();
+                toggleChart(chart.id);
+              }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-[18px] h-[18px] rounded border-[#87938B] text-[#1B4324] accent-[#1B4324] focus:ring-[#1B4324]/30 cursor-pointer shrink-0"
+              aria-label={isSelected ? t("visualize.btn_added_to_report") : t("visualize.btn_add_to_report")}
+              title={isSelected ? t("visualize.btn_added_to_report") : t("visualize.btn_add_to_report")}
+            />
+            <div>
+              <h2 className="text-base sm:lg font-bold text-[#121A14]">{chart.user_title || chart.title}</h2>
+              <p className="text-xs text-[#626C65] mt-0.5">{subtitle}</p>
+            </div>
           </div>
-          <button
-            onClick={onClose}
-            className="w-8 h-8 rounded-lg flex items-center justify-center text-[#626C65] hover:text-[#121A14] hover:bg-[#F3F4F2] transition-colors"
-            title={t("visualize.modal_close")}
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            {effective.hasSettings && (
+              <ChartSettingsPopover
+                chart={chart}
+                stats={stats}
+                settings={settings}
+                onUpdateSettings={newSettings => onUpdateSettings(chart.id, newSettings)}
+                onResetSettings={() => onResetSettings(chart.id)}
+              />
+            )}
+            <button
+              onClick={onClose}
+              className="w-8 h-8 rounded-lg flex items-center justify-center text-[#626C65] hover:text-[#121A14] hover:bg-[#F3F4F2] transition-colors"
+              title={t("visualize.modal_close")}
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Modal Body */}
         <div className="p-6 overflow-y-auto space-y-6 flex-1">
           <div className="w-full">
-            {chart.type === "histogram" && (
-              <div className="h-[360px]">
-                <DistributionChart data={modalData} color={chart.color} isDiscrete={stats?.is_discrete} />
+            {!isReady ? (
+              <div
+                style={{ height: `${displayType === "bar" ? modalBarHeight : 360}px` }}
+                className="w-full bg-[#F9F9F8] rounded-xl flex items-center justify-center border border-[#EAEAEA] animate-pulse"
+              >
+                <div className="w-8 h-8 rounded-full border-2 border-[#1B4324] border-t-transparent animate-spin opacity-40" />
               </div>
-            )}
-            {chart.type === "bar" && (
-              <div style={{ height: `${barHeight}px` }}>
-                <CategoricalChart data={modalData} color={chart.color} />
-              </div>
-            )}
-            {chart.type === "line" && (
-              <div className="h-[360px]">
-                <TrendChart data={modalData} color={chart.color} />
-              </div>
-            )}
-            {chart.type === "heatmap" && (
-              <CorrelationHeatmap matrix={chart.matrix} topCorr={chart.topCorr} onCellClick={onCellClick} anchorPair={anchorPair} />
-            )}
-            {chart.type === "pie" && (
-              <div className="h-[360px]">
-                <PieChartComponent data={modalData} color={chart.color} />
-              </div>
-            )}
-            {chart.type === "box" && (
-              <div className="h-[360px]">
-                <BoxPlotChart stats={stats} color={chart.color} />
-              </div>
+            ) : (
+              <>
+                {displayType === "histogram" && (
+                  <div className="h-[360px]">
+                    <DistributionChart data={effectiveData} color={chart.color} isDiscrete={stats?.is_discrete} isAnimationActive={false} debounce={100} />
+                  </div>
+                )}
+                {displayType === "bar" && (
+                  <div className={modalBarHeight > 700 ? "max-h-[700px] overflow-y-auto pr-1" : ""}>
+                    <div style={{ height: `${modalBarHeight}px` }}>
+                      <CategoricalChart data={effectiveData} color={chart.color} isAnimationActive={false} debounce={100} />
+                    </div>
+                  </div>
+                )}
+                {displayType === "pie" && (
+                  <div className="w-full py-2 flex items-center justify-center">
+                    <PieChartComponent
+                      data={effectiveData}
+                      color={chart.color}
+                      isDiscrete={stats?.is_discrete}
+                      isScale={stats?.is_scale}
+                      isAnimationActive={false}
+                      debounce={100}
+                    />
+                  </div>
+                )}
+                {displayType === "box" && (
+                  <div className="h-[360px]">
+                    <BoxPlotChart stats={stats} color={chart.color} isAnimationActive={false} debounce={100} />
+                  </div>
+                )}
+                {chart.type === "line" && (
+                  <div className="h-[360px]">
+                    <TrendChart data={effectiveData} color={chart.color} isAnimationActive={false} debounce={100} />
+                  </div>
+                )}
+                {chart.type === "heatmap" && (
+                  <CorrelationHeatmap matrix={chart.matrix} topCorr={chart.topCorr} onCellClick={onCellClick} anchorPair={anchorPair} />
+                )}
+              </>
             )}
           </div>
+
+          {isCapped200 && (
+            <p className="text-xs text-[#8C948D] italic text-center">
+              {t("visualize.capped_200_note")}
+            </p>
+          )}
 
           {/* Discrete scale / rating subtitle */}
           {stats?.is_discrete && (
@@ -510,24 +925,13 @@ const EnlargedChartModal = ({
             chart={chart}
             autoInsights={insights}
             anchorPair={anchorPair}
+            aiUsage={aiUsage}
+            onUsageUpdated={onUsageUpdated}
           />
         </div>
 
         {/* Modal Footer */}
-        <div className="px-6 py-3 border-t border-[#E5E5E3] bg-[#FBFBFA] flex items-center justify-between shrink-0">
-          <button
-            onClick={() => toggleChart(chart.id)}
-            className={`px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 transition-colors ${isSelected
-                ? "bg-[#EAF2EB] border border-[#1B4324]/30 text-[#1B4324] hover:bg-[#dbece0]"
-                : "border border-[#E5E5E3] bg-white hover:border-[#1B4324] text-[#2A342D]"
-              }`}
-          >
-            {isSelected ? (
-              <><FileCheck2 className="w-4 h-4 text-[#1B4324]" /> {t("visualize.btn_added_to_report")}</>
-            ) : (
-              <><FilePlus2 className="w-4 h-4 text-[#626C65]" /> {t("visualize.btn_add_to_report")}</>
-            )}
-          </button>
+        <div className="px-6 py-3 border-t border-[#E5E5E3] bg-[#FBFBFA] flex items-center justify-end shrink-0">
           <button
             onClick={onClose}
             className="px-4 py-2 bg-white border border-[#E5E5E3] rounded-lg text-xs font-medium text-[#626C65] hover:text-[#121A14] transition-colors"
@@ -695,7 +1099,15 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
   const [isDragging, setIsDragging] = useState(false);
   const [directSummary, setDirectSummary] = useState(null);
   const [fileExpired, setFileExpired] = useState(false);
+  const [aiUsage, setAiUsage] = useState(null);
   const fileInputRef = useRef(null);
+
+  // Fetch AI usage on mount
+  useEffect(() => {
+    getAIUsage()
+      .then((res) => setAiUsage(res.data))
+      .catch(() => {});
+  }, []);
 
   // Check session status on mount
   useEffect(() => {
@@ -731,6 +1143,10 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
       ...(generated.time || [])
     ];
 
+    const strongCorrPairs = (summary?.top_correlations || []).filter(
+      tc => Math.abs(typeof tc.r === "number" ? tc.r : parseFloat(tc.r)) >= 0.5
+    );
+
     // 1. At least one per non-empty category
     if (generated.distribution?.length > 0) {
       const bestDist = generated.distribution.find(c => {
@@ -740,7 +1156,7 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
       if (bestDist) selected.add(bestDist.id);
     }
 
-    if (generated.correlation?.length > 0 && generated.correlation[0]) {
+    if (generated.correlation?.length > 0 && generated.correlation[0] && strongCorrPairs.length > 0) {
       selected.add(generated.correlation[0].id);
     }
 
@@ -756,6 +1172,7 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
     for (const c of all) {
       if (selected.size >= 5) break;
       if (selected.has(c.id)) continue;
+      if (c.type === "heatmap" && strongCorrPairs.length === 0) continue;
       const ins = summary?.columns?.[c.col]?.auto_insights;
       if (ins && ins.length > 0) {
         selected.add(c.id);
@@ -765,6 +1182,8 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
     // 3. Fallback to fill up to at least 3
     for (const c of all) {
       if (selected.size >= 3) break;
+      if (selected.has(c.id)) continue;
+      if (c.type === "heatmap" && strongCorrPairs.length === 0) continue;
       selected.add(c.id);
     }
 
@@ -915,7 +1334,7 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
     });
   }, []);
 
-  const handleAnchorSelect = async (colA, colB, r) => {
+  const handleAnchorSelect = useCallback(async (colA, colB, r) => {
     if (abortRef.current) abortRef.current.abort();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -944,16 +1363,16 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
         setScatterLoading(false);
       }
     }
-  };
+  }, [fileSession.sessionId, t]);
 
-  const handleAnchorClear = () => {
+  const handleAnchorClear = useCallback(() => {
     if (abortRef.current) abortRef.current.abort();
     setAnchorPair(null);
     setScatterData(null);
     setScatterError(null);
-  };
+  }, []);
 
-  const handleUpdateChart = (id, newConfig) => {
+  const handleUpdateChart = useCallback((id, newConfig) => {
     setCharts(prev => {
       const newCharts = { ...prev };
       for (const category in newCharts) {
@@ -965,7 +1384,15 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
       }
       return newCharts;
     });
-  };
+  }, []);
+
+  const handleMaximize = useCallback((chart) => {
+    setEnlargedChart(chart);
+  }, []);
+
+  const handleCloseModal = useCallback(() => {
+    setEnlargedChart(null);
+  }, []);
 
   const proceedToReport = (confirmedList) => {
     updateFileSession({ confirmedCharts: confirmedList });
@@ -977,6 +1404,22 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
     }
   };
 
+  const handleUpdateChartSettings = useCallback((chartId, newSettings) => {
+    const current = fileSession.chartSettings?.[chartId] || {};
+    updateFileSession({
+      chartSettings: {
+        ...(fileSession.chartSettings || {}),
+        [chartId]: { ...current, ...newSettings }
+      }
+    });
+  }, [fileSession.chartSettings, updateFileSession]);
+
+  const handleResetChartSettings = useCallback((chartId) => {
+    const next = { ...(fileSession.chartSettings || {}) };
+    delete next[chartId];
+    updateFileSession({ chartSettings: next });
+  }, [fileSession.chartSettings, updateFileSession]);
+
   const handleConfirm = () => {
     if (selectedChartIds.size === 0) {
       setShowEmptyConfirmModal(true);
@@ -986,14 +1429,20 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
     const allCharts = [...charts.distribution, ...charts.correlation, ...charts.time, ...charts.other, ...customCharts];
     const confirmed = allCharts
       .filter(c => selectedChartIds.has(c.id))
-      .map(c => ({
-        chart_id: c.id,
-        user_title: c.user_title || c.title,
-        auto_title: c.auto_title || c.title,
-        type: c.type,
-        column: c.col,
-        ai_explanation: fileSession.chartExplanations?.[c.id]?.content || null,
-      }));
+      .map(c => {
+        const s = fileSession.chartSettings?.[c.id] || {};
+        const displayType = s.display_type || c.type;
+        return {
+          chart_id: c.id,
+          user_title: c.user_title || c.title,
+          auto_title: c.auto_title || c.title,
+          type: c.type, // keep existing type field = base type, unchanged
+          display_type: displayType,
+          settings: s,
+          column: c.col,
+          ai_explanation: fileSession.chartExplanations?.[c.id]?.content || null,
+        };
+      });
 
     proceedToReport(confirmed);
   };
@@ -1263,8 +1712,13 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
                         anchorPair={chart.type === "heatmap" ? anchorPair : undefined}
                         sessionId={fileSession.sessionId}
                         fileHash={fileSession.fileHash}
-                        onMaximize={setEnlargedChart}
+                        onMaximize={handleMaximize}
                         isSuggested={suggestedChartIds.has(chart.id)}
+                        settings={fileSession.chartSettings?.[chart.id] || EMPTY_SETTINGS}
+                        onUpdateSettings={handleUpdateChartSettings}
+                        onResetSettings={handleResetChartSettings}
+                        aiUsage={aiUsage}
+                        onUsageUpdated={setAiUsage}
                       />
                     </div>
 
@@ -1325,11 +1779,16 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
         summary={fileSession.statisticalSummary}
         isSelected={enlargedChart ? selectedChartIds.has(enlargedChart.id) : false}
         toggleChart={toggleChart}
-        onClose={() => setEnlargedChart(null)}
+        onClose={handleCloseModal}
         sessionId={fileSession.sessionId}
         fileHash={fileSession.fileHash}
         anchorPair={anchorPair}
         onCellClick={handleAnchorSelect}
+        settings={enlargedChart ? (fileSession.chartSettings?.[enlargedChart.id] || EMPTY_SETTINGS) : EMPTY_SETTINGS}
+        onUpdateSettings={handleUpdateChartSettings}
+        onResetSettings={handleResetChartSettings}
+        aiUsage={aiUsage}
+        onUsageUpdated={setAiUsage}
       />
 
       {/* Confirmation warning modal for 0 charts selected */}

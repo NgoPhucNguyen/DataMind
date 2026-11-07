@@ -1,10 +1,11 @@
-import { useState } from "react";
+import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ZoomIn, ZoomOut } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer,
-  LineChart, Line, PieChart, Pie, Cell
+  LineChart, Line, PieChart, Pie, Cell, LabelList
 } from "recharts";
+import { getOrderedGreenShades } from "../../utils/chartView";
 
 export const CHART_THEME = {
   primary: "#1B4324",
@@ -14,10 +15,23 @@ export const CHART_THEME = {
   borderCard: "#E5E5E3",
   otherCategory: "#9CA3AF",
   tooltipCursor: "rgba(0,0,0,0.02)",
-  piePalette: ["#1B4324", "#2C6E3B", "#4A8C57", "#73AB7D", "#A1C9A7", "#D1E6D5"],
+  piePalette: ["#1B4324", "#2E6F65", "#B87A28", "#3B5B78", "#A24936", "#5B7038", "#6B4C6E", "#8C7355"],
+  // Bolder numbers and labels (Phase 2c)
+  tickColor: "#3F4742",
+  tickFontWeight: 500,
+  valueColor: "#1F2923",
+  valueMutedColor: "#4B5563",
+  valueFontWeight: 600,
 };
 
-export const DistributionChart = ({ data = [], color = CHART_THEME.primary, isDiscrete = false }) => {
+export const DistributionChart = React.memo(({
+  data = [],
+  color = CHART_THEME.primary,
+  isDiscrete = false,
+  isAnimationActive = true,
+  debounce,
+}) => {
+  const { t } = useTranslation();
   const isDiscreteMode = Boolean(isDiscrete || (data.length > 0 && data[0]?.label !== undefined));
 
   const chartData = data.map(d => {
@@ -40,14 +54,18 @@ export const DistributionChart = ({ data = [], color = CHART_THEME.primary, isDi
   const CustomTooltip = ({ active, payload }) => {
     if (active && payload && payload.length) {
       const item = payload[0].payload;
+      const count = item.count ?? 0;
       return (
         <div className="bg-white border border-[#E5E5E3] rounded-lg p-2.5 shadow-md text-xs z-50 pointer-events-none">
           <p className="font-semibold text-[#121A14] mb-1">{item.name}</p>
           <p className="text-[#626C65]">
-            {isDiscreteMode && item.pct !== undefined
-              ? `${item.count} (${item.pct}%)`
-              : item.count
-            }
+            {isDiscreteMode && count === 0 ? (
+              <span className="font-medium text-[#8C948D]">{t("visualize.zero_respondents")}</span>
+            ) : isDiscreteMode && item.pct !== undefined ? (
+              `${count} (${item.pct}%)`
+            ) : (
+              count
+            )}
           </p>
         </div>
       );
@@ -56,28 +74,63 @@ export const DistributionChart = ({ data = [], color = CHART_THEME.primary, isDi
   };
 
   return (
-    <ResponsiveContainer width="100%" height="100%">
+    <ResponsiveContainer width="100%" height="100%" debounce={debounce}>
       <BarChart data={chartData}>
         <CartesianGrid strokeDasharray="3 3" stroke={CHART_THEME.borderGrid} vertical={false} />
         <XAxis
           dataKey="name"
-          stroke={CHART_THEME.textMuted}
+          stroke={CHART_THEME.tickColor}
+          tick={{ fill: CHART_THEME.tickColor, fontWeight: CHART_THEME.tickFontWeight }}
           fontSize={10}
           tickFormatter={isDiscreteMode ? undefined : (val) => val.split(" - ")[0]}
         />
-        <YAxis stroke={CHART_THEME.textMuted} fontSize={10} />
+        <YAxis
+          stroke={CHART_THEME.tickColor}
+          tick={{ fill: CHART_THEME.tickColor, fontWeight: CHART_THEME.tickFontWeight }}
+          fontSize={10}
+        />
         <Tooltip
           content={<CustomTooltip />}
           cursor={{ fill: CHART_THEME.tooltipCursor }}
           wrapperStyle={{ zIndex: 1000 }}
         />
-        <Bar dataKey="count" fill={color} radius={[4, 4, 0, 0]} />
+        <Bar dataKey="count" fill={color} radius={[4, 4, 0, 0]} isAnimationActive={isAnimationActive}>
+          {isDiscreteMode && (
+            <LabelList
+              dataKey="count"
+              position="top"
+              content={(props) => {
+                const { x, y, width, value } = props;
+                if (value === 0) {
+                  return (
+                    <text
+                      x={x + width / 2}
+                      y={y - 4}
+                      fill={CHART_THEME.valueMutedColor}
+                      textAnchor="middle"
+                      fontSize={11}
+                      fontWeight={CHART_THEME.valueFontWeight}
+                    >
+                      0
+                    </text>
+                  );
+                }
+                return null;
+              }}
+            />
+          )}
+        </Bar>
       </BarChart>
     </ResponsiveContainer>
   );
-};
+});
 
-export const CategoricalChart = ({ data = [], color = CHART_THEME.primary }) => {
+export const CategoricalChart = React.memo(({
+  data = [],
+  color = CHART_THEME.primary,
+  isAnimationActive = true,
+  debounce,
+}) => {
   const { t } = useTranslation();
 
   const getLabel = (val, entry) => {
@@ -107,10 +160,25 @@ export const CategoricalChart = ({ data = [], color = CHART_THEME.primary }) => 
       }
     }
 
+    let tooltipTitle = fullText;
+    if (entry?.hidden_items && entry.hidden_items.length > 0) {
+      const sample = entry.hidden_items.slice(0, 10).map(h => `${h.value} (${h.count})`).join(", ");
+      const more = entry.hidden_items.length > 10 ? ` +${entry.hidden_items.length - 10}` : "";
+      tooltipTitle = `${fullText} [${sample}${more}]`;
+    }
+
     return (
       <g transform={`translate(${x},${y})`}>
-        <text x={-6} y={line2 ? -4 : 3} textAnchor="end" fill={CHART_THEME.textMuted} fontSize={10} className="select-none">
-          <title>{fullText}</title>
+        <text
+          x={-6}
+          y={line2 ? -4 : 3}
+          textAnchor="end"
+          fill={CHART_THEME.tickColor}
+          fontWeight={CHART_THEME.tickFontWeight}
+          fontSize={10}
+          className="select-none"
+        >
+          <title>{tooltipTitle}</title>
           <tspan x={-6}>{line1}</tspan>
           {line2 && <tspan x={-6} dy={12}>{line2}</tspan>}
         </text>
@@ -123,8 +191,13 @@ export const CategoricalChart = ({ data = [], color = CHART_THEME.primary }) => 
       const item = payload[0].payload;
       const isOther = item.value === "__other__";
       const label = isOther ? (item.other_n ? t("visualize.other_label", { n: item.other_n }) : t("visualize.other_fallback")) : item.value;
+      const hiddenList = item.hidden_items || [];
+      const showHidden = isOther && hiddenList.length > 0;
+      const top10Hidden = hiddenList.slice(0, 10);
+      const remainingHiddenCount = hiddenList.length - 10;
+
       return (
-        <div className="bg-white border border-[#E5E5E3] rounded-lg p-2.5 shadow-md text-xs z-50 max-w-[260px] pointer-events-none">
+        <div className="bg-white border border-[#E5E5E3] rounded-lg p-2.5 shadow-md text-xs z-50 max-w-[280px] pointer-events-none">
           <p className="font-semibold text-[#121A14] break-words mb-1">{label}</p>
           <p className="text-[#626C65]">
             {t("visualize.tooltip_count")} <span className="font-semibold text-[#121A14]">{item.count}</span>
@@ -134,6 +207,24 @@ export const CategoricalChart = ({ data = [], color = CHART_THEME.primary }) => 
               {t("visualize.tooltip_pct")} <span className="font-semibold text-[#121A14]">{item.pct}%</span>
             </p>
           )}
+
+          {showHidden && (
+            <div className="mt-2 pt-2 border-t border-[#EAEAEA] text-[11px] text-[#626C65] space-y-0.5">
+              <p className="font-medium text-[#2A342D] mb-1">
+                {t("visualize.other_hidden_header")}
+              </p>
+              {top10Hidden.map((h, i) => (
+                <div key={i} className="truncate">
+                  • {h.value} ({h.count})
+                </div>
+              ))}
+              {remainingHiddenCount > 0 && (
+                <p className="italic text-[#8C948D] pt-0.5">
+                  {t("visualize.other_hidden_more", { count: remainingHiddenCount })}
+                </p>
+              )}
+            </div>
+          )}
         </div>
       );
     }
@@ -141,10 +232,15 @@ export const CategoricalChart = ({ data = [], color = CHART_THEME.primary }) => 
   };
 
   return (
-    <ResponsiveContainer width="100%" height="100%">
+    <ResponsiveContainer width="100%" height="100%" debounce={debounce}>
       <BarChart data={data} layout="vertical" margin={{ left: 10, right: 20, top: 4, bottom: 4 }}>
         <CartesianGrid strokeDasharray="3 3" stroke={CHART_THEME.borderGrid} horizontal={false} />
-        <XAxis type="number" stroke={CHART_THEME.textMuted} fontSize={10} />
+        <XAxis
+          type="number"
+          stroke={CHART_THEME.tickColor}
+          tick={{ fill: CHART_THEME.tickColor, fontWeight: CHART_THEME.tickFontWeight }}
+          fontSize={10}
+        />
         <YAxis 
           dataKey="value" 
           type="category" 
@@ -152,7 +248,7 @@ export const CategoricalChart = ({ data = [], color = CHART_THEME.primary }) => 
           tick={renderYTick}
         />
         <Tooltip content={<CustomTooltip />} cursor={{ fill: CHART_THEME.tooltipCursor }} wrapperStyle={{ zIndex: 1000 }} />
-        <Bar dataKey="count" radius={[0, 4, 4, 0]}>
+        <Bar dataKey="count" radius={[0, 4, 4, 0]} isAnimationActive={isAnimationActive}>
           {data.map((entry, index) => (
             <Cell
               key={`cell-${index}`}
@@ -163,23 +259,37 @@ export const CategoricalChart = ({ data = [], color = CHART_THEME.primary }) => 
       </BarChart>
     </ResponsiveContainer>
   );
-};
+});
 
-export const TrendChart = ({ data = [], color = CHART_THEME.primary }) => {
+export const TrendChart = React.memo(({
+  data = [],
+  color = CHART_THEME.primary,
+  isAnimationActive = true,
+  debounce,
+}) => {
   return (
-    <ResponsiveContainer width="100%" height="100%">
+    <ResponsiveContainer width="100%" height="100%" debounce={debounce}>
       <LineChart data={data}>
         <CartesianGrid strokeDasharray="3 3" stroke={CHART_THEME.borderGrid} vertical={false} />
-        <XAxis dataKey="period" stroke={CHART_THEME.textMuted} fontSize={10} />
-        <YAxis stroke={CHART_THEME.textMuted} fontSize={10} />
+        <XAxis
+          dataKey="period"
+          stroke={CHART_THEME.tickColor}
+          tick={{ fill: CHART_THEME.tickColor, fontWeight: CHART_THEME.tickFontWeight }}
+          fontSize={10}
+        />
+        <YAxis
+          stroke={CHART_THEME.tickColor}
+          tick={{ fill: CHART_THEME.tickColor, fontWeight: CHART_THEME.tickFontWeight }}
+          fontSize={10}
+        />
         <Tooltip contentStyle={{ backgroundColor: "#ffffff", border: `1px solid ${CHART_THEME.borderGrid}`, borderRadius: 8, color: CHART_THEME.textDark }} wrapperStyle={{ zIndex: 1000 }} />
-        <Line type="monotone" dataKey="count" stroke={color} strokeWidth={2} dot={{ r: 3, fill: color }} />
+        <Line type="monotone" dataKey="count" stroke={color} strokeWidth={2} dot={{ r: 3, fill: color }} isAnimationActive={isAnimationActive} />
       </LineChart>
     </ResponsiveContainer>
   );
-};
+});
 
-export const CorrelationHeatmap = ({ matrix, topCorr, onCellClick, anchorPair }) => {
+export const CorrelationHeatmap = React.memo(({ matrix, topCorr, onCellClick, anchorPair }) => {
   const { t, i18n } = useTranslation();
   const [zoom, setZoom] = useState(1);
 
@@ -251,12 +361,13 @@ export const CorrelationHeatmap = ({ matrix, topCorr, onCellClick, anchorPair })
                     return (
                       <td
                         key={col}
+                        style={{ fontWeight: CHART_THEME.valueFontWeight }}
                         className={`p-2 border border-border transition-all duration-150 relative ${getColor(val)} ${
                           diagonal
                             ? "opacity-50 cursor-default"
                             : `cursor-pointer hover:ring-2 hover:ring-[#1B4324]/50 hover:z-40 ${
                                 anchored 
-                                  ? "outline outline-2 outline-[#1B4324] outline-offset-[-2px] z-40 font-bold shadow-lg" 
+                                   ? "outline outline-2 outline-[#1B4324] outline-offset-[-2px] z-40 font-bold shadow-lg" 
                                   : isCrosshair 
                                     ? "after:absolute after:inset-0 after:bg-[#1B4324]/5 z-10"
                                     : ""
@@ -313,45 +424,196 @@ export const CorrelationHeatmap = ({ matrix, topCorr, onCellClick, anchorPair })
       )}
     </div>
   );
-};
+});
 
-export const PieChartComponent = ({ data = [], color = CHART_THEME.primary }) => {
-  const COLORS = [color, ...CHART_THEME.piePalette.slice(1)];
-  return (
-    <ResponsiveContainer width="100%" height="100%">
-      <PieChart>
-        <Pie
-          data={data}
-          cx="50%"
-          cy="50%"
-          innerRadius={60}
-          outerRadius={80}
-          paddingAngle={2}
-          dataKey="count"
-          nameKey="value"
-        >
-          {data?.map((entry, index) => (
-            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-          ))}
-        </Pie>
-        <Tooltip contentStyle={{ backgroundColor: "#ffffff", border: `1px solid ${CHART_THEME.borderGrid}`, borderRadius: 8, color: CHART_THEME.textDark }} />
-      </PieChart>
-    </ResponsiveContainer>
-  );
-};
-
-export const BoxPlotChart = ({ stats, color = CHART_THEME.primary }) => {
+export const PieChartComponent = React.memo(({
+  data = [],
+  color = CHART_THEME.primary,
+  isDiscrete = false,
+  isScale = false,
+  isAnimationActive = true,
+  debounce,
+}) => {
   const { t } = useTranslation();
-  if (!stats) return null;
+
+  if (!data || data.length === 0) return null;
+
+  const isOrdered = Boolean(isDiscrete || isScale);
+  const nonOtherItems = data.filter((d) => (d.value ?? d.name) !== "__other__");
+  const orderedShades = isOrdered ? getOrderedGreenShades(nonOtherItems.length) : [];
+
+  let nonOtherIdx = 0;
+  const sliceColors = data.map((entry) => {
+    const val = entry.value ?? entry.name;
+    if (val === "__other__") {
+      return CHART_THEME.otherCategory;
+    }
+    if (isOrdered) {
+      const c = orderedShades[nonOtherIdx] || color || CHART_THEME.primary;
+      nonOtherIdx++;
+      return c;
+    }
+    const c = CHART_THEME.piePalette[nonOtherIdx % CHART_THEME.piePalette.length];
+    nonOtherIdx++;
+    return c;
+  });
+
+  const CustomPieTooltip = ({ active, payload }) => {
+    if (active && payload && payload.length) {
+      const item = payload[0].payload;
+      const isOther = item.value === "__other__";
+      const label = isOther
+        ? (item.other_n ? t("visualize.other_label", { n: item.other_n }) : t("visualize.other_fallback"))
+        : String(item.label ?? item.value ?? item.name ?? "");
+      const hiddenList = item.hidden_items || [];
+      const showHidden = isOther && hiddenList.length > 0;
+      const top10Hidden = hiddenList.slice(0, 10);
+      const remainingHiddenCount = hiddenList.length - 10;
+
+      return (
+        <div className="bg-white border border-[#E5E5E3] rounded-lg p-2.5 shadow-md text-xs z-50 max-w-[280px] pointer-events-none">
+          <p className="font-semibold text-[#121A14] break-words mb-1">
+            {label}: <span className="font-normal text-[#626C65]">{item.count} {item.pct !== undefined ? `(${item.pct}%)` : ""}</span>
+          </p>
+          {showHidden && (
+            <div className="mt-2 pt-2 border-t border-[#EAEAEA] text-[11px] text-[#626C65] space-y-0.5">
+              <p className="font-medium text-[#2A342D] mb-1">
+                {t("visualize.other_hidden_header")}
+              </p>
+              {top10Hidden.map((h, i) => (
+                <div key={i} className="truncate">
+                  • {h.value} ({h.count})
+                </div>
+              ))}
+              {remainingHiddenCount > 0 && (
+                <p className="italic text-[#8C948D] pt-0.5">
+                  {t("visualize.other_hidden_more", { count: remainingHiddenCount })}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      );
+    }
+    return null;
+  };
+
+  const renderSliceLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, pct }) => {
+    if (pct === undefined || pct < 4) return null;
+    const RADIAN = Math.PI / 180;
+    const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
+    const x = cx + radius * Math.cos(-midAngle * RADIAN);
+    const y = cy + radius * Math.sin(-midAngle * RADIAN);
+    return (
+      <text
+        x={x}
+        y={y}
+        fill="#ffffff"
+        textAnchor="middle"
+        dominantBaseline="central"
+        fontSize={11}
+        fontWeight={CHART_THEME.valueFontWeight}
+      >
+        {`${Math.round(pct)}%`}
+      </text>
+    );
+  };
+
+  return (
+    <div className="w-full flex flex-col sm:flex-row items-center justify-center gap-6 py-2">
+      <div className="w-[180px] h-[180px] sm:w-[210px] sm:h-[210px] shrink-0">
+        <ResponsiveContainer width="100%" height="100%" debounce={debounce}>
+          <PieChart>
+            <Pie
+              data={data}
+              cx="50%"
+              cy="50%"
+              innerRadius={data.length <= 4 ? 45 : 40}
+              outerRadius={data.length <= 4 ? 80 : 75}
+              paddingAngle={2}
+              dataKey="count"
+              nameKey="value"
+              labelLine={false}
+              label={data.length <= 4 ? renderSliceLabel : undefined}
+              isAnimationActive={isAnimationActive}
+            >
+              {data.map((entry, index) => (
+                <Cell
+                  key={`cell-${index}`}
+                  fill={sliceColors[index]}
+                />
+              ))}
+            </Pie>
+            <Tooltip content={<CustomPieTooltip />} wrapperStyle={{ zIndex: 1000 }} />
+          </PieChart>
+        </ResponsiveContainer>
+      </div>
+
+      <div className={`flex flex-col justify-center space-y-1.5 min-w-[160px] max-w-[280px] w-full sm:w-auto text-xs py-1 ${data.length > 8 ? "max-h-[190px] overflow-y-auto pr-1" : ""}`}>
+        {data.map((item, index) => {
+          const isOther = item.value === "__other__";
+          const label = isOther
+            ? (item.other_n ? t("visualize.other_label", { n: item.other_n }) : t("visualize.other_fallback"))
+            : String(item.label ?? item.value ?? item.name ?? "");
+          const sliceColor = sliceColors[index];
+          const pctStr = item.pct !== undefined ? `(${Math.round(item.pct)}%)` : "";
+          return (
+            <div key={index} className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 min-w-0">
+                <span
+                  className="w-2.5 h-2.5 rounded-full shrink-0"
+                  style={{ backgroundColor: sliceColor }}
+                />
+                <span className="truncate text-[#2A342D]" title={label}>
+                  {label}
+                </span>
+              </div>
+              <span
+                className="font-mono shrink-0 text-[11px] whitespace-nowrap"
+                style={{ color: CHART_THEME.valueColor, fontWeight: CHART_THEME.valueFontWeight }}
+              >
+                {item.count} {pctStr}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+});
+
+export const BoxPlotChart = React.memo(({
+  stats,
+  color = CHART_THEME.primary,
+  isAnimationActive = true,
+  debounce,
+}) => {
+  const { t } = useTranslation();
+  if (!stats || stats.min === undefined || stats.p25 === undefined || stats.median === undefined || stats.p75 === undefined || stats.max === undefined) {
+    return null;
+  }
   const data = [
     { name: t("visualize.boxplot_distribution"), box: [stats.p25 || 0, stats.p75 || 0], min: stats.min, max: stats.max, median: stats.median }
   ];
   return (
-    <ResponsiveContainer width="100%" height="100%">
+    <ResponsiveContainer width="100%" height="100%" debounce={debounce}>
       <BarChart data={data} layout="vertical">
         <CartesianGrid strokeDasharray="3 3" stroke={CHART_THEME.borderGrid} horizontal={false} />
-        <XAxis type="number" stroke={CHART_THEME.textMuted} fontSize={10} domain={[stats.min || 0, stats.max || 0]} />
-        <YAxis dataKey="name" type="category" width={80} stroke={CHART_THEME.textMuted} fontSize={10} />
+        <XAxis
+          type="number"
+          stroke={CHART_THEME.tickColor}
+          tick={{ fill: CHART_THEME.tickColor, fontWeight: CHART_THEME.tickFontWeight }}
+          fontSize={10}
+          domain={[stats.min || 0, stats.max || 0]}
+        />
+        <YAxis
+          dataKey="name"
+          type="category"
+          width={80}
+          stroke={CHART_THEME.tickColor}
+          tick={{ fill: CHART_THEME.tickColor, fontWeight: CHART_THEME.tickFontWeight }}
+          fontSize={10}
+        />
         <Tooltip 
           cursor={{ fill: CHART_THEME.tooltipCursor }} 
           contentStyle={{ backgroundColor: "#ffffff", border: `1px solid ${CHART_THEME.borderGrid}`, borderRadius: 8, color: CHART_THEME.textDark }} 
@@ -360,8 +622,8 @@ export const BoxPlotChart = ({ stats, color = CHART_THEME.primary }) => {
             return value;
           }}
         />
-        <Bar dataKey="box" fill={color} radius={[4, 4, 4, 4]} barSize={40} />
+        <Bar dataKey="box" fill={color} radius={[4, 4, 4, 4]} barSize={40} isAnimationActive={isAnimationActive} />
       </BarChart>
     </ResponsiveContainer>
   );
-};
+});

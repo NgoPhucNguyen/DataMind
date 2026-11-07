@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useToast } from "../../contexts/ToastContext";
 import { useFileSession } from "../../contexts/FileSessionContext";
 import { explainChart, saveExplanation } from "../../services/visualizeService";
+import { getAIUsage } from "../../services/profilerService";
 import { translateError } from "../../i18n";
 import { BTN, BADGE } from "../../constants/ui";
 import { useAIAction } from "../../hooks/useAIAction";
@@ -33,7 +34,7 @@ function getChartConfig(chart) {
   };
 }
 
-export default function AIInsightsCard({ sessionId, fileHash, chart, autoInsights, anchorPair }) {
+export default function AIInsightsCard({ sessionId, fileHash, chart, autoInsights, anchorPair, aiUsage, onUsageUpdated }) {
   const { t, i18n } = useTranslation();
   const { showToast } = useToast();
   const { fileSession, updateFileSession } = useFileSession();
@@ -48,6 +49,32 @@ export default function AIInsightsCard({ sessionId, fileHash, chart, autoInsight
   const [isExpanded, setIsExpanded] = useState(false);
   const [confirmReanalyze, setConfirmReanalyze] = useState(false);
   const [lastError, setLastError] = useState(null);
+  const [localUsage, setLocalUsage] = useState(null);
+
+  // Fetch usage as fallback if not passed down
+  useEffect(() => {
+    if (!aiUsage && !insightData?.usage) {
+      getAIUsage()
+        .then((res) => setLocalUsage(res.data))
+        .catch(() => {});
+    }
+  }, [aiUsage, insightData?.usage]);
+
+  const effectiveUsage = aiUsage || localUsage || insightData?.usage;
+  const remaining = effectiveUsage?.remaining;
+  const limit = effectiveUsage?.limit;
+  const isQuotaExhausted = remaining !== undefined && remaining <= 0;
+
+  let explainBtnText = t("visualize.ai_btn_explain");
+  if (isQuotaExhausted) {
+    explainBtnText = t("visualize.ai_quota_exhausted");
+  } else if (remaining !== undefined && limit !== undefined) {
+    explainBtnText = t("visualize.ai_btn_explain_with_quota", {
+      remaining,
+      limit,
+      defaultValue: `AI giải thích · 1 lượt · còn ${remaining}/${limit}`,
+    });
+  }
 
   // On mount: restore saved explanation from fileSession (no API call)
   useEffect(() => {
@@ -123,11 +150,20 @@ export default function AIInsightsCard({ sessionId, fileHash, chart, autoInsight
           },
         });
       }
+      if (res?.usage) {
+        if (onUsageUpdated) onUsageUpdated(res.usage);
+        setLocalUsage(res.usage);
+      }
       return res;
     },
-    usage: insightData?.usage,
+    usage: effectiveUsage,
     onUsageUpdated: (newUsage) => {
       setInsightData((prev) => (prev ? { ...prev, usage: newUsage } : prev));
+      if (onUsageUpdated) {
+        onUsageUpdated(newUsage);
+      } else {
+        setLocalUsage(newUsage);
+      }
     },
     onUpgradeClick: () => {
       showToast(translateError("ERR_AI_QUOTA_EXCEEDED"), "error");
@@ -215,10 +251,16 @@ export default function AIInsightsCard({ sessionId, fileHash, chart, autoInsight
         <button
           id={`ai-explain-btn-${chart.id || chart.col}`}
           onClick={() => handleExplain(false)}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-[#EAF2EB] text-[#1B4324] hover:bg-[#dceddd] rounded text-sm font-medium transition-colors shrink-0 cursor-pointer"
+          disabled={isQuotaExhausted || aiAction.loading}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium transition-colors shrink-0 ${
+            isQuotaExhausted
+              ? "bg-neutral-100 text-[#8C948D] cursor-not-allowed opacity-60"
+              : "bg-[#EAF2EB] text-[#1B4324] hover:bg-[#dceddd] cursor-pointer"
+          }`}
+          title={isQuotaExhausted ? t("visualize.ai_quota_exhausted") : undefined}
         >
           <Sparkles className="w-4 h-4" />
-          {t("visualize.ai_btn_explain")}
+          {explainBtnText}
         </button>
         {aiAction.AIConfirmModal}
       </div>
@@ -356,10 +398,16 @@ export default function AIInsightsCard({ sessionId, fileHash, chart, autoInsight
           </div>
           <button
             onClick={() => handleExplain(false)}
-            className="self-start ml-5 px-3 py-1.5 bg-[#EAF2EB] text-[#1B4324] hover:bg-[#dceddd] rounded text-xs font-medium transition-colors flex items-center gap-1.5"
+            disabled={isQuotaExhausted || aiAction.loading}
+            className={`self-start ml-5 px-3 py-1.5 rounded text-xs font-medium transition-colors flex items-center gap-1.5 ${
+              isQuotaExhausted
+                ? "bg-neutral-100 text-[#8C948D] cursor-not-allowed opacity-60"
+                : "bg-[#EAF2EB] text-[#1B4324] hover:bg-[#dceddd] cursor-pointer"
+            }`}
+            title={isQuotaExhausted ? t("visualize.ai_quota_exhausted") : undefined}
           >
             <Sparkles className="w-3 h-3" />
-            {t("visualize.ai_btn_explain")}
+            {explainBtnText}
           </button>
         </div>
       )}

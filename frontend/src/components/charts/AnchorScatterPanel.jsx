@@ -1,11 +1,12 @@
+import React from "react";
 import { useTranslation } from "react-i18next";
 import {
   ScatterChart, Scatter, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer
 } from "recharts";
-import { X, AlertTriangle, Check } from "lucide-react";
+import { X, AlertTriangle } from "lucide-react";
 import { CARD, TEXT, BTN, BADGE } from "../../constants/ui";
 
-const AnchorScatterPanel = ({ colA, colB, rValue, scatterData, loading, error, onClear, isSelected, onToggle }) => {
+const AnchorScatterPanel = React.memo(({ colA, colB, rValue, scatterData, loading, error, onClear, isSelected, onToggle }) => {
   const { t } = useTranslation();
   const rBadgeClass = rValue > 0
     ? `${BADGE.success}`
@@ -16,6 +17,18 @@ const AnchorScatterPanel = ({ colA, colB, rValue, scatterData, loading, error, o
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
+          <input
+            type="checkbox"
+            checked={isSelected}
+            onChange={(e) => {
+              e.stopPropagation();
+              onToggle();
+            }}
+            onClick={(e) => e.stopPropagation()}
+            className="w-[18px] h-[18px] rounded border-[#87938B] text-[#1B4324] accent-[#1B4324] focus:ring-[#1B4324]/30 cursor-pointer shrink-0"
+            aria-label={isSelected ? t("visualize.btn_added_to_report") : t("visualize.btn_add_to_report")}
+            title={isSelected ? t("visualize.btn_added_to_report") : t("visualize.btn_add_to_report")}
+          />
           <h2 className={`${TEXT.sectionTitle} mb-0`}>
             {t("visualize.scatter_title", { colA, colB })}
           </h2>
@@ -24,13 +37,6 @@ const AnchorScatterPanel = ({ colA, colB, rValue, scatterData, loading, error, o
           </span>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={onToggle}
-            className={`w-6 h-6 rounded flex items-center justify-center border-[2.5px] transition-colors shrink-0 ${isSelected ? "bg-[#121A14] border-[#121A14] text-white" : "border-[#87938B] text-transparent hover:border-[#121A14]"}`}
-            title={t("visualize.scatter_add_tooltip")}
-          >
-            <Check className="w-4 h-4" strokeWidth={3} />
-          </button>
           <button
             onClick={onClear}
             className={`${BTN.secondary} flex items-center gap-1.5`}
@@ -128,6 +134,6 @@ const AnchorScatterPanel = ({ colA, colB, rValue, scatterData, loading, error, o
       )}
     </div>
   );
-};
+});
 
 export default AnchorScatterPanel;

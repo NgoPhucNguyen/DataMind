@@ -20,6 +20,7 @@ const defaultSession = {
   uploadedAt: null,  // epoch ms
   fileExpiresAt: null, // ISO string from backend (Redis actual expiration)
   chartExplanations: {},  // { [chartId]: { content, source, lang } }
+  chartSettings: {},  // { [chartId]: { display_type, top_n, sort, hide_zero } }
 };
 
 export function FileSessionProvider({ children }) {
