@@ -48,23 +48,84 @@ def generate_insights(stats: dict) -> list[dict]:
             })
 
     elif dtype == "numeric":
-        p25 = stats.get("p25")
-        p75 = stats.get("p75")
-        if p25 is not None and p75 is not None:
-            insights.append({
-                "key": "typical_range",
-                "params": {
-                    "low": round(p25, 2) if isinstance(p25, (int, float)) else p25,
-                    "high": round(p75, 2) if isinstance(p75, (int, float)) else p75
-                }
-            })
-            
-        outliers = stats.get("outlier_count", 0)
-        if outliers and outliers > 0:
-            insights.append({
-                "key": "outliers",
-                "params": {"n": int(outliers)}
-            })
+        if stats.get("is_discrete"):
+            if stats.get("is_scale"):
+                scale_max = stats.get("scale_max", 5)
+                n = stats.get("respondents", 0)
+                mean_val = stats.get("mean")
+                if mean_val is not None and scale_max is not None:
+                    insights.append({
+                        "key": "scale_mean",
+                        "type": "scale_mean",
+                        "params": {
+                            "mean": round(float(mean_val), 1),
+                            "max": int(scale_max),
+                            "n": int(n)
+                        }
+                    })
+
+                # Top-2 box percentage
+                bins = stats.get("distribution_bins", [])
+                if bins and scale_max:
+                    low = scale_max - 1
+                    high = scale_max
+                    top_box_count = sum(
+                        b.get("count", 0)
+                        for b in bins
+                        if low <= b.get("value", float("-inf")) <= high
+                    )
+                    pct = round(top_box_count / n * 100, 1) if n > 0 else 0.0
+                    insights.append({
+                        "key": "scale_top_box",
+                        "type": "scale_top_box",
+                        "params": {
+                            "pct": pct,
+                            "low": int(low),
+                            "high": int(high)
+                        }
+                    })
+            else:
+                n = stats.get("respondents", 0)
+                mean_val = stats.get("mean")
+                if mean_val is not None:
+                    insights.append({
+                        "key": "discrete_mean",
+                        "type": "discrete_mean",
+                        "params": {
+                            "mean": round(float(mean_val), 1),
+                            "n": int(n)
+                        }
+                    })
+
+                bins = stats.get("distribution_bins", [])
+                if bins:
+                    top_bin = max(bins, key=lambda b: b.get("count", 0))
+                    insights.append({
+                        "key": "discrete_top",
+                        "type": "discrete_top",
+                        "params": {
+                            "value": top_bin.get("value"),
+                            "pct": top_bin.get("pct", 0.0)
+                        }
+                    })
+        else:
+            p25 = stats.get("p25")
+            p75 = stats.get("p75")
+            if p25 is not None and p75 is not None:
+                insights.append({
+                    "key": "typical_range",
+                    "params": {
+                        "low": round(p25, 2) if isinstance(p25, (int, float)) else p25,
+                        "high": round(p75, 2) if isinstance(p75, (int, float)) else p75
+                    }
+                })
+
+            outliers = stats.get("outlier_count", 0)
+            if outliers and outliers > 0:
+                insights.append({
+                    "key": "outliers",
+                    "params": {"n": int(outliers)}
+                })
 
     elif dtype == "datetime":
         trend_data = stats.get("trend_data", [])

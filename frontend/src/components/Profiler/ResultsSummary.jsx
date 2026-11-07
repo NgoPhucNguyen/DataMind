@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { Clock, Zap, RotateCw, RotateCcw, AlertTriangle, Info, X } from "lucide-react";
 import { BTN } from "../../constants/ui";
 import { getCurrentLang } from "../../i18n";
+import { normalizeConfidence } from "./Badges";
 
 function useCountdown(fileExpiresAt, uploadedAt) {
   const computeSecondsLeft = () => {
@@ -176,8 +177,8 @@ export const ResultsSummary = ({
           })}
           {` · ${problemCols} ${problemCols === 1 ? "issue" : "issues"}`}
           {aiAnalyzed
-            ? ` · ${t("profiler.domain_label")} ${domain} (${Math.round(
-                (result.semantic_context?.confidence || 0) * 100
+            ? ` · ${t("profiler.domain_label")} ${domain} (${normalizeConfidence(
+                result.semantic_context?.confidence
               )}%)`
             : ""}
         </span>

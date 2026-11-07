@@ -6,6 +6,7 @@ import { useFileSession } from "../../contexts/FileSessionContext";
 import { explainChart, saveExplanation } from "../../services/visualizeService";
 import { translateError } from "../../i18n";
 import { BTN, BADGE } from "../../constants/ui";
+import { useAIAction } from "../../hooks/useAIAction";
 
 /** Cap plotted data to this many points before sending to backend */
 const MAX_PLOTTED_POINTS = 30;
@@ -85,26 +86,27 @@ export default function AIInsightsCard({ sessionId, fileHash, chart, autoInsight
         : t("errors.ERR_AI_QUOTA_EXCEEDED")
       : null;
 
-  // ── Core explain call ────────────────────────────────────────────────────
-  const doExplain = async (isReanalyze = false) => {
-    setLoading(true);
-    setLastError(null);
-    try {
-      const res = await explainChart({
-        session_id: sessionId,
-        chart_type: chart.type,
-        col_x: currentX,
-        col_y: currentY,
-        tier: "tier1",
-        is_reanalyze: isReanalyze,
-        chart_config: getChartConfig(chart),
-        plotted_data: getPlottedData(chart),
-      });
+  // ── Core explain action hook ─────────────────────────────────────────────
+  const aiAction = useAIAction({
+    actionFn: async ({ signal, isReanalyze }) => {
+      setLastError(null);
+      const res = await explainChart(
+        {
+          session_id: sessionId,
+          chart_type: chart.type,
+          col_x: currentX,
+          col_y: currentY,
+          tier: "tier1",
+          is_reanalyze: Boolean(isReanalyze),
+          chart_config: getChartConfig(chart),
+          plotted_data: getPlottedData(chart),
+        },
+        { signal }
+      );
       setInsightData(res);
       setDisplayedCols({ col_x: currentX, col_y: currentY });
       setEditContent(res.content);
       setIsExpanded(true);
-      // Persist to fileSession so it survives navigation
       if (chartId) {
         updateFileSession({
           chartExplanations: {
@@ -113,7 +115,28 @@ export default function AIInsightsCard({ sessionId, fileHash, chart, autoInsight
           },
         });
       }
-    } catch (err) {
+      return res;
+    },
+    usage: insightData?.usage,
+    onUsageUpdated: (newUsage) => {
+      setInsightData((prev) => (prev ? { ...prev, usage: newUsage } : prev));
+    },
+    onUpgradeClick: () => {
+      showToast(translateError("ERR_AI_QUOTA_EXCEEDED"), "error");
+    },
+    getPreviousContent: () => ({
+      insightData,
+      editContent,
+      isExpanded,
+    }),
+    onRestore: (prev) => {
+      if (prev) {
+        setInsightData(prev.insightData);
+        setEditContent(prev.editContent);
+        setIsExpanded(prev.isExpanded);
+      }
+    },
+    onError: (err) => {
       const errCode =
         err?.response?.data?.detail?.code ||
         err?.response?.data?.code;
@@ -128,22 +151,11 @@ export default function AIInsightsCard({ sessionId, fileHash, chart, autoInsight
         setLastError(msg);
         showToast(msg, "error");
       }
-    } finally {
-      setLoading(false);
-    }
-  };
+    },
+  });
 
   const handleExplain = (isReanalyze = false) => {
-    if (isReanalyze) {
-      setConfirmReanalyze(true);
-      return;
-    }
-    doExplain(false);
-  };
-
-  const handleConfirmReanalyze = () => {
-    setConfirmReanalyze(false);
-    doExplain(true);
+    aiAction.execute({ isReanalyze });
   };
 
   // ── Save user edit ───────────────────────────────────────────────────────
@@ -188,24 +200,35 @@ export default function AIInsightsCard({ sessionId, fileHash, chart, autoInsight
   };
 
   // ── Initial state (no result yet) ────────────────────────────────────────
-  if (!insightData && !loading && !lastError) {
+  if (!insightData && !aiAction.loading && !lastError) {
     return (
       <div className="mt-4 pt-3 border-t border-border flex flex-wrap justify-between items-center gap-2 min-w-0">
         <p className="text-sm text-muted shrink-0">{t("visualize.ai_prompt")}</p>
         <button
           id={`ai-explain-btn-${chart.id || chart.col}`}
           onClick={() => handleExplain(false)}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-[#EAF2EB] text-[#1B4324] hover:bg-[#dceddd] rounded text-sm font-medium transition-colors shrink-0"
+          className="flex items-center gap-1.5 px-3 py-1.5 bg-[#EAF2EB] text-[#1B4324] hover:bg-[#dceddd] rounded text-sm font-medium transition-colors shrink-0 cursor-pointer"
         >
           <Sparkles className="w-4 h-4" />
           {t("visualize.ai_btn_explain")}
         </button>
+        {aiAction.AIConfirmModal}
+      </div>
+    );
+  }
+
+  // ── Loading state (initial) ──────────────────────────────────────────────
+  if (!insightData && aiAction.loading) {
+    return (
+      <div className="mt-4 pt-3 border-t border-border flex flex-wrap justify-between items-center gap-2 min-w-0">
+        <p className="text-sm text-muted shrink-0">{t("visualize.ai_prompt")}</p>
+        {aiAction.AIRunningBar}
       </div>
     );
   }
 
   // ── Error state with retry ───────────────────────────────────────────────
-  if (!insightData && !loading && lastError) {
+  if (!insightData && !aiAction.loading && lastError) {
     return (
       <div className="mt-4 pt-3 border-t border-border flex flex-wrap justify-between items-center gap-2 min-w-0">
         <p className="text-sm text-red-500 flex items-center gap-1 shrink min-w-0">
@@ -214,11 +237,12 @@ export default function AIInsightsCard({ sessionId, fileHash, chart, autoInsight
         </p>
         <button
           onClick={() => { setLastError(null); handleExplain(false); }}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-[#EAF2EB] text-[#1B4324] hover:bg-[#dceddd] rounded text-sm font-medium transition-colors shrink-0"
+          className="flex items-center gap-1.5 px-3 py-1.5 bg-[#EAF2EB] text-[#1B4324] hover:bg-[#dceddd] rounded text-sm font-medium transition-colors shrink-0 cursor-pointer"
         >
           <RefreshCw className="w-3.5 h-3.5" />
           {t("visualize.ai_btn_retry")}
         </button>
+        {aiAction.AIConfirmModal}
       </div>
     );
   }
@@ -226,32 +250,9 @@ export default function AIInsightsCard({ sessionId, fileHash, chart, autoInsight
   // ── Full card ─────────────────────────────────────────────────────────────
   return (
     <div className="mt-4 pt-3 border-t border-border relative min-w-0">
-      {/* Re-analyze confirm overlay */}
-      {confirmReanalyze && (
-        <div className="absolute inset-0 z-20 bg-white/95 backdrop-blur-sm flex flex-col items-center justify-center p-4 rounded-md border border-border shadow-sm">
-          <p className="text-sm font-semibold text-ink mb-1">
-            {t("visualize.ai_confirm_reanalyze_title")}
-          </p>
-          <p className="text-xs text-muted mb-4 text-center">
-            {t("visualize.ai_confirm_reanalyze_body", {
-              colX: currentX,
-              colY: currentY || "N/A",
-            })}
-          </p>
-          <div className="flex gap-2">
-            <button
-              onClick={() => setConfirmReanalyze(false)}
-              className={`${BTN.secondary} px-4 py-1.5 text-xs`}
-            >
-              {t("visualize.ai_cancel")}
-            </button>
-            <button
-              onClick={handleConfirmReanalyze}
-              className={`${BTN.primary} px-4 py-1.5 text-xs bg-[#1B4324]`}
-            >
-              {t("visualize.ai_confirm_ok")}
-            </button>
-          </div>
+      {aiAction.loading && (
+        <div className="mb-3 p-2 bg-neutral-50 rounded-lg border border-border">
+          {aiAction.AIRunningBar}
         </div>
       )}
 
@@ -283,10 +284,11 @@ export default function AIInsightsCard({ sessionId, fileHash, chart, autoInsight
           <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={() => handleExplain(true)}
-              className="p-1 text-muted hover:text-ink transition-colors"
+              disabled={aiAction.loading}
+              className="p-1 text-muted hover:text-ink transition-colors disabled:opacity-40"
               title={t("visualize.ai_btn_reanalyze")}
             >
-              <RefreshCw className="w-3.5 h-3.5" />
+              <RefreshCw className={`w-3.5 h-3.5 ${aiAction.loading ? "animate-spin" : ""}`} />
             </button>
             <button
               onClick={() => setIsExpanded(!isExpanded)}
@@ -306,14 +308,14 @@ export default function AIInsightsCard({ sessionId, fileHash, chart, autoInsight
       </div>
 
       {/* Stale banner */}
-      {!loading && isStale && !isEditing && (
+      {!loading && !aiAction.loading && isStale && !isEditing && (
         <div className="mb-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-md text-xs text-amber-800 flex flex-wrap items-center justify-between gap-2">
           <span className="flex items-center gap-1.5">
             <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
             {t("visualize.ai_stale_notice")}
           </span>
           <button
-            onClick={() => doExplain(false)}
+            onClick={() => handleExplain(false)}
             className="px-2.5 py-1 bg-amber-100 hover:bg-amber-200 rounded text-xs font-medium transition-colors shrink-0"
           >
             {t("visualize.ai_btn_reexplain")}
@@ -331,7 +333,7 @@ export default function AIInsightsCard({ sessionId, fileHash, chart, autoInsight
       )}
 
       {/* Column mismatch warning */}
-      {!loading && isMismatch && insightData && (
+      {!loading && !aiAction.loading && isMismatch && insightData && (
         <div className="mt-3 px-3 py-2 bg-yellow-50 border border-yellow-200 rounded-md text-xs text-yellow-800 flex flex-col gap-2">
           <div className="flex items-start gap-1.5">
             <span className="mt-0.5">⚠️</span>
@@ -397,6 +399,7 @@ export default function AIInsightsCard({ sessionId, fileHash, chart, autoInsight
           )}
         </div>
       )}
+      {aiAction.AIConfirmModal}
     </div>
   );
 }

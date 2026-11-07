@@ -118,6 +118,14 @@ export default function PageHelpDocs({ pageId }) {
                 >
                   {t("profiler.help_docs_full_link", "Xem tài liệu đầy đủ →")}
                 </a>
+              ) : pageId === "cleaner" ? (
+                <a
+                  href="/docs/cleaner/overview"
+                  onClick={() => setIsOpen(false)}
+                  className="text-xs font-semibold text-forest hover:underline"
+                >
+                  {t("cleaner.help_docs_full_link", "Xem tài liệu đầy đủ →")}
+                </a>
               ) : <div />}
               <button 
                 onClick={() => setIsOpen(false)}

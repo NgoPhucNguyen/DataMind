@@ -13,6 +13,17 @@ from pydantic import BaseModel
 from typing import Any
 
 
+class WindowInfo(BaseModel):
+    """Thông tin phân trang cửa sổ dữ liệu (Row Window)."""
+    offset: int = 0
+    size: int = 150
+    mode: str = "all"  # "all" | "errors"
+    total_rows: int = 0
+    total_error_rows: int = 0
+    first_excel_row: int | None = None
+    last_excel_row: int | None = None
+
+
 # ─── Sub-models cho từng loại issue ────────────────────────────────────────
 
 class ErrorCell(BaseModel):
@@ -52,6 +63,8 @@ class DuplicateIssue(BaseModel):
     """Thông tin dòng trùng lặp."""
     duplicate_count: int      # Số dòng trùng (không tính dòng giữ lại)
     total_rows: int
+    near_empty_count: int = 0
+    warning: str | None = None
 
 class SemanticIssue(BaseModel):
     """Cột có lỗi ngữ nghĩa vượt ngưỡng hệ thống."""
@@ -81,6 +94,12 @@ class IssueReport(BaseModel):
     error_cells: list[ErrorCell] = []
     has_issues: bool                      # True nếu có ít nhất 1 vấn đề
     preview_data: list[dict] = []         # Sample data kèm original_index
+    semantic_status: str = "checked"      # "not_run" | "no_special_columns" | "checked"
+    semantic_checked: bool | None = None  # Backward compatibility
+    preview_rows: int = 150
+    column_issue_counts: dict[str, dict[str, int]] = {}
+    column_letters: dict[str, str] = {}
+    window: WindowInfo | None = None
 
 
 # ─── Request bodies ────────────────────────────────────────────────────────
@@ -89,12 +108,16 @@ class IssueDetectRequest(BaseModel):
     """Request body cho POST /files/detect-issues."""
     file_hash: str
     overridden_types: dict[str, str] = {}   # {"col_name": "categorical"}
+    offset: int = 0
+    mode: str = "all"  # "all" | "errors"
 
 
 class AutoCleanRequest(BaseModel):
     """Request body cho POST /files/auto-clean."""
     file_hash: str
     overridden_types: dict[str, str] = {}
+    offset: int = 0
+    mode: str = "all"  # "all" | "errors"
 
 
 class CleanAction(BaseModel):
@@ -120,7 +143,72 @@ class ConfirmCleanRequest(BaseModel):
 class ManualCleanPreviewRequest(BaseModel):
     """Request body cho POST /files/manual-clean-preview."""
     file_hash: str
-    actions: list[CleanAction]
+    actions: list[CleanAction] = []
+    offset: int = 0
+    mode: str = "all"  # "all" | "errors"
+
+
+class ManualCleanPreviewResponse(BaseModel):
+    """Response trả về khi preview thao tác làm sạch thủ công."""
+    preview_data: list[dict] = []
+    error_cells: list[ErrorCell] = []
+    changed_cells: list[dict] = []
+    removed_rows: list[int] = []
+    changed_truncated: bool = False
+    preview_rows: int = 150
+    column_letters: dict[str, str] = {}
+    column_issue_counts: dict[str, dict[str, int]] = {}
+    window: WindowInfo | None = None
+
+
+class ErrorCellsRequest(BaseModel):
+    """Request body cho POST /files/error-cells."""
+    file_hash: str
+    actions: list[CleanAction] = []
+    overridden_types: dict[str, str] = {}
+    column: str
+    issue_type: str
+    offset: int = 0
+    limit: int = 20
+
+
+class ErrorCellGroupItem(BaseModel):
+    excel_row: int
+    letter: str
+    value: Any = None
+    issue: str
+    row_id: int
+    column: str
+
+
+class ErrorCellsResponse(BaseModel):
+    """Response cho danh sách ô có lỗi của nhóm (column, issue_type)."""
+    cells: list[ErrorCellGroupItem] = []
+    total: int = 0
+    column: str
+    issue_type: str
+    offset: int = 0
+    limit: int = 20
+
+
+class LocateRowRequest(BaseModel):
+    """Request body cho định vị dòng (locate row offset & status)."""
+    file_hash: str
+    excel_row: int
+    mode: str = "all"  # "all" | "errors"
+    clean_mode: str = "detect"  # "detect" | "auto" | "manual"
+    actions: list[CleanAction] = []
+    overridden_types: dict[str, str] = {}
+
+
+class LocateRowResponse(BaseModel):
+    """Response cho định vị dòng."""
+    status: str  # "found" | "removed" | "not_found" | "not_in_errors"
+    offset: int | None = None
+    excel_row: int
+    reason: str | None = None
+    mode: str = "all"
+    window: WindowInfo | None = None
 
 
 # ─── DiffReport (thay đổi sau khi clean) ──────────────────────────────────
@@ -139,6 +227,10 @@ class DiffReport(BaseModel):
     types_converted: dict[str, str]           # {"salary": "object → float64"}
     encoding_fixed: dict[str, int]            # {"name": 8}
     columns_dropped: list[str] = []
+    invalid_replaced: dict[str, int] = {}     # {"col": count}
+    format_normalized: dict[str, int] = {}    # {"col": count}
+    columns_renamed: dict[str, str] = {}      # {"old": "new"}
+    cells_edited_manually: int = 0
 
 
 # ─── ValidationResult (kết quả validate 2 tầng) ──────────────────────────
@@ -179,6 +271,9 @@ class AutoCleanResponse(BaseModel):
     changed_cells: list[dict] = []        # Cell-level diff vs original
     removed_rows: list[int] = []          # Index labels dropped by dedup/drop
     changed_truncated: bool = False       # True when changed_cells hit cap
+    preview_rows: int = 150
+    column_letters: dict[str, str] = {}
+    window: WindowInfo | None = None
 
 
 # ─── summary_for_module3 ──────────────────────────────────────────────────
@@ -211,3 +306,6 @@ class CleanDatasetResponse(BaseModel):
     confirmed_at: str              # ISO datetime string
     validation: ValidationResult | None = None
     preview_data: list[dict] = []
+    preview_rows: int = 150
+    column_letters: dict[str, str] = {}
+    window: WindowInfo | None = None

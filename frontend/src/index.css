@@ -82,3 +82,39 @@ a:focus-visible {
   outline-offset: 2px;
   border-radius: 4px;
 }
+
+/* ── Jump to Cell & Excel Cell/Header Selection ───────────── */
+@keyframes cell-flash {
+  0% {
+    background-color: #fef08a !important;
+    outline: 2px solid #ca8a04 !important;
+    outline-offset: -2px;
+  }
+  100% {
+    background-color: inherit;
+    outline: 2px solid transparent;
+  }
+}
+
+.cell-flash {
+  animation: cell-flash 2s ease-out;
+}
+
+.excel-cell-active {
+  position: relative !important;
+  z-index: 15 !important;
+  outline: 2px solid #1B4324 !important;
+  outline-offset: -2px !important;
+  box-shadow: 0 0 0 1px #1B4324, 0 2px 8px rgba(27, 67, 36, 0.15) !important;
+  background-image: linear-gradient(rgba(27, 67, 36, 0.08), rgba(27, 67, 36, 0.08)) !important;
+}
+
+.excel-header-active {
+  background-color: #E2ECE4 !important;
+  color: #1B4324 !important;
+  font-weight: 700 !important;
+  outline: 1.5px solid #1B4324 !important;
+  outline-offset: -1px !important;
+  position: relative !important;
+  z-index: 35 !important;
+}

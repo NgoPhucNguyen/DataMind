@@ -16,6 +16,12 @@ import {
   Clock,
   HelpCircle,
   Hash,
+  Brush,
+  PenTool,
+  Zap,
+  AlertTriangle,
+  ArrowRight,
+  History,
 } from "lucide-react";
 import api from "../services/axiosClient";
 import MarkdownDocViewer from "../components/docs/MarkdownDocViewer";
@@ -28,6 +34,63 @@ import profilerAttentionRaw from "../docs/vi/profiler/attention.md?raw";
 import profilerOverrideRaw from "../docs/vi/profiler/override.md?raw";
 import profilerAiContextRaw from "../docs/vi/profiler/ai-context.md?raw";
 import profilerSessionRaw from "../docs/vi/profiler/session.md?raw";
+
+// Raw markdown imports from docs/vi/cleaner/
+import cleanerOverviewRaw from "../docs/vi/cleaner/overview.md?raw";
+import cleanerIssueTypesRaw from "../docs/vi/cleaner/issue-types.md?raw";
+import cleanerFindErrorsRaw from "../docs/vi/cleaner/find-errors.md?raw";
+import cleanerAutoCleanRaw from "../docs/vi/cleaner/auto-clean.md?raw";
+import cleanerManualCleanRaw from "../docs/vi/cleaner/manual-clean.md?raw";
+import cleanerReviewResultsRaw from "../docs/vi/cleaner/review-results.md?raw";
+import cleanerConfirmAndNextRaw from "../docs/vi/cleaner/confirm-and-next.md?raw";
+
+// Raw markdown for changelog
+import changelogRaw from "../docs/vi/changelog.md?raw";
+
+const CLEANER_DOCS = {
+  overview: {
+    id: "overview",
+    title: "Tổng quan Làm sạch dữ liệu",
+    raw: cleanerOverviewRaw,
+    icon: Brush,
+  },
+  "issue-types": {
+    id: "issue-types",
+    title: "5 loại vấn đề thường gặp",
+    raw: cleanerIssueTypesRaw,
+    icon: AlertTriangle,
+  },
+  "find-errors": {
+    id: "find-errors",
+    title: "Tìm & định vị lỗi nhanh",
+    raw: cleanerFindErrorsRaw,
+    icon: Search,
+  },
+  "auto-clean": {
+    id: "auto-clean",
+    title: "Tự động sửa với 1 cú click",
+    raw: cleanerAutoCleanRaw,
+    icon: Zap,
+  },
+  "manual-clean": {
+    id: "manual-clean",
+    title: "Sửa thủ công & Không gian làm việc",
+    raw: cleanerManualCleanRaw,
+    icon: PenTool,
+  },
+  "review-results": {
+    id: "review-results",
+    title: "Xem kết quả thay đổi (Diff)",
+    raw: cleanerReviewResultsRaw,
+    icon: Layers,
+  },
+  "confirm-and-next": {
+    id: "confirm-and-next",
+    title: "Chốt dữ liệu & Chuyển tiếp",
+    raw: cleanerConfirmAndNextRaw,
+    icon: ArrowRight,
+  },
+};
 
 const PROFILER_DOCS = {
   overview: {
@@ -158,28 +221,39 @@ export default function Docs() {
   const location = useLocation();
   const { t, i18n } = useTranslation();
 
-  const [activeModule, setActiveModule] = useState("profiler");
+  const [activeModule, setActiveModule] = useState("cleaner");
   const [activeTopic, setActiveTopic] = useState("overview");
   const [rules, setRules] = useState({});
   const [searchQuery, setSearchQuery] = useState("");
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const [tocHeadings, setTocHeadings] = useState([]);
+  const [cleanerExpanded, setCleanerExpanded] = useState(true);
   const [profilerExpanded, setProfilerExpanded] = useState(true);
 
   // Sync route params to state
   useEffect(() => {
-    if (routeModule === "profiler") {
+    if (routeModule === "cleaner") {
+      setActiveModule("cleaner");
+      if (routeTopic && CLEANER_DOCS[routeTopic]) {
+        setActiveTopic(routeTopic);
+      } else {
+        setActiveTopic("overview");
+      }
+    } else if (routeModule === "profiler") {
       setActiveModule("profiler");
       if (routeTopic && PROFILER_DOCS[routeTopic]) {
         setActiveTopic(routeTopic);
       } else {
         setActiveTopic("overview");
       }
+    } else if (routeModule === "changelog") {
+      setActiveModule("changelog");
+      setActiveTopic("changelog");
     } else if (routeModule) {
       setActiveModule(routeModule);
       setActiveTopic(routeTopic || "");
     } else {
-      setActiveModule("profiler");
+      setActiveModule("cleaner");
       setActiveTopic("overview");
     }
   }, [routeModule, routeTopic]);
@@ -201,8 +275,16 @@ export default function Docs() {
 
   // Parse headings (h2, h3) from markdown raw text for right TOC
   useEffect(() => {
-    if (activeModule === "profiler" && PROFILER_DOCS[activeTopic]) {
-      const rawText = PROFILER_DOCS[activeTopic].raw.normalize("NFC");
+    let rawText = "";
+    if (activeModule === "cleaner" && CLEANER_DOCS[activeTopic]) {
+      rawText = CLEANER_DOCS[activeTopic].raw.normalize("NFC");
+    } else if (activeModule === "profiler" && PROFILER_DOCS[activeTopic]) {
+      rawText = PROFILER_DOCS[activeTopic].raw.normalize("NFC");
+    } else if (activeModule === "changelog") {
+      rawText = changelogRaw.normalize("NFC");
+    }
+
+    if (rawText) {
       const lines = rawText.split("\n");
       const headings = [];
 
@@ -255,8 +337,18 @@ export default function Docs() {
     }
   }, [location.hash, activeTopic, activeModule]);
 
+  const handleSelectCleanerTopic = (topicKey) => {
+    navigate(`/docs/cleaner/${topicKey}`);
+    setMobileDrawerOpen(false);
+  };
+
   const handleSelectProfilerTopic = (topicKey) => {
     navigate(`/docs/profiler/${topicKey}`);
+    setMobileDrawerOpen(false);
+  };
+
+  const handleSelectChangelog = () => {
+    navigate(`/docs/changelog`);
     setMobileDrawerOpen(false);
   };
 
@@ -267,19 +359,52 @@ export default function Docs() {
     setMobileDrawerOpen(false);
   };
 
-  // Search filter across profiler topic titles and headings
+  // Search filter across cleaner and profiler topic titles and headings
   const searchResults = useMemo(() => {
     if (!searchQuery.trim()) return [];
     const q = searchQuery.toLowerCase().trim();
     const results = [];
 
+    // Search Cleaner docs
+    Object.entries(CLEANER_DOCS).forEach(([topicKey, doc]) => {
+      if (doc.title.toLowerCase().includes(q)) {
+        results.push({
+          module: "cleaner",
+          topic: topicKey,
+          title: doc.title,
+          sub: "Làm sạch dữ liệu",
+          anchor: "",
+        });
+      }
+      const lines = doc.raw.normalize("NFC").split("\n");
+      lines.forEach((line) => {
+        const match = line.match(/^#{1,3}\s+(.+)$/);
+        if (match) {
+          const heading = match[1];
+          if (heading.toLowerCase().includes(q)) {
+            const anchorMatch = heading.match(/\{#([\w-]+)\}\s*$/);
+            const anchor = anchorMatch ? `#${anchorMatch[1]}` : "";
+            const cleanTitle = heading.replace(/\{#([\w-]+)\}\s*$/, "").trim();
+            results.push({
+              module: "cleaner",
+              topic: topicKey,
+              title: cleanTitle,
+              sub: `Trong: ${doc.title}`,
+              anchor,
+            });
+          }
+        }
+      });
+    });
+
+    // Search Profiler docs
     Object.entries(PROFILER_DOCS).forEach(([topicKey, doc]) => {
       if (doc.title.toLowerCase().includes(q)) {
         results.push({
           module: "profiler",
           topic: topicKey,
           title: doc.title,
-          sub: "Chủ đề",
+          sub: "Đánh giá dữ liệu",
           anchor: "",
         });
       }
@@ -304,9 +429,21 @@ export default function Docs() {
       });
     });
 
+    // Search Changelog
+    if ("có gì mới nhật ký cập nhật changelog".includes(q)) {
+      results.push({
+        module: "changelog",
+        topic: "",
+        title: "Có gì mới (Nhật ký cập nhật)",
+        sub: "Chung & Chính sách",
+        anchor: "",
+      });
+    }
+
     return results.slice(0, 8);
   }, [searchQuery]);
 
+  const currentCleanerDoc = activeModule === "cleaner" ? CLEANER_DOCS[activeTopic] || CLEANER_DOCS.overview : null;
   const currentProfilerDoc = activeModule === "profiler" ? PROFILER_DOCS[activeTopic] || PROFILER_DOCS.overview : null;
   const currentStaticDoc = activeModule === "static" ? STATIC_SECTIONS.find((s) => s.id === activeTopic) || STATIC_SECTIONS[0] : null;
 
@@ -326,11 +463,32 @@ export default function Docs() {
             <BookOpen className="w-4 h-4 text-forest shrink-0" />
             <span className="font-semibold text-ink">Tài liệu</span>
             <span>/</span>
-            <span className="text-forest font-medium">{t("profiler.title", "Đánh giá dữ liệu")}</span>
+            {activeModule === "cleaner" && (
+              <>
+                <span className="text-forest font-medium">{t("cleaner.title", "Làm sạch dữ liệu")}</span>
+                <span>/</span>
+                <span className="text-ink font-medium truncate max-w-[180px] sm:max-w-xs">{currentCleanerDoc?.title}</span>
+              </>
+            )}
             {activeModule === "profiler" && (
               <>
+                <span className="text-forest font-medium">{t("profiler.title", "Đánh giá dữ liệu")}</span>
                 <span>/</span>
                 <span className="text-ink font-medium truncate max-w-[180px] sm:max-w-xs">{currentProfilerDoc?.title}</span>
+              </>
+            )}
+            {activeModule === "changelog" && (
+              <>
+                <span className="text-forest font-medium">Chung & Chính sách</span>
+                <span>/</span>
+                <span className="text-ink font-medium">Có gì mới</span>
+              </>
+            )}
+            {activeModule === "static" && (
+              <>
+                <span className="text-forest font-medium">Chung & Chính sách</span>
+                <span>/</span>
+                <span className="text-ink font-medium truncate max-w-[180px] sm:max-w-xs">{currentStaticDoc?.title}</span>
               </>
             )}
           </div>
@@ -352,7 +510,11 @@ export default function Docs() {
                 <button
                   key={i}
                   onClick={() => {
-                    navigate(`/docs/${res.module}/${res.topic}${res.anchor}`);
+                    if (res.module === "changelog") {
+                      navigate(`/docs/changelog${res.anchor}`);
+                    } else {
+                      navigate(`/docs/${res.module}/${res.topic}${res.anchor}`);
+                    }
                     setSearchQuery("");
                   }}
                   className="w-full text-left px-3.5 py-2.5 hover:bg-sage/30 border-b border-border/50 last:border-0 transition-colors"
@@ -372,6 +534,48 @@ export default function Docs() {
       <div className="flex-1 flex w-full max-w-7xl mx-auto">
         {/* Left Sidebar (Desktop) */}
         <aside className="w-64 flex-shrink-0 border-r border-border px-3 py-6 sticky top-28 self-start hidden md:block max-h-[calc(100vh-7rem)] overflow-y-auto">
+          {/* Module group: Làm sạch dữ liệu */}
+          <div className="mb-6">
+            <button
+              onClick={() => setCleanerExpanded(!cleanerExpanded)}
+              className="w-full flex items-center justify-between text-xs font-bold uppercase tracking-wider text-muted hover:text-ink px-2 py-1.5 rounded transition-colors text-left"
+            >
+              <span className="flex items-center gap-2 leading-relaxed">
+                <Brush className="w-3.5 h-3.5 text-forest shrink-0" />
+                <span>{t("cleaner.title", "Làm sạch dữ liệu")} (Cleaner)</span>
+              </span>
+              {cleanerExpanded ? (
+                <ChevronDown className="w-3.5 h-3.5 shrink-0 ml-1" />
+              ) : (
+                <ChevronRight className="w-3.5 h-3.5 shrink-0 ml-1" />
+              )}
+            </button>
+
+            {cleanerExpanded && (
+              <nav className="flex flex-col gap-0.5 mt-1 pl-2">
+                {Object.entries(CLEANER_DOCS).map(([key, item]) => {
+                  const Icon = item.icon;
+                  const isActive = activeModule === "cleaner" && activeTopic === key;
+                  return (
+                    <button
+                      key={key}
+                      onClick={() => handleSelectCleanerTopic(key)}
+                      title={item.title}
+                      className={`text-left px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center gap-2 ${
+                        isActive
+                          ? "bg-sage text-forest font-semibold shadow-xs"
+                          : "text-muted hover:text-ink hover:bg-sage/40"
+                      }`}
+                    >
+                      <Icon className={`w-3.5 h-3.5 shrink-0 ${isActive ? "text-forest" : "text-muted"}`} />
+                      <span className="truncate">{item.title}</span>
+                    </button>
+                  );
+                })}
+              </nav>
+            )}
+          </div>
+
           {/* Module group: Đánh giá dữ liệu */}
           <div className="mb-6">
             <button
@@ -420,6 +624,18 @@ export default function Docs() {
               Chung & Chính sách
             </p>
             <nav className="flex flex-col gap-0.5 mt-1">
+              <button
+                onClick={handleSelectChangelog}
+                title="Có gì mới (Nhật ký cập nhật)"
+                className={`text-left px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center gap-2 ${
+                  activeModule === "changelog"
+                    ? "bg-sage text-forest font-semibold shadow-xs"
+                    : "text-muted hover:text-ink hover:bg-sage/40"
+                }`}
+              >
+                <History className={`w-3.5 h-3.5 shrink-0 ${activeModule === "changelog" ? "text-forest" : "text-muted"}`} />
+                <span className="truncate">Có gì mới (Changelog)</span>
+              </button>
               {STATIC_SECTIONS.map((s) => {
                 const isActive = activeModule === "static" && activeTopic === s.id;
                 return (
@@ -455,6 +671,30 @@ export default function Docs() {
                 </button>
               </div>
 
+              {/* Mobile Cleaner */}
+              <div className="mb-4">
+                <p className="text-xs font-bold uppercase tracking-wider text-forest mb-2 leading-relaxed">
+                  {t("cleaner.title", "Làm sạch dữ liệu")} (Cleaner)
+                </p>
+                <div className="space-y-1">
+                  {Object.entries(CLEANER_DOCS).map(([key, item]) => (
+                    <button
+                      key={key}
+                      onClick={() => handleSelectCleanerTopic(key)}
+                      title={item.title}
+                      className={`w-full text-left px-2.5 py-2 rounded-lg text-xs font-medium truncate block ${
+                        activeModule === "cleaner" && activeTopic === key
+                          ? "bg-sage text-forest font-semibold"
+                          : "text-muted hover:text-ink"
+                      }`}
+                    >
+                      {item.title}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Mobile Profiler */}
               <div className="mb-4">
                 <p className="text-xs font-bold uppercase tracking-wider text-forest mb-2 leading-relaxed">
                   {t("profiler.title", "Đánh giá dữ liệu")} (Profiler)
@@ -482,6 +722,17 @@ export default function Docs() {
                   Chung & Chính sách
                 </p>
                 <div className="space-y-1">
+                  <button
+                    onClick={handleSelectChangelog}
+                    title="Có gì mới (Nhật ký cập nhật)"
+                    className={`w-full text-left px-2.5 py-2 rounded-lg text-xs font-medium truncate block ${
+                      activeModule === "changelog"
+                        ? "bg-sage text-forest font-semibold"
+                        : "text-muted hover:text-ink"
+                    }`}
+                  >
+                    Có gì mới (Changelog)
+                  </button>
                   {STATIC_SECTIONS.map((s) => (
                     <button
                       key={s.id}
@@ -511,6 +762,16 @@ export default function Docs() {
             </div>
           )}
 
+          {activeModule === "cleaner" && currentCleanerDoc && (
+            <div>
+              <div className="mb-3 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-emerald-50 text-emerald-800 border border-emerald-200">
+                <Brush className="w-3.5 h-3.5 shrink-0 text-emerald-700" />
+                <span>Mô-đun {t("cleaner.title", "Làm sạch dữ liệu")} (Cleaner)</span>
+              </div>
+              <MarkdownDocViewer content={currentCleanerDoc.raw} rules={rules} />
+            </div>
+          )}
+
           {activeModule === "profiler" && currentProfilerDoc && (
             <div>
               <div className="mb-3 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-forest/10 text-forest border border-forest/20">
@@ -518,6 +779,16 @@ export default function Docs() {
                 <span>Mô-đun {t("profiler.title", "Đánh giá dữ liệu")} (Profiler)</span>
               </div>
               <MarkdownDocViewer content={currentProfilerDoc.raw} rules={rules} />
+            </div>
+          )}
+
+          {activeModule === "changelog" && (
+            <div>
+              <div className="mb-3 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-amber-50 text-amber-800 border border-amber-200">
+                <History className="w-3.5 h-3.5 shrink-0 text-amber-700" />
+                <span>Nhật ký cập nhật hệ thống</span>
+              </div>
+              <MarkdownDocViewer content={changelogRaw} rules={rules} />
             </div>
           )}
 

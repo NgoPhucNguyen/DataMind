@@ -83,7 +83,7 @@ export default function Navbar() {
                                 onClick={() => navigate("/dashboard/profiler")}
                                 className="text-sm bg-ink hover:bg-ink/80 text-white px-4 py-2 rounded-lg font-semibold transition-all hidden sm:block"
                             >
-                                Vào Dashboard
+                                Dashboard
                             </button>
 
                             <div

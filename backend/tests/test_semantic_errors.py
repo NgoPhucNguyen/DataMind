@@ -56,6 +56,7 @@ def test_semantic_fallback_and_validation():
     # Phải bắt được lỗi ở dòng 1 và 3 cột emails
     assert len(detect_semantic_cells) == 4 # 2 email lỗi + 2 phone lỗi
     assert detect_semantic_cells == preview_semantic_cells
+    assert report["semantic_status"] == "checked"
     
     # 3. Test report column level
     assert len(report["semantic_errors"]) == 0 # Tại sao bằng 0? Vì threshold = MAX(3, 5%). Email lỗi 2 cell < 3 -> không report cấp cột.
@@ -115,6 +116,41 @@ def test_semantic_safety_net():
         assert cell["issue_type"] == "semantic_error"
         assert cell["semantic_type"] == "SEQUENCE_NUMBER"
         assert cell["severity"] == "hint" # Đã được downgrade từ error xuống hint
+
+
+def test_semantic_status_modes():
+    """Test 3 states of semantic_status: not_run, no_special_columns, checked."""
+    df = pd.DataFrame({"col1": ["abc", "def"]})
+
+    # 1. not_run: No profiler AI context
+    rep_not_run = detect_issues(
+        df=df,
+        filename="test.csv",
+        file_hash="dummy_hash_not_run",
+        profiler_context=None,
+    )
+    assert rep_not_run["semantic_status"] == "not_run"
+
+    # 2. no_special_columns: AI ran (domain identified) but no format-checked columns
+    rep_no_special = detect_issues(
+        df=df,
+        filename="test.csv",
+        file_hash="dummy_hash_no_special",
+        column_semantics={"col1": "GENERAL_TEXT"},
+        profiler_context={"semantic_context": {"domain": "Customer Support"}},
+    )
+    assert rep_no_special["semantic_status"] == "no_special_columns"
+
+    # 3. checked: AI ran and at least one format-checked column exists (e.g. EMAIL)
+    rep_checked = detect_issues(
+        df=df,
+        filename="test.csv",
+        file_hash="dummy_hash_checked",
+        column_semantics={"col1": "EMAIL"},
+        profiler_context={"semantic_context": {"domain": "Customer Support"}},
+    )
+    assert rep_checked["semantic_status"] == "checked"
+
 
 if __name__ == "__main__":
     pytest.main(["-v", __file__])

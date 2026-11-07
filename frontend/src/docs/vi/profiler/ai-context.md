@@ -1,3 +1,8 @@
+---
+title: Ngữ cảnh AI và Lĩnh vực dữ liệu
+updated: 2026-11-02
+---
+
 # Ngữ cảnh AI và Lĩnh vực dữ liệu {#ai-context}
 
 Tại khối **Ngữ cảnh của AI** bên dưới bảng cột, bạn có thể bổ sung ý nghĩa của file hoặc bấm nút để trí tuệ nhân tạo (AI) tự động đọc hiểu và tóm tắt toàn bộ tập dữ liệu.

@@ -9,6 +9,7 @@ File KHÔNG ghi vào disk. Đọc từ memory buffer (io.BytesIO).
 import io
 import re
 import os
+import time
 import hashlib
 import logging
 import uuid
@@ -16,7 +17,9 @@ from datetime import datetime, timezone
 from app.models import User
 
 import pandas as pd
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status, Request
+from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
 
 from app.core.dependencies import get_current_user, get_current_user_with_tier
 from app.core.database import get_db
@@ -28,6 +31,7 @@ from app.services.ai_usage_service import (
     get_user_ai_usage_summary,
 )
 from app.core import cache
+from app.core.rules import CLEANER_PREVIEW_ROWS
 from app.core.errors import DataMindException, ErrorSeverity
 from app.core.ai_client import get_dev_provider
 from app.schemas.files import ProfileResponse, SemanticContext, ColumnProfile
@@ -35,7 +39,9 @@ from app.schemas.cleaner import (
     IssueDetectRequest, IssueReport,
     AutoCleanRequest, AutoCleanResponse, DiffReport,
     ConfirmCleanRequest, CleanDatasetResponse, SummaryForModule3,
-    ValidationResult, ManualCleanPreviewRequest
+    ValidationResult, ManualCleanPreviewRequest, ManualCleanPreviewResponse,
+    WindowInfo, LocateRowRequest, LocateRowResponse,
+    ErrorCellsRequest, ErrorCellsResponse,
 )
 from pydantic import BaseModel
 from app.services import profiler_service, llm_service, cleaner_service
@@ -78,13 +84,26 @@ def _validate_extension(filename: str) -> str:
     )
 
 
+def col_index_to_letter(idx: int) -> str:
+    """Chuyển đổi 0-indexed column position sang ký hiệu chữ cái Excel (0 -> A, 25 -> Z, 26 -> AA)."""
+    result = []
+    idx += 1
+    while idx > 0:
+        idx, rem = divmod(idx - 1, 26)
+        result.append(chr(65 + rem))
+    return "".join(reversed(result))
+
+
 def _read_dataframe(file_bytes: io.BytesIO, ext: str) -> pd.DataFrame:
     """Parse file bytes thành DataFrame theo extension."""
     try:
         if ext == ".csv":
-            df = pd.read_csv(file_bytes)
+            df = pd.read_csv(file_bytes, skip_blank_lines=False)
         else:
             df = pd.read_excel(file_bytes)
+
+        # Ghi nhận vị trí cột gốc trong RAW file trước khi drop / rename bất kỳ cột nào
+        raw_col_letters = {str(col): col_index_to_letter(i) for i, col in enumerate(df.columns)}
 
         # ── Filter cột Unnamed ──────────────────────────────────────
         # Phân biệt 2 trường hợp:
@@ -99,11 +118,13 @@ def _read_dataframe(file_bytes: io.BytesIO, ext: str) -> pd.DataFrame:
             is_unnamed = bool(re.match(r'^Unnamed: \d+$', col_str))
 
             if is_unnamed and df[col].isna().all():
-                # Cột trống hoàn toàn + tên tự động → xóa
+                # Cột trống hoàn toàn + tên tự động → xóa (vẫn lưu lại chữ cái gốc trong raw_col_letters)
                 cols_to_drop.append(col)
             elif is_unnamed and not df[col].isna().all():
                 # Cột có data nhưng không có header → đổi tên placeholder
-                rename_map[col] = f"Cột không tên ({chr(65 + unnamed_counter)})"
+                new_placeholder = f"Cột không tên ({col_index_to_letter(unnamed_counter)})"
+                rename_map[col] = new_placeholder
+                raw_col_letters[new_placeholder] = raw_col_letters[col_str]
                 unnamed_counter += 1
 
         if cols_to_drop:
@@ -111,8 +132,9 @@ def _read_dataframe(file_bytes: io.BytesIO, ext: str) -> pd.DataFrame:
         if rename_map:
             df = df.rename(columns=rename_map)
 
-        # Xóa dòng 100% trống
+        # Xóa dòng 100% trống nhưng giữ nguyên index của các dòng còn lại
         df = df.dropna(how='all')
+        df.attrs["column_letters"] = raw_col_letters
 
         return df
     except DataMindException:
@@ -131,28 +153,14 @@ def _read_dataframe(file_bytes: io.BytesIO, ext: str) -> pd.DataFrame:
         )
 
 
-@router.post(
-    "/profile",
-    response_model=ProfileResponse,
-    summary="Phân tích cấu trúc file CSV/Excel",
-    description=(
-        "Upload file CSV hoặc Excel. "
-        "Hệ thống phân loại từng cột (Numeric/Datetime/Categorical/Text), "
-        "gợi ý biểu đồ, và dùng Gemini AI để đoán lĩnh vực của dataset."
-    ),
-)
-async def profile_file(
-    file: UploadFile = File(..., description="File CSV hoặc Excel cần phân tích"),
-    force_refresh: bool = False,
-    current_user: dict = Depends(get_current_user_with_tier),
-    db: Session = Depends(get_db),
-):
-    # 1. Validate extension
-    ext = _validate_extension(file.filename)
-
-    # 2. Đọc bytes vào RAM — KHÔNG ghi disk
-    content = await file.read()
-
+def _process_profile(
+    content: bytes,
+    filename: str,
+    ext: str,
+    force_refresh: bool,
+    user_id: int,
+    db: Session,
+) -> ProfileResponse:
     if len(content) > MAX_FILE_SIZE_BYTES:
         raise DataMindException(
             code="ERR_FILE_TOO_LARGE",
@@ -186,29 +194,26 @@ async def profile_file(
     # 4. Kiểm tra Redis cache
     if force_refresh:
         # User bấm "Phân tích lại" → xóa cache cũ trước, rồi chạy lại từ đầu
-        cache.delete_profile(current_user["user_id"], file_hash)
-        logger.info("Force refresh: deleted cache for file_hash=%s user=%s", file_hash, current_user["user_id"])
+        cache.delete_profile(user_id, file_hash)
+        logger.info("Force refresh: deleted cache for file_hash=%s user=%s", file_hash, user_id)
     else:
-        cached_data = cache.get_profile(current_user["user_id"], file_hash)
+        cached_data = cache.get_profile(user_id, file_hash)
         if cached_data:
-            logger.info("Cache HIT: file_hash=%s user=%s", file_hash, current_user["user_id"])
+            logger.info("Cache HIT: file_hash=%s user=%s", file_hash, user_id)
             # FIX: Mặc dù profile cache hit (TTL 24h), file bytes có thể đã hết hạn (TTL 5h).
             # Ta cần đảm bảo file bytes được lưu lại vào cache.
-            cache.set_file_bytes(current_user["user_id"], file_hash, content, file.filename, ext)
-            cached_data.pop("is_first_upload", None)
+            cache.set_file_bytes(user_id, file_hash, content, filename, ext)
             
             # Tính file_expires_at thực tế từ Redis TTL
-            ttl_sec = cache.get_file_bytes_ttl(current_user["user_id"], file_hash) or cache._FILE_BYTES_TTL
+            ttl_sec = cache.get_file_bytes_ttl(user_id, file_hash) or cache._FILE_BYTES_TTL
             expires_at_iso = datetime.fromtimestamp(
                 datetime.now(timezone.utc).timestamp() + ttl_sec, tz=timezone.utc
             ).isoformat()
             
-            return ProfileResponse(
-                **cached_data,
-                cached=True,
-                file_expires_at=expires_at_iso,
-                is_first_upload=_mark_first_upload(db, current_user["user_id"]),
-            )
+            cached_data["cached"] = True
+            cached_data["file_expires_at"] = expires_at_iso
+            cached_data["is_first_upload"] = _mark_first_upload(db, user_id)
+            return ProfileResponse(**cached_data)
     # 5. Parse DataFrame từ memory buffer
     file_bytes = io.BytesIO(content)
     df = _read_dataframe(file_bytes, ext)
@@ -220,11 +225,12 @@ async def profile_file(
         )
 
     # 6. Profile bằng Pandas (dynamic, không hardcode tên cột)
+    col_letters = dict(df.attrs.get("column_letters", {}))
     columns_raw = profiler_service.profile_dataframe(df)
-    columns = [ColumnProfile(**col) for col in columns_raw]
+    columns = [ColumnProfile(**col, letter=col_letters.get(col.get("name"))) for col in columns_raw]
 
     # 7.
-    existing_ctx = cache.get_profiler_context(current_user['user_id'], file_hash)
+    existing_ctx = cache.get_profiler_context(user_id, file_hash)
     if existing_ctx and existing_ctx.get('semantic_context'):
         sem_raw = existing_ctx['semantic_context']
         semantic = SemanticContext(
@@ -257,33 +263,34 @@ async def profile_file(
 
     result = ProfileResponse(
         file_hash=file_hash,
-        filename=file.filename,
+        filename=filename,
         total_rows=len(df),
         total_columns=len(df.columns),
         columns=columns,
         semantic_context=semantic,
         cached=False,
-        is_first_upload=_mark_first_upload(db, current_user["user_id"]),
+        is_first_upload=_mark_first_upload(db, user_id),
+        column_letters=col_letters,
     )
 
     # 9. Lưu vào Redis cache (bỏ qua nếu Redis lỗi)
     cache_data = result.model_dump()
     cache_data.pop("cached", None)  # Không lưu field cached vào Redis
     cache_data.pop("is_first_upload", None) 
-    cache.set_profile(current_user["user_id"], file_hash, cache_data)
+    cache.set_profile(user_id, file_hash, cache_data)
 
     # 10. Lưu file bytes vào Redis để Cleaner endpoints tái dùng (TTL 5h)
-    cache.set_file_bytes(current_user["user_id"], file_hash, content, file.filename, ext)
+    cache.set_file_bytes(user_id, file_hash, content, filename, ext)
 
-    ttl_sec = cache.get_file_bytes_ttl(current_user["user_id"], file_hash) or cache._FILE_BYTES_TTL
+    ttl_sec = cache.get_file_bytes_ttl(user_id, file_hash) or cache._FILE_BYTES_TTL
     expires_at_iso = datetime.fromtimestamp(
         datetime.now(timezone.utc).timestamp() + ttl_sec, tz=timezone.utc
     ).isoformat()
     result.file_expires_at = expires_at_iso
 
     # Save profiler report section
-    cache.set_report_section(current_user["user_id"], file_hash, "profiler", {
-        "file_name": file.filename,
+    cache.set_report_section(user_id, file_hash, "profiler", {
+        "file_name": filename,
         "row_count": len(df),
         "col_count": len(df.columns),
         "schema": [c.model_dump() for c in columns]
@@ -292,15 +299,49 @@ async def profile_file(
     # 11. Build và cache Markdown Dataset Context (Part 1) cho AI Explain
     from app.services.context_builder import build_dataset_context
     dataset_md = build_dataset_context(cache_data)
-    cache.set_dataset_context_md(current_user["user_id"], file_hash, dataset_md)
+    cache.set_dataset_context_md(user_id, file_hash, dataset_md)
 
     logger.info(
         "Profiled: file=%s rows=%d cols=%d domain=%s user=%s",
-        file.filename, len(df), len(df.columns),
-        semantic.domain, current_user["user_id"],
+        filename, len(df), len(df.columns),
+        semantic.domain, user_id,
     )
 
     return result
+
+
+@router.post(
+    "/profile",
+    response_model=ProfileResponse,
+    summary="Phân tích cấu trúc file CSV/Excel",
+    description=(
+        "Upload file CSV hoặc Excel. "
+        "Hệ thống phân loại từng cột (Numeric/Datetime/Categorical/Text), "
+        "gợi ý biểu đồ, và dùng Gemini AI để đoán lĩnh vực của dataset."
+    ),
+)
+async def profile_file(
+    file: UploadFile = File(..., description="File CSV hoặc Excel cần phân tích"),
+    force_refresh: bool = False,
+    current_user: dict = Depends(get_current_user_with_tier),
+    db: Session = Depends(get_db),
+):
+    # 1. Validate extension
+    ext = _validate_extension(file.filename)
+
+    # 2. Đọc bytes vào RAM — KHÔNG ghi disk (async I/O)
+    content = await file.read()
+
+    # 3. Chạy toàn bộ CPU profiling, parse DataFrame & Redis cache trong threadpool
+    return await run_in_threadpool(
+        _process_profile,
+        content=content,
+        filename=file.filename,
+        ext=ext,
+        force_refresh=force_refresh,
+        user_id=current_user["user_id"],
+        db=db,
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -320,6 +361,7 @@ class AIContextRequest(BaseModel):
     description="Gọi Gemini để nhận diện lĩnh vực dataset và phân loại cột. Hỗ trợ tái phân tích với chỉnh sửa.",
 )
 async def analyze_ai_context(
+    request: Request,
     body: AIContextRequest,
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -344,6 +386,11 @@ async def analyze_ai_context(
         lang=body.lang,
         user_correction=user_correction
     )
+
+    feature_name = "reanalyze" if body.is_reanalyze else "profiler"
+    if await request.is_disconnected():
+        logger.info(f"ai.cancelled feature={feature_name}")
+        return JSONResponse(status_code=499, content={"detail": "Client closed request", "cancelled": True})
 
     column_semantics = semantic_raw.pop("column_semantics", {})
 
@@ -410,7 +457,7 @@ async def analyze_ai_context(
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.get("/session-status", summary="Kiểm tra trạng thái khả dụng của file và cache (rẻ, không gọi AI)")
-async def get_session_status(
+def get_session_status(
     file_hash: str,
     current_user: dict = Depends(get_current_user),
 ):
@@ -443,7 +490,7 @@ async def get_session_status(
 
 
 @router.get("/profiler-state", summary="Lấy trạng thái Profiler đã lưu (không gọi AI)")
-async def get_profiler_state(
+def get_profiler_state(
     file_hash: str,
     current_user: dict = Depends(get_current_user),
 ):
@@ -484,7 +531,7 @@ class SaveProfilerStateRequest(BaseModel):
 
 
 @router.post("/profiler-state", summary="Lưu nội dung chỉnh sửa Profiler mà không tốn quota")
-async def save_profiler_state(
+def save_profiler_state(
     body: SaveProfilerStateRequest,
     current_user: dict = Depends(get_current_user),
 ):
@@ -504,7 +551,7 @@ async def save_profiler_state(
 
 
 @router.get("/ai-usage", summary="Lấy thống kê định mức AI dùng chung")
-async def get_ai_usage_status(
+def get_ai_usage_status(
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -524,7 +571,7 @@ class SessionContextRequest(BaseModel):
     "/session/context",
     summary="Lưu ngữ cảnh dataset",
 )
-async def save_session_context(
+def save_session_context(
     body: SessionContextRequest,
     current_user: dict = Depends(get_current_user),
 ):
@@ -536,12 +583,7 @@ async def save_session_context(
 # Helper: tái tải DataFrame từ Redis cache
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _load_df_from_cache(user_id: int, file_hash: str) -> tuple[pd.DataFrame, str, str]:
-    """
-    Lấy file bytes từ Redis cache (chỉ trong phạm vi user_id sở hữu) và parse thành DataFrame.
-    Raise 404 nếu không tìm thấy (hết TTL, Redis chưa có, hoặc file_hash thuộc user khác).
-    Trả về (df, filename, ext).
-    """
+def _load_cached_file(user_id: int, file_hash: str) -> dict:
     cached = cache.get_file_bytes(user_id, file_hash)
     if cached is None:
         raise DataMindException(
@@ -550,11 +592,21 @@ def _load_df_from_cache(user_id: int, file_hash: str) -> tuple[pd.DataFrame, str
             user_message="Phiên làm việc đã hết hạn hoặc file không tìm thấy. Vui lòng upload lại.",
             technical_detail={
                 "module": "files",
-                "location": "_load_df_from_cache",
+                "location": "_load_cached_file",
                 "root_cause": f"cache.get_file_bytes(user={user_id}, '{file_hash}') trả về None — TTL hết, Redis miss, hoặc không thuộc sở hữu user này"
             },
             suggested_action=None
         )
+    return cached
+
+
+def _load_df_from_cache(user_id: int, file_hash: str) -> tuple[pd.DataFrame, str, str]:
+    """
+    Lấy file bytes từ Redis cache (chỉ trong phạm vi user_id sở hữu) và parse thành DataFrame.
+    Raise 404 nếu không tìm thấy (hết TTL, Redis chưa có, hoặc file_hash thuộc user khác).
+    Trả về (df, filename, ext).
+    """
+    cached = _load_cached_file(user_id, file_hash)
     file_bytes = io.BytesIO(cached["bytes"])
     df = _read_dataframe(file_bytes, cached["ext"])
     return df, cached["filename"], cached["ext"]
@@ -573,37 +625,72 @@ def _load_df_from_cache(user_id: int, file_hash: str) -> tuple[pd.DataFrame, str
         "Trả về báo cáo các issue (missing, wrong type, encoding, duplicate)."
     ),
 )
-async def detect_issues(
+def detect_issues(
     body: IssueDetectRequest,
     current_user: dict = Depends(get_current_user),
 ):
-    df, filename, _ = _load_df_from_cache(current_user["user_id"], body.file_hash)
-    
-    # Load profile to get semantic mapping
-    profile_data = cache.get_profile(current_user["user_id"], body.file_hash)
+    t_start = time.perf_counter()
+    user_id = current_user["user_id"]
+
+    # 1. Load bytes
+    t0 = time.perf_counter()
+    cached = _load_cached_file(user_id, body.file_hash)
+    ms_load = int((time.perf_counter() - t0) * 1000)
+
+    # 2. Parse DataFrame
+    t1 = time.perf_counter()
+    file_bytes = io.BytesIO(cached["bytes"])
+    df = _read_dataframe(file_bytes, cached["ext"])
+    filename = cached["filename"]
+    ms_parse = int((time.perf_counter() - t1) * 1000)
+
+    # 3. Resolve types once
+    t2 = time.perf_counter()
+    profile_data = cache.get_profile(user_id, body.file_hash)
     column_semantics = {}
+    profile_types = {}
     if profile_data:
         for col in profile_data.get("columns", []):
             column_semantics[col.get("name")] = col.get("semantic_type", "GENERAL_TEXT")
+            profile_types[col.get("name")] = col.get("detected_type", "text")
 
+    resolved_types = {
+        str(c): cleaner_service.resolve_column_type(
+            str(c), df[c], body.overridden_types, profile_types
+        )
+        for c in df.columns
+    }
+    ms_types = int((time.perf_counter() - t2) * 1000)
+
+    # 4. Detect issues
+    t3 = time.perf_counter()
     report_raw = cleaner_service.detect_issues(
         df=df,
         filename=filename,
         file_hash=body.file_hash,
         overridden_types=body.overridden_types,
+        user_id=user_id,
+        profile_types=profile_types,
         column_semantics=column_semantics,
+        resolved_types=resolved_types,
+        offset=getattr(body, "offset", 0),
+        mode=getattr(body, "mode", "all"),
+        profiler_context=cache.get_profiler_context(user_id, body.file_hash),
     )
+    ms_detect = int((time.perf_counter() - t3) * 1000)
+
+    # 5. Serialize
+    t4 = time.perf_counter()
+    res = IssueReport(**report_raw)
+    ms_ser = int((time.perf_counter() - t4) * 1000)
+    ms_total = int((time.perf_counter() - t_start) * 1000)
 
     logger.info(
-        "IssueDetect: file=%s missing=%d wrong_type=%d encoding=%d dup=%s user=%s",
-        filename,
-        len(report_raw["missing_values"]),
-        len(report_raw["wrong_types"]),
-        len(report_raw["encoding_errors"]),
-        report_raw["duplicates"],
-        current_user["user_id"],
+        "cleaner.detect_issues load=%d parse=%d types=%d detect=%d serialize=%d total=%d",
+        ms_load, ms_parse, ms_types, ms_detect, ms_ser, ms_total
     )
-    return IssueReport(**report_raw)
+
+    return res
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -619,85 +706,163 @@ async def detect_issues(
         "Trả về DiffReport (chưa lưu — user cần bấm Xác nhận)."
     ),
 )
-async def auto_clean(
+def auto_clean(
     body: AutoCleanRequest,
     current_user: dict = Depends(get_current_user_with_tier),
 ):
-    df, filename, _ = _load_df_from_cache(current_user["user_id"], body.file_hash)
+    t_start = time.perf_counter()
+    user_id = current_user["user_id"]
 
+    # 1. Load bytes
+    t0 = time.perf_counter()
+    cached = _load_cached_file(user_id, body.file_hash)
+    ms_load = int((time.perf_counter() - t0) * 1000)
+
+    # 2. Parse DataFrame
+    t1 = time.perf_counter()
+    file_bytes = io.BytesIO(cached["bytes"])
+    df = _read_dataframe(file_bytes, cached["ext"])
+    filename = cached["filename"]
+    ms_parse = int((time.perf_counter() - t1) * 1000)
+
+    # 3. Resolve types once
+    t2 = time.perf_counter()
+    profile_data = cache.get_profile(user_id, body.file_hash)
+    column_semantics = {}
+    profile_types = {}
+    if profile_data:
+        for col in profile_data.get("columns", []):
+            column_semantics[col.get("name")] = col.get("semantic_type", "GENERAL_TEXT")
+            profile_types[col.get("name")] = col.get("detected_type", "text")
+
+    resolved_types = {
+        str(c): cleaner_service.resolve_column_type(
+            str(c), df[c], body.overridden_types, profile_types
+        )
+        for c in df.columns
+    }
+    ms_types = int((time.perf_counter() - t2) * 1000)
+
+    # 4. Auto clean
+    t3 = time.perf_counter()
     cleaned_df, diff_raw, cleaning_log = cleaner_service.auto_clean(
         df=df,
         overridden_types=body.overridden_types,
+        user_id=user_id,
+        file_hash=body.file_hash,
+        profile_types=profile_types,
+        resolved_types=resolved_types,
     )
+    ms_clean = int((time.perf_counter() - t3) * 1000)
+    invalid_replaced_keys = diff_raw.pop("invalid_replaced_keys", set())
 
-    # Kiểm tra gàng buộc sau khi clean
+    # Kiểm tra ràng buộc sau khi clean
     validation_dict = cleaner_service.validate_clean_dataset(cleaned_df)
     validation_res = ValidationResult(**validation_dict)
 
-    # Nếu có lỗi cứng, có thể block luôn ở server nếu muốn (tuỳ business logic).
-    # Nhưng theo yêu cầu, frontend sẽ đọc can_proceed để hiển thị lỗi. 
-    # Ta vẫn nên trả về 200 kèm validation result để UI vẽ lỗi rõ ràng.
-
-    # Cache kết quả DataFrame đã clean (1h) để confirm step dùng
-    import io as _io
-    buf = _io.BytesIO()
+    # Cache kết quả DataFrame đã clean (5h) để confirm step dùng
+    buf = io.BytesIO()
     cleaned_df.to_csv(buf, index=False)
     buf.seek(0)
     clean_hash = f"{body.file_hash}_clean"
-    cache.set_file_bytes(current_user["user_id"], clean_hash, buf.read(), filename, ".csv")
+    cache.set_file_bytes(user_id, clean_hash, buf.read(), filename, ".csv")
 
-    logger.info(
-        "AutoClean: file=%s rows %d→%d user=%s",
-        filename, diff_raw["original_rows"], diff_raw["clean_rows"],
-        current_user["user_id"],
+    total_rows = len(cleaned_df)
+    offset = max(0, getattr(body, "offset", 0))
+    mode = getattr(body, "mode", "all")
+
+    error_positions = cleaner_service.get_error_row_indices(
+        cleaned_df,
+        overridden_types=body.overridden_types,
+        column_semantics=column_semantics,
+        profile_types=profile_types,
+        resolved_types=resolved_types,
     )
-    import math
-    preview_df = cleaned_df.head(500).copy()
-    # Capture preview labels BEFORE reset_index (original index labels)
+    total_error_rows = len(error_positions)
+
+    if mode == "errors":
+        slice_positions = error_positions[offset : offset + CLEANER_PREVIEW_ROWS]
+    else:
+        slice_positions = list(range(offset, min(offset + CLEANER_PREVIEW_ROWS, total_rows)))
+
+    preview_df = cleaned_df.iloc[slice_positions].copy()
     preview_labels = list(preview_df.index)
 
-    preview_df = preview_df.replace({float('nan'): None, pd.NaT: None})
+    first_excel_row = (int(preview_labels[0]) + 2) if preview_labels else None
+    last_excel_row = (int(preview_labels[-1]) + 2) if preview_labels else None
+
+    window_info = WindowInfo(
+        offset=offset,
+        size=CLEANER_PREVIEW_ROWS,
+        mode=mode,
+        total_rows=total_rows,
+        total_error_rows=total_error_rows,
+        first_excel_row=first_excel_row,
+        last_excel_row=last_excel_row,
+    )
+
+    preview_df = preview_df.where(pd.notna(preview_df), None)
     for col in preview_df.columns:
         if pd.api.types.is_datetime64_any_dtype(preview_df[col]):
             preview_df[col] = preview_df[col].dt.strftime('%Y-%m-%d %H:%M:%S')
 
     preview_df = preview_df.reset_index(names="original_index")
 
-    # Tính toán lại error_cells cho tập dữ liệu sau auto-clean
-    profile_data = cache.get_profile(current_user["user_id"], body.file_hash)
-    column_semantics = {}
-    if profile_data:
-        for col in profile_data.get("columns", []):
-            column_semantics[col.get("name")] = col.get("semantic_type", "GENERAL_TEXT")
+    # 5. Error cells on preview_df
+    t4 = time.perf_counter()
+    error_cells = cleaner_service._get_error_cells(
+        preview_df,
+        body.overridden_types,
+        column_semantics,
+        user_id=user_id,
+        file_hash=body.file_hash,
+        profile_types=profile_types,
+        resolved_types=resolved_types,
+    )
+    ms_err = int((time.perf_counter() - t4) * 1000)
 
-    # Chỉ tính lỗi trên preview_df để hiển thị cho nhẹ, hoặc tính trên cleaned_df nếu muốn đầy đủ
-    # Chú ý: Auto-clean không chủ động sửa semantic error nên ta báo cáo lỗi trên preview_df
-    error_cells = cleaner_service._get_error_cells(preview_df, body.overridden_types, column_semantics)
-
-    # Compute cell-level diff and removed rows
+    # 6. Changed cells & removed rows
+    t5 = time.perf_counter()
     changed_cells, changed_truncated = cleaner_service.compute_changed_cells(
         original_df=df,
         cleaned_df=cleaned_df,
         preview_labels=preview_labels,
         edited_keys=set(),
+        invalid_replaced_keys=invalid_replaced_keys,
         cap=2000,
     )
     removed_rows = cleaner_service.compute_removed_rows(
         original_df=df,
         cleaned_df=cleaned_df,
-        window_size=500,
+        window_size=CLEANER_PREVIEW_ROWS,
+        offset=offset,
     )
+    ms_chg = int((time.perf_counter() - t5) * 1000)
 
-    return AutoCleanResponse(
+    # 7. Serialize
+    t6 = time.perf_counter()
+    res = AutoCleanResponse(
+        preview_rows=CLEANER_PREVIEW_ROWS,
         file_hash=body.file_hash,
         diff_report=DiffReport(**diff_raw),
         validation=validation_res,
-        preview_data=preview_df.to_dict(orient="records"),
+        preview_data=[{k: cleaner_service._to_json_safe(v) for k, v in r.items()} for r in preview_df.to_dict(orient="records")],
         error_cells=error_cells,
         changed_cells=changed_cells,
         removed_rows=removed_rows,
         changed_truncated=changed_truncated,
+        column_letters=dict(cleaned_df.attrs.get("column_letters", df.attrs.get("column_letters", {}))),
+        window=window_info,
     )
+    ms_ser = int((time.perf_counter() - t6) * 1000)
+    ms_total = int((time.perf_counter() - t_start) * 1000)
+
+    logger.info(
+        "cleaner.auto_clean load=%d parse=%d types=%d clean=%d errors=%d changed=%d serialize=%d total=%d",
+        ms_load, ms_parse, ms_types, ms_clean, ms_err, ms_chg, ms_ser, ms_total
+    )
+
+    return res
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -706,40 +871,108 @@ async def auto_clean(
 
 @router.post(
     "/manual-clean-preview",
+    response_model=ManualCleanPreviewResponse,
     summary="Xem trước kết quả làm sạch thủ công",
     description="Áp dụng chuỗi hành động làm sạch thủ công và trả về dữ liệu mẫu mà chưa lưu vào cache."
 )
-async def manual_clean_preview(
+def manual_clean_preview(
     body: ManualCleanPreviewRequest,
     current_user: dict = Depends(get_current_user_with_tier),
 ):
+    t_start = time.perf_counter()
+    user_id = current_user["user_id"]
+
     try:
-        df, filename, _ = _load_df_from_cache(current_user["user_id"], body.file_hash)
+        t0 = time.perf_counter()
+        cached = _load_cached_file(user_id, body.file_hash)
+        ms_load = int((time.perf_counter() - t0) * 1000)
+
+        t1 = time.perf_counter()
+        file_bytes = io.BytesIO(cached["bytes"])
+        df = _read_dataframe(file_bytes, cached["ext"])
+        filename = cached["filename"]
+        ms_parse = int((time.perf_counter() - t1) * 1000)
     except DataMindException as dme:
-        # file cache expired
         raise HTTPException(status_code=410, detail=dme.user_message)
     except Exception as e:
         logger.error(f"Load cache error in manual-clean-preview: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Không thể tải dữ liệu từ bộ nhớ đệm.")
 
     try:
-        # Áp dụng các hành động thủ công
-        cleaned_df, _ = cleaner_service.apply_manual_actions(df, body.actions)
-        
-        # Lấy 100 dòng đầu tiên giữ nguyên thứ tự gốc (tương tự như detect_issues)
-        # để tránh việc row nhảy vị trí liên tục khi user edit (Smart Preview cũ dùng nan_mask gây lộn xộn index)
-        preview_df = cleaned_df.head(100).copy()
-        # Capture labels BEFORE reset_index
-        preview_labels = list(preview_df.index)
-
-        profile_data = cache.get_profile(current_user["user_id"], body.file_hash)
+        t2 = time.perf_counter()
+        profile_data = cache.get_profile(user_id, body.file_hash)
         column_semantics = {}
+        profile_types = {}
         if profile_data:
             for col in profile_data.get("columns", []):
                 column_semantics[col.get("name")] = col.get("semantic_type", "GENERAL_TEXT")
+                profile_types[col.get("name")] = col.get("detected_type", "text")
 
-        # Phân tích lỗi trên preview_df (giữ nguyên original index)
-        error_cells = cleaner_service._get_error_cells(preview_df, {}, column_semantics)
+        resolved_types = {
+            str(c): cleaner_service.resolve_column_type(
+                str(c), df[c], None, profile_types
+            )
+            for c in df.columns
+        }
+        ms_types = int((time.perf_counter() - t2) * 1000)
+
+        offset = max(0, getattr(body, "offset", 0))
+        mode = getattr(body, "mode", "all")
+
+        t3 = time.perf_counter()
+        cleaned_df, _ = cleaner_service.apply_manual_actions(
+            df=df,
+            actions=body.actions,
+            overridden_types=None,
+            user_id=user_id,
+            file_hash=body.file_hash,
+            profile_types=profile_types,
+            resolved_types=resolved_types,
+        )
+        ms_act = int((time.perf_counter() - t3) * 1000)
+
+        total_rows = len(cleaned_df)
+        error_positions = cleaner_service.get_error_row_indices(
+            cleaned_df,
+            overridden_types=None,
+            column_semantics=column_semantics,
+            profile_types=profile_types,
+            resolved_types=resolved_types,
+        )
+        total_error_rows = len(error_positions)
+
+        if mode == "errors":
+            slice_positions = error_positions[offset : offset + CLEANER_PREVIEW_ROWS]
+        else:
+            slice_positions = list(range(offset, min(offset + CLEANER_PREVIEW_ROWS, total_rows)))
+
+        cleaned_preview_df = cleaned_df.iloc[slice_positions].copy()
+        preview_labels = list(cleaned_preview_df.index)
+
+        first_excel_row = (int(preview_labels[0]) + 2) if preview_labels else None
+        last_excel_row = (int(preview_labels[-1]) + 2) if preview_labels else None
+
+        window_info = WindowInfo(
+            offset=offset,
+            size=CLEANER_PREVIEW_ROWS,
+            mode=mode,
+            total_rows=total_rows,
+            total_error_rows=total_error_rows,
+            first_excel_row=first_excel_row,
+            last_excel_row=last_excel_row,
+        )
+
+        t4 = time.perf_counter()
+        error_cells = cleaner_service._get_error_cells(
+            cleaned_preview_df,
+            {},
+            column_semantics,
+            user_id=user_id,
+            file_hash=body.file_hash,
+            profile_types=profile_types,
+            resolved_types=resolved_types,
+        )
+        ms_err = int((time.perf_counter() - t4) * 1000)
 
         # Build edited_keys from BATCH_EDIT_CELLS actions
         edited_keys: set = set()
@@ -753,7 +986,7 @@ async def manual_clean_preview(
                     if r_id is not None and c_name is not None:
                         edited_keys.add((int(r_id), str(c_name)))
 
-        # Compute cell-level diff
+        t5 = time.perf_counter()
         changed_cells, changed_truncated = cleaner_service.compute_changed_cells(
             original_df=df,
             cleaned_df=cleaned_df,
@@ -764,25 +997,52 @@ async def manual_clean_preview(
         removed_rows = cleaner_service.compute_removed_rows(
             original_df=df,
             cleaned_df=cleaned_df,
-            window_size=100,
+            window_size=CLEANER_PREVIEW_ROWS,
+            offset=offset,
+        )
+        ms_chg = int((time.perf_counter() - t5) * 1000)
+
+        t6 = time.perf_counter()
+        disp_preview = cleaned_preview_df.where(pd.notna(cleaned_preview_df), None)
+        for col in disp_preview.columns:
+            if pd.api.types.is_datetime64_any_dtype(disp_preview[col]):
+                disp_preview[col] = disp_preview[col].dt.strftime('%Y-%m-%d %H:%M:%S')
+
+        disp_preview = disp_preview.reset_index(names="original_index")
+        preview_records = [
+            {k: cleaner_service._to_json_safe(v) for k, v in r.items()}
+            for r in disp_preview.to_dict(orient="records")
+        ]
+
+        col_issue_counts = cleaner_service.compute_column_issue_counts(
+            df=cleaned_df,
+            overridden_types={},
+            profile_types=profile_types,
+            column_semantics=column_semantics,
+            resolved_types=resolved_types,
         )
 
-        preview_df = preview_df.replace({float('nan'): None, pd.NaT: None})
-        for col in preview_df.columns:
-            if pd.api.types.is_datetime64_any_dtype(preview_df[col]):
-                preview_df[col] = preview_df[col].dt.strftime('%Y-%m-%d %H:%M:%S')
+        res = ManualCleanPreviewResponse(
+            preview_data=preview_records,
+            error_cells=error_cells,
+            changed_cells=changed_cells,
+            removed_rows=removed_rows,
+            changed_truncated=changed_truncated,
+            preview_rows=CLEANER_PREVIEW_ROWS,
+            column_letters=dict(cleaned_preview_df.attrs.get("column_letters", df.attrs.get("column_letters", {}))),
+            column_issue_counts=col_issue_counts,
+            window=window_info,
+        )
+        ms_ser = int((time.perf_counter() - t6) * 1000)
+        ms_total = int((time.perf_counter() - t_start) * 1000)
 
-        # Lưu index gốc thành original_index
-        preview_df = preview_df.reset_index(names="original_index")
+        logger.info(
+            "cleaner.manual_preview load=%d parse=%d types=%d actions=%d errors=%d changed=%d serialize=%d total=%d",
+            ms_load, ms_parse, ms_types, ms_act, ms_err, ms_chg, ms_ser, ms_total
+        )
 
-        return {
-            "preview_data": preview_df.to_dict(orient="records"),
-            "error_cells": error_cells,
-            "changed_cells": changed_cells,
-            "removed_rows": removed_rows,
-            "changed_truncated": changed_truncated,
-        }
-        
+        return res
+
     except ValueError as ve:
         logger.warning(f"Manual Clean Validation Error: {ve}")
         raise HTTPException(status_code=400, detail=str(ve))
@@ -803,45 +1063,86 @@ async def manual_clean_preview(
         "Clean Dataset được chốt và có thể truyền sang Module 3."
     ),
 )
-async def confirm_clean(
+def confirm_clean(
     body: ConfirmCleanRequest,
     current_user: dict = Depends(get_current_user_with_tier),
 ):
-    df, filename, _ = _load_df_from_cache(current_user["user_id"], body.file_hash)
+    t_start = time.perf_counter()
+    user_id = current_user["user_id"]
 
+    # 1. Load bytes
+    t0 = time.perf_counter()
+    cached = _load_cached_file(user_id, body.file_hash)
+    ms_load = int((time.perf_counter() - t0) * 1000)
+
+    # 2. Parse DataFrame
+    t1 = time.perf_counter()
+    file_bytes = io.BytesIO(cached["bytes"])
+    df = _read_dataframe(file_bytes, cached["ext"])
+    filename = cached["filename"]
+    ms_parse = int((time.perf_counter() - t1) * 1000)
+
+    # 3. Resolve types once
+    t2 = time.perf_counter()
+    profile_data = cache.get_profile(user_id, body.file_hash)
+    profile_types = {}
+    if profile_data:
+        for col in profile_data.get("columns", []):
+            profile_types[col.get("name")] = col.get("detected_type", "text")
+
+    resolved_types = {
+        str(c): cleaner_service.resolve_column_type(
+            str(c), df[c], body.overridden_types, profile_types
+        )
+        for c in df.columns
+    }
+    ms_types = int((time.perf_counter() - t2) * 1000)
+
+    # 4. Clean & Diff
+    t3 = time.perf_counter()
+    ms_diff = 0
     if body.clean_mode == "manual":
         try:
             logger.info(f"CONFIRM_CLEAN MANUAL ACTIONS: {body.actions}")
-            cleaned_df, cleaning_log = cleaner_service.apply_manual_actions(df, body.actions)
+            cleaned_df, cleaning_log = cleaner_service.apply_manual_actions(
+                df=df,
+                actions=body.actions,
+                overridden_types=body.overridden_types,
+                user_id=user_id,
+                file_hash=body.file_hash,
+                profile_types=profile_types,
+                resolved_types=resolved_types,
+            )
         except ValueError as ve:
             logger.warning(f"Manual Clean Validation Error in confirm_clean: {ve}")
             raise HTTPException(status_code=400, detail=str(ve))
         
-        # Giả lập diff_raw đơn giản cho manual mode để tránh lỗi serialize
-        diff_raw = {
-            "original_rows": len(df),
-            "clean_rows": len(cleaned_df),
-            "original_cols": len(df.columns),
-            "clean_cols": len(cleaned_df.columns),
-            "duplicate_rows_removed": len(df) - len(cleaned_df),
-            "columns_dropped": [],
-            "missing_filled": {},
-            "types_converted": {},
-            "encoding_fixed": {}
-        }
+        t4 = time.perf_counter()
+        diff_raw = cleaner_service.compute_diff_report(
+            original_df=df,
+            cleaned_df=cleaned_df,
+            actions_or_log=body.actions,
+        )
+        ms_diff = int((time.perf_counter() - t4) * 1000)
     else:
         # Chạy auto_clean lần cuối (mặc định)
         cleaned_df, diff_raw, cleaning_log = cleaner_service.auto_clean(
             df=df,
             overridden_types=body.overridden_types,
+            user_id=user_id,
+            file_hash=body.file_hash,
+            profile_types=profile_types,
+            resolved_types=resolved_types,
         )
+        diff_raw.pop("invalid_replaced_keys", None)
+
+    ms_clean = int((time.perf_counter() - t3) * 1000)
 
     # Validate cuối
     validation_dict = cleaner_service.validate_clean_dataset(cleaned_df)
     validation_res = ValidationResult(**validation_dict)
     
     if not validation_res.can_proceed:
-        # Lấy thông báo lỗi đầu tiên để show, thực tế có list lỗi trong hard_blocks
         reason = validation_res.hard_blocks[0].message if validation_res.hard_blocks else "Dữ liệu không hợp lệ."
         raise DataMindException(
             code="ERR_CLN_VALIDATION_FAILED",
@@ -855,65 +1156,189 @@ async def confirm_clean(
             suggested_action=None
         )
 
-    # Xuất ra CSV bytes
-    import io as _io
-    buf = _io.BytesIO()
+    # Xuất ra CSV bytes & upload
+    t_up0 = time.perf_counter()
+    buf = io.BytesIO()
     cleaned_df.to_csv(buf, index=False)
     csv_bytes = buf.getvalue()
+    clean_file_url = _upload_to_supabase(csv_bytes, filename, user_id)
+    ms_up = int((time.perf_counter() - t_up0) * 1000)
 
-    # Upload lên Supabase Storage (nếu có cấu hình)
-    clean_file_url = _upload_to_supabase(csv_bytes, filename, current_user["user_id"])
-
-    # Tạo session
+    # Tạo session & Serialize
+    t5 = time.perf_counter()
     session_id = str(uuid.uuid4())
     confirmed_at = datetime.now(timezone.utc).isoformat()
     summary = cleaner_service.build_summary_for_module3(cleaned_df)
-    
-    # Store file_hash in metadata so visualize service can lookup provenance
     summary["file_hash"] = body.file_hash
 
-    # Lưu metadata session vào Redis để Module Visualization sử dụng
-    cache.set_session_metadata(current_user["user_id"], session_id, summary)
-
-    # Cache file bytes theo session_id để Module 3 có thể lấy ra
-    cache.set_file_bytes(current_user["user_id"], session_id, csv_bytes, filename, ".csv")
-
-    cache.set_cleaning_log(current_user["user_id"], body.file_hash, cleaning_log)
-    cache.set_report_section(current_user["user_id"], body.file_hash, "cleaner", {
+    cache.set_session_metadata(user_id, session_id, summary)
+    cache.set_file_bytes(user_id, session_id, csv_bytes, filename, ".csv")
+    cache.set_cleaning_log(user_id, body.file_hash, cleaning_log)
+    cache.set_report_section(user_id, body.file_hash, "cleaner", {
         "actions_taken": cleaning_log,
         "clean_mode": body.clean_mode,
         "stats": diff_raw,
         "ignored_cells_count": body.ignored_cells_count
     })
-    cache.invalidate_downstream_state(current_user["user_id"], body.file_hash)
+    cache.invalidate_downstream_state(user_id, body.file_hash)
 
-    logger.info(
-        "ConfirmClean: session=%s file=%s mode=%s rows=%d user=%s",
-        session_id, filename, body.clean_mode,
-        diff_raw["clean_rows"], current_user["user_id"],
-    )
-    
-    # Generate preview data from cleaned_df
-    preview_df = cleaned_df.head(100).copy()
-    preview_df = preview_df.replace({float('nan'): None, pd.NaT: None})
+    preview_df = cleaned_df.head(CLEANER_PREVIEW_ROWS).copy()
+    preview_df = preview_df.where(pd.notna(preview_df), None)
     for col in preview_df.columns:
         if pd.api.types.is_datetime64_any_dtype(preview_df[col]):
             preview_df[col] = preview_df[col].dt.strftime('%Y-%m-%d %H:%M:%S')
     if "original_index" not in preview_df.columns:
         preview_df = preview_df.reset_index(names="original_index")
-    preview_data = preview_df.to_dict(orient="records")
+    preview_data = [{k: cleaner_service._to_json_safe(v) for k, v in r.items()} for r in preview_df.to_dict(orient="records")]
 
-    return CleanDatasetResponse(
+    res = CleanDatasetResponse(
         session_id=session_id,
         filename=filename,
+        preview_rows=CLEANER_PREVIEW_ROWS,
         clean_file_url=clean_file_url,
         clean_report=DiffReport(**diff_raw),
         summary_for_module3=SummaryForModule3(**summary),
         clean_mode=body.clean_mode,
         confirmed_at=confirmed_at,
         validation=validation_res,
-        preview_data=preview_data
+        preview_data=preview_data,
+        column_letters=dict(cleaned_df.attrs.get("column_letters", df.attrs.get("column_letters", {}))),
     )
+    ms_ser = int((time.perf_counter() - t5) * 1000)
+    ms_total = int((time.perf_counter() - t_start) * 1000)
+
+    logger.info(
+        "cleaner.confirm_clean load=%d parse=%d types=%d clean=%d diff=%d upload=%d serialize=%d total=%d",
+        ms_load, ms_parse, ms_types, ms_clean, ms_diff, ms_up, ms_ser, ms_total
+    )
+
+    return res
+
+
+@router.post(
+    "/cleaner/locate",
+    response_model=LocateRowResponse,
+    summary="Tìm offset của cửa sổ chứa dòng excel_row",
+)
+@router.post(
+    "/locate-row",
+    response_model=LocateRowResponse,
+    summary="Tìm offset của cửa sổ chứa dòng excel_row (alias)",
+)
+def locate_row(
+    body: LocateRowRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    user_id = current_user["user_id"]
+    cached = _load_cached_file(user_id, body.file_hash)
+    file_bytes = io.BytesIO(cached["bytes"])
+    df = _read_dataframe(file_bytes, cached["ext"])
+    original_df = df
+
+    profile_data = cache.get_profile(user_id, body.file_hash)
+    column_semantics = {}
+    profile_types = {}
+    if profile_data:
+        for col in profile_data.get("columns", []):
+            column_semantics[col.get("name")] = col.get("semantic_type", "GENERAL_TEXT")
+            profile_types[col.get("name")] = col.get("detected_type", "text")
+
+    resolved_types = {
+        str(c): cleaner_service.resolve_column_type(
+            str(c), df[c], body.overridden_types, profile_types
+        )
+        for c in df.columns
+    }
+
+    target_df = df
+    if body.clean_mode == "auto":
+        target_df, _, _ = cleaner_service.auto_clean(
+            df=df,
+            overridden_types=body.overridden_types,
+            user_id=user_id,
+            file_hash=body.file_hash,
+            profile_types=profile_types,
+            resolved_types=resolved_types,
+        )
+    elif body.clean_mode == "manual" and body.actions:
+        target_df, _ = cleaner_service.apply_manual_actions(
+            df=df,
+            actions=body.actions,
+            overridden_types=body.overridden_types,
+            user_id=user_id,
+            file_hash=body.file_hash,
+            profile_types=profile_types,
+            resolved_types=resolved_types,
+        )
+
+    res = cleaner_service.locate_row(
+        df=target_df,
+        excel_row=body.excel_row,
+        mode=body.mode,
+        original_df=original_df,
+        overridden_types=body.overridden_types,
+        profile_types=profile_types,
+        column_semantics=column_semantics,
+        resolved_types=resolved_types,
+    )
+    return LocateRowResponse(**res)
+
+
+@router.post(
+    "/error-cells",
+    response_model=ErrorCellsResponse,
+    summary="Lấy danh sách các ô có lỗi thuộc nhóm (column, issue_type)",
+)
+def get_error_cells(
+    body: ErrorCellsRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    user_id = current_user["user_id"]
+    cached = _load_cached_file(user_id, body.file_hash)
+    file_bytes = io.BytesIO(cached["bytes"])
+    df = _read_dataframe(file_bytes, cached["ext"])
+
+    profile_data = cache.get_profile(user_id, body.file_hash)
+    column_semantics = {}
+    profile_types = {}
+    if profile_data:
+        for col in profile_data.get("columns", []):
+            column_semantics[col.get("name")] = col.get("semantic_type", "GENERAL_TEXT")
+            profile_types[col.get("name")] = col.get("detected_type", "text")
+
+    resolved_types = {
+        str(c): cleaner_service.resolve_column_type(
+            str(c), df[c], body.overridden_types, profile_types
+        )
+        for c in df.columns
+    }
+
+    target_df = df
+    if body.actions:
+        target_df, _ = cleaner_service.apply_manual_actions(
+            df=df,
+            actions=body.actions,
+            overridden_types=body.overridden_types,
+            user_id=user_id,
+            file_hash=body.file_hash,
+            profile_types=profile_types,
+            resolved_types=resolved_types,
+        )
+
+    res = cleaner_service.get_group_error_cells(
+        df=target_df,
+        column=body.column,
+        issue_type=body.issue_type,
+        offset=body.offset,
+        limit=body.limit,
+        overridden_types=body.overridden_types,
+        profile_types=profile_types,
+        column_semantics=column_semantics,
+        resolved_types=resolved_types,
+        column_letters=dict(target_df.attrs.get("column_letters", df.attrs.get("column_letters", {}))),
+    )
+    return ErrorCellsResponse(**res)
+
 
 #Need checking!
 def _safe_storage_name(name: str, max_len: int = 80) -> str:
@@ -983,7 +1408,7 @@ def _upload_to_supabase(csv_bytes: bytes, original_filename: str, user_id: int) 
     summary="Hủy session hiện tại (no-op)",
     description="Kept for frontend compatibility. The per-file lock has been removed; this endpoint now always returns 200."
 )
-async def clear_active_session_endpoint(
+def clear_active_session_endpoint(
     current_user: dict = Depends(get_current_user),
 ):
     # No-op: the one-file-at-a-time lock has been removed.

@@ -1,5 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel
 import io
 import logging
@@ -28,7 +29,7 @@ class ComputeRequest(BaseModel):
     overridden_types: dict[str, str] = {}
 
 @router.post("/compute", summary="Tính toán các thống kê cho module trực quan hóa")
-async def compute(
+def compute(
     body: ComputeRequest,
     current_user: dict = Depends(get_current_user)
 ):
@@ -62,7 +63,7 @@ class ScatterRequest(BaseModel):
 
 
 @router.post("/scatter-data", summary="Trả về dữ liệu điểm phân tán cho cặp cột anchor")
-async def scatter_data(
+def scatter_data(
     body: ScatterRequest,
     current_user: dict = Depends(get_current_user)
 ):
@@ -168,6 +169,7 @@ class ExplainRequest(BaseModel):
 
 @router.post("/explain", summary="Giải thích biểu đồ bằng AI")
 async def explain_chart(
+    request: Request,
     body: ExplainRequest,
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -283,7 +285,7 @@ async def explain_chart(
 
     # 4. Load stats & Build prompt
     profile_data = cache.get_profile(current_user["user_id"], file_hash)
-    summary = visualize_service.compute_statistics(current_user["user_id"], body.session_id)
+    summary = await run_in_threadpool(visualize_service.compute_statistics, current_user["user_id"], body.session_id)
     
     col_stats = {}
     if body.chart_type in ("heatmap", "scatter"):
@@ -347,8 +349,12 @@ async def explain_chart(
         record_ai_usage(db, current_user["user_id"], "explain-chart", "failed")
         raise e
 
-    # 6. Ghi nhận quota tiêu thụ
     feature_name = "re_explain" if body.is_reanalyze else "explain"
+    if await request.is_disconnected():
+        logger.info(f"ai.cancelled feature={feature_name}")
+        return JSONResponse(status_code=499, content={"detail": "Client closed request", "cancelled": True})
+
+    # 6. Ghi nhận quota tiêu thụ
     usage_summary = record_ai_feature_usage(db, current_user["user_id"], feature_name)
 
     # 7. Cache lại với lang và context_hash
@@ -388,7 +394,7 @@ class SaveExplainRequest(BaseModel):
     lang: str = "vi"
 
 @router.post("/explain/save", summary="Lưu nội dung AI giải thích do user sửa")
-async def save_explain(
+def save_explain(
     body: SaveExplainRequest,
     current_user: dict = Depends(get_current_user)
 ):
@@ -429,50 +435,3 @@ async def save_explain(
     )
     return {"message": "Đã lưu bản nháp."}
 
-
-
-
-
-class BatchExplainRequestItem(BaseModel):
-    chart_id: str
-    chart_type: str
-    col_x: str
-    col_y: str | None = None
-
-class BatchExplainRequest(BaseModel):
-    session_id: str
-    tier: str = "tier1"
-    charts: list[BatchExplainRequestItem]
-
-@router.post("/explain/batch", summary="Lấy danh sách các AI Explain đã tạo cho nhiều biểu đồ")
-async def get_batch_explain(
-    body: BatchExplainRequest,
-    current_user: dict = Depends(get_current_user)
-):
-    cached_file = cache.get_file_bytes(current_user["user_id"], body.session_id)
-    if not cached_file:
-        return {"explanations": {}}
-    
-    import hashlib
-    file_hash = "v5:" + hashlib.md5(cached_file["bytes"]).hexdigest()
-    
-    results = {}
-    for item in body.charts:
-        sorted_x, sorted_y = item.col_x, item.col_y
-        if item.col_y:
-            sorted_x, sorted_y = sorted([item.col_x, item.col_y])
-            
-        edited = cache.get_ai_explain_edited(
-            current_user["user_id"], file_hash, item.chart_type, sorted_x, sorted_y, body.tier
-        )
-        if edited:
-            results[item.chart_id] = {"content": edited, "source": "user"}
-            continue
-            
-        original = cache.get_ai_explain_original(
-            file_hash, item.chart_type, sorted_x, sorted_y, body.tier
-        )
-        if original:
-            results[item.chart_id] = {"content": original, "source": "ai"}
-            
-    return {"explanations": results}

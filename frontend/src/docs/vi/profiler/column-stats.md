@@ -1,3 +1,8 @@
+---
+title: Thống kê cột và Gợi ý biểu đồ
+updated: 2026-11-02
+---
+
 # Thống kê cột và Gợi ý biểu đồ {#column-stats}
 
 Bảng **Cấu trúc cột & Vấn đề dữ liệu** trên giao diện Đánh giá dữ liệu cung cấp các chỉ số thống kê cơ bản nhằm giúp bạn đánh giá nhanh tính toàn vẹn và mức độ phân tán của từng trường dữ liệu.

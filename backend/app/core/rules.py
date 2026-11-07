@@ -52,9 +52,21 @@ DISGUISED_NUMERIC_THRESHOLD_DESC = "Tỷ lệ chuyển đổi thành công tối
 THOUSANDS_NUMERIC_THRESHOLD = 0.6
 THOUSANDS_NUMERIC_THRESHOLD_DESC = "Tỷ lệ khớp số phân cách hàng nghìn để bỏ qua kiểm tra Multiple Choice (60%)"
 
-# Cảnh báo ô trống
-NULL_WARNING_PCT_THRESHOLD = 60.0
-NULL_WARNING_PCT_THRESHOLD_DESC = "Tỷ lệ phần trăm ô trống kích hoạt cảnh báo cột thiếu dữ liệu nghiêm trọng (> 60%)"
+# Cảnh báo ô trống & Ngưỡng thiếu dữ liệu cao
+HIGH_MISSING_PCT = 60
+HIGH_MISSING_PCT_DESC = "Ngưỡng tỷ lệ ô trống tối thiểu để xác định cột thiếu dữ liệu nghiêm trọng (>= 60%)"
+NULL_WARNING_PCT_THRESHOLD = HIGH_MISSING_PCT
+NULL_WARNING_PCT_THRESHOLD_DESC = HIGH_MISSING_PCT_DESC
+
+# Ngưỡng biểu đồ số rời rạc và thang đo Visualize
+VIZ_DISCRETE_MAX_UNIQUE = 10      # numeric with <= this many unique values -> discrete
+VIZ_DISCRETE_MAX_UNIQUE_DESC = "Số lượng giá trị duy nhất tối đa để coi cột số là rời rạc (<= 10)"
+
+VIZ_DISCRETE_MAX_RANGE = 10       # integer columns with (max - min) <= this get gap-filled levels
+VIZ_DISCRETE_MAX_RANGE_DESC = "Khoảng giá trị tối đa (max - min) để điền khoảng trống các bậc số nguyên (<= 10)"
+
+VIZ_SCALE_MAX_VALUES = (5, 7, 10) # max value that looks like a rating scale
+VIZ_SCALE_MAX_VALUES_DESC = "Các giá trị cực đại điển hình của thang đo đánh giá (5, 7, 10 điểm)"
 
 # Số lượng mẫu hiển thị
 SAMPLE_VALUE_LIMIT = 5
@@ -87,6 +99,15 @@ CLEANER_FILL_DATETIME_DESC = "Quy tắc điền khuyết cho cột thời gian: 
 CLEANER_FILL_TEXT = "skip"
 CLEANER_FILL_TEXT_DESC = "Quy tắc điền khuyết cho cột văn bản tự do: bỏ qua xử lý chuẩn hóa và điền khuyết"
 
+CLEANER_PREVIEW_ROWS = 150
+CLEANER_PREVIEW_ROWS_DESC = "Số lượng dòng mẫu xem trước chuẩn trong module Cleaner (150 dòng)"
+
+CLEANER_NEAR_EMPTY_ROW_THRESHOLD = 0.80
+CLEANER_NEAR_EMPTY_ROW_THRESHOLD_DESC = "Tỷ lệ ô trống tối thiểu để xác định một dòng gần như trống (>= 80% số cột)"
+
+CLEANER_DUPLICATE_WARNING_PCT = 20.0
+CLEANER_DUPLICATE_WARNING_PCT_DESC = "Ngưỡng tỷ lệ phần trăm dòng trùng lặp và gần trống kích hoạt cảnh báo (> 20%)"
+
 
 # ==============================================================================
 # 3. SESSION & CACHE TTLs
@@ -97,9 +118,6 @@ CACHE_DEFAULT_TTL_DESC = "Thời gian lưu trữ kết quả phân tích profile
 
 FILE_BYTES_TTL = 18000
 FILE_BYTES_TTL_DESC = "Thời gian lưu trữ file nhị phân (bytes) trong Redis phục vụ làm sạch (5 giờ)"
-
-ACTIVE_SESSION_TTL = 600
-ACTIVE_SESSION_TTL_DESC = "Thời gian khóa phiên hoạt động đang xử lý của người dùng (10 phút)"
 
 RULES_VERSION = "2026.11-v1"
 
@@ -156,7 +174,12 @@ def get_all_rules_metadata() -> dict[str, Any]:
             "null_warning_pct_threshold": {
                 "value": NULL_WARNING_PCT_THRESHOLD,
                 "unit": "percent",
-                "description": NULL_WARNING_PCT_THRESHOLD_DESC
+                "description": f"Ngưỡng tỷ lệ ô trống để cảnh báo cột thiếu nhiều dữ liệu (>= {HIGH_MISSING_PCT}%)"
+            },
+            "high_missing_pct": {
+                "value": HIGH_MISSING_PCT,
+                "unit": "percent",
+                "description": "Ngưỡng tỷ lệ ô trống thống nhất cho cảnh báo và bỏ qua biểu đồ"
             },
             "sample_value_limit": {
                 "value": SAMPLE_VALUE_LIMIT,
@@ -174,6 +197,21 @@ def get_all_rules_metadata() -> dict[str, Any]:
                 "value": CLEANER_DROP_COLUMN_NULL_PCT,
                 "unit": "percent",
                 "description": CLEANER_DROP_COLUMN_NULL_PCT_DESC
+            },
+            "preview_rows": {
+                "value": CLEANER_PREVIEW_ROWS,
+                "unit": "rows",
+                "description": CLEANER_PREVIEW_ROWS_DESC
+            },
+            "near_empty_row_threshold": {
+                "value": CLEANER_NEAR_EMPTY_ROW_THRESHOLD,
+                "unit": "ratio",
+                "description": CLEANER_NEAR_EMPTY_ROW_THRESHOLD_DESC
+            },
+            "duplicate_warning_pct": {
+                "value": CLEANER_DUPLICATE_WARNING_PCT,
+                "unit": "percent",
+                "description": CLEANER_DUPLICATE_WARNING_PCT_DESC
             },
             "fill_rules": {
                 "numeric": {"strategy": CLEANER_FILL_NUMERIC, "description": CLEANER_FILL_NUMERIC_DESC},
@@ -208,11 +246,6 @@ def get_all_rules_metadata() -> dict[str, Any]:
                 "value": FILE_BYTES_TTL // 60,
                 "unit": "minutes",
                 "description": "Thời gian lưu trữ file nhị phân theo phút (300 phút)"
-            },
-            "active_session_ttl": {
-                "value": ACTIVE_SESSION_TTL,
-                "unit": "seconds",
-                "description": ACTIVE_SESSION_TTL_DESC
             }
         },
         "ai": {
@@ -225,6 +258,28 @@ def get_all_rules_metadata() -> dict[str, Any]:
                 "value": AI_PRO_DAILY_LIMIT,
                 "unit": "runs/day",
                 "description": "Số lượt sử dụng AI cho gói Pro mỗi ngày"
+            }
+        },
+        "visualize": {
+            "discrete_max_unique": {
+                "value": VIZ_DISCRETE_MAX_UNIQUE,
+                "unit": "values",
+                "description": "Số giá trị phân biệt tối đa để xem cột số là dạng rời rạc / thang đo"
+            },
+            "discrete_max_range": {
+                "value": VIZ_DISCRETE_MAX_RANGE,
+                "unit": "values",
+                "description": "Khoảng giá trị tối đa (max - min) để nhận diện cột số rời rạc"
+            },
+            "scale_max_values": {
+                "value": list(VIZ_SCALE_MAX_VALUES),
+                "unit": "list",
+                "description": "Các mốc tối đa phổ biến của thang đo rating (1-5, 1-7, 1-10)"
+            },
+            "high_missing_pct": {
+                "value": HIGH_MISSING_PCT,
+                "unit": "percent",
+                "description": "Tỷ lệ ô trống tối đa để hiển thị biểu đồ trực quan hóa"
             }
         }
     }

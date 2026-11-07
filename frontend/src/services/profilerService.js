@@ -31,13 +31,13 @@ export const profileFile = async (file, forceRefresh = false) => {   // (2) thê
  * @param {boolean} isReanalyze - True nếu là phân tích lại theo chỉnh sửa
  * @returns {Promise}
  */
-export const requestAIContext = (fileHash, lang = "vi", description = null, isReanalyze = false) => {
+export const requestAIContext = (fileHash, lang = "vi", description = null, isReanalyze = false, config = {}) => {
   return api.post("/files/ai-context", {
     file_hash: fileHash,
     lang,
     description,
     is_reanalyze: isReanalyze,
-  });
+  }, config);
 };
 
 /**

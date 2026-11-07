@@ -1,5 +1,7 @@
 import os
+import logging
 from fastapi import APIRouter, Depends, Request, Query
+from fastapi.responses import JSONResponse
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
 import hashlib
@@ -14,6 +16,7 @@ from app.core import cache
 from app.core.ai_client import get_dev_provider
 
 router = APIRouter(tags=["report"])
+logger = logging.getLogger(__name__)
 
 def compute_charts_hash(charts_or_ids: List[Any] | None) -> str:
     """
@@ -55,7 +58,7 @@ class SaveReportIntroRequest(BaseModel):
     chart_ids: Optional[List[str]] = None
 
 @router.get("/report/state")
-async def get_report_state(
+def get_report_state(
     file_hash: str = Query(...),
     lang: str = Query("vi"),
     current_user: dict = Depends(get_current_user),
@@ -133,6 +136,11 @@ async def get_report_intro(
     intro_text, is_fallback = await generate_report_intro(metadata, body.charts or [], lang=norm_lang)
     charts_hash = compute_charts_hash(body.charts or [])
 
+    feature_name = "report_intro"
+    if await request.is_disconnected():
+        logger.info(f"ai.cancelled feature={feature_name}")
+        return JSONResponse(status_code=499, content={"detail": "Client closed request", "cancelled": True})
+
     # 3. Quota & Cache
     if not is_fallback:
         usage = record_ai_feature_usage(db, user_id, "report_intro")
@@ -165,7 +173,7 @@ async def get_report_intro(
     return res
 
 @router.post("/report/intro/save")
-async def save_report_intro(
+def save_report_intro(
     body: SaveReportIntroRequest,
     current_user: dict = Depends(get_current_user),
 ):

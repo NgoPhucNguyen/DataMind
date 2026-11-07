@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Check, Link as LinkIcon } from "lucide-react";
+import { Check, Link as LinkIcon, Calendar } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import DecisionFlowBlock from "./DecisionFlowBlock";
@@ -9,13 +9,33 @@ import ExampleCardBlock from "./ExampleCardBlock";
 import TryClassifierBlock from "./TryClassifierBlock";
 import RulesTableBlock from "./RulesTableBlock";
 import CalloutBlock from "./CalloutBlock";
+import DiffTableBlock from "./DiffTableBlock";
 import { UIChip } from "./uiRegistry";
+
+/**
+ * Format ISO date string into user-friendly localized date
+ * e.g., "2026-11-04" -> "Cập nhật: 04/11/2026" (vi) or "Updated: Nov 4, 2026" (en)
+ */
+function formatUpdatedDate(isoDate, lang = "vi") {
+  if (!isoDate) return null;
+  const parts = isoDate.split("-");
+  if (parts.length === 3) {
+    const [year, month, day] = parts;
+    if (lang === "en") {
+      const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+      const mIdx = parseInt(month, 10) - 1;
+      return `Updated: ${months[mIdx] || month} ${parseInt(day, 10)}, ${year}`;
+    }
+    return `Cập nhật: ${day}/${month}/${year}`;
+  }
+  return `Cập nhật: ${isoDate}`;
+}
 
 /**
  * Custom heading component with copy link icon and ID parsing
  * Headings use standard app font (font-sans, 'Be Vietnam Pro')
  */
-function createHeading(level) {
+function createHeading(level, formattedUpdated = null) {
   return function HeadingComponent({ children, ...props }) {
     const [copied, setCopied] = useState(false);
 
@@ -50,49 +70,77 @@ function createHeading(level) {
 
     const Tag = `h${level}`;
     const levelClasses = {
-      1: "text-2xl md:text-3xl font-sans font-bold text-ink mt-8 mb-4 border-b border-border pb-2 tracking-tight",
+      1: "text-2xl md:text-3xl font-sans font-bold text-ink mt-8 mb-3 border-b border-border pb-2 tracking-tight",
       2: "text-xl md:text-2xl font-sans font-bold text-ink mt-8 mb-3 border-b border-border/60 pb-1.5 tracking-tight",
       3: "text-base md:text-lg font-sans font-semibold text-ink mt-6 mb-2",
       4: "text-sm md:text-base font-sans font-semibold text-ink mt-4 mb-2",
     }[level] || "text-sm md:text-base font-sans font-semibold text-ink mt-4 mb-2";
 
     return (
-      <Tag
-        id={id}
-        className={`group relative scroll-mt-24 transition-colors duration-500 rounded px-1 -mx-1 ${levelClasses}`}
-      >
-        <span className="flex items-center gap-2">
-          <span>{displayText}</span>
-          {id && (
-            <button
-              onClick={handleCopy}
-              className="opacity-0 group-hover:opacity-100 transition-opacity p-1 text-muted hover:text-forest focus:outline-none"
-              title="Sao chép liên kết mục này"
-            >
-              {copied ? (
-                <Check className="w-3.5 h-3.5 text-forest" />
-              ) : (
-                <LinkIcon className="w-3.5 h-3.5" />
-              )}
-            </button>
-          )}
-        </span>
-      </Tag>
+      <>
+        <Tag
+          id={id}
+          className={`group relative scroll-mt-24 transition-colors duration-500 rounded px-1 -mx-1 ${levelClasses}`}
+        >
+          <span className="flex items-center gap-2">
+            <span>{displayText}</span>
+            {id && (
+              <button
+                onClick={handleCopy}
+                className="opacity-0 group-hover:opacity-100 transition-opacity p-1 text-muted hover:text-forest focus:outline-none"
+                title="Sao chép liên kết mục này"
+              >
+                {copied ? (
+                  <Check className="w-3.5 h-3.5 text-forest" />
+                ) : (
+                  <LinkIcon className="w-3.5 h-3.5" />
+                )}
+              </button>
+            )}
+          </span>
+        </Tag>
+        {level === 1 && formattedUpdated && (
+          <div className="text-xs text-muted -mt-1 mb-6 flex items-center gap-1.5 font-medium">
+            <Calendar className="w-3.5 h-3.5 text-forest shrink-0" />
+            <span>{formattedUpdated}</span>
+          </div>
+        )}
+      </>
     );
   };
 }
 
 export default function MarkdownDocViewer({ content = "", rules = {} }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+
   // Normalize content to Unicode NFC
-  const normalizedContent = (content || "").normalize("NFC");
+  let body = (content || "").normalize("NFC");
+  const metadata = {};
+
+  // Parse YAML-like front matter: --- \n title: ... \n updated: ... \n ---
+  const fmMatch = body.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
+  if (fmMatch) {
+    const fmLines = fmMatch[1].split(/\r?\n/);
+    fmLines.forEach((line) => {
+      const colonIdx = line.indexOf(":");
+      if (colonIdx !== -1) {
+        const key = line.slice(0, colonIdx).trim();
+        const val = line.slice(colonIdx + 1).trim();
+        metadata[key] = val;
+      }
+    });
+    // Strip front matter from rendered body
+    body = body.slice(fmMatch[0].length);
+  }
+
+  const formattedUpdated = formatUpdatedDate(metadata.updated, i18n.language);
 
   return (
     <div className="doc-content text-ink leading-relaxed font-sans max-w-full break-words">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
-          h1: createHeading(1),
+          h1: createHeading(1, formattedUpdated),
           h2: createHeading(2),
           h3: createHeading(3),
           h4: createHeading(4),
@@ -164,13 +212,27 @@ export default function MarkdownDocViewer({ content = "", rules = {} }) {
               return <TryClassifierBlock />;
             }
 
-            if (lang === "dm-rules") {
-              return <RulesTableBlock rules={rules} />;
+            if (lang.startsWith("dm-rules")) {
+              const group = lang.replace("dm-rules", "").replace(/[:\s]+/, "").trim();
+              return <RulesTableBlock rules={rules} initialGroup={group || "all"} />;
             }
 
             if (lang.startsWith("dm-callout")) {
               const type = lang.replace("dm-callout", "").replace(/[:\s]+/, "").trim() || "tip";
               return <CalloutBlock type={type}>{rawCode}</CalloutBlock>;
+            }
+
+            if (lang === "dm-diff") {
+              try {
+                const parsed = JSON.parse(rawCode);
+                return <DiffTableBlock data={parsed} />;
+              } catch (e) {
+                return (
+                  <div className="p-3 bg-red-50 text-red-700 text-xs rounded border border-red-200">
+                    Lỗi cú pháp dm-diff: {e.message}
+                  </div>
+                );
+              }
             }
 
             if (lang === "dm-example") {
@@ -219,7 +281,7 @@ export default function MarkdownDocViewer({ content = "", rules = {} }) {
           },
         }}
       >
-        {normalizedContent}
+        {body}
       </ReactMarkdown>
     </div>
   );

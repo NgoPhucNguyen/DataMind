@@ -1,3 +1,8 @@
+---
+title: Nhận diện 5 kiểu dữ liệu
+updated: 2026-11-02
+---
+
 # Nhận diện 5 kiểu dữ liệu {#data-types}
 
 Hệ thống DataMind phân loại mọi cột dữ liệu trong file của bạn vào đúng **1 trong 5 kiểu dữ liệu chuẩn**. Quá trình phân loại diễn ra hoàn toàn tự động dựa trên **nội dung giá trị thực tế**, không đoán mò theo tên cột.

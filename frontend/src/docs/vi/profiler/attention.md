@@ -1,3 +1,8 @@
+---
+title: 4 lý do cột cần xem xét
+updated: 2026-11-02
+---
+
 # 4 lý do cột cần xem xét {#attention}
 
 Khi phân tích xong bảng tính, nếu phát hiện bất thường, màn hình Đánh giá dữ liệu sẽ hiển thị ngay một nút màu vàng cam: `ui:profiler.attention_chip`. Bạn chỉ cần bấm vào nút này để lọc nhanh bảng chỉ hiển thị những cột có vấn đề cần can thiệp.

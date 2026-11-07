@@ -1,3 +1,8 @@
+---
+title: Phiên làm việc và Bộ nhớ tạm
+updated: 2026-11-02
+---
+
 # Phiên làm việc và Bộ nhớ tạm {#session}
 
 DataMind được thiết kế với nguyên tắc bảo mật và tôn trọng quyền riêng tư dữ liệu cao nhất. Hệ thống không lưu trữ tệp bảng tính của bạn vĩnh viễn trên máy chủ.

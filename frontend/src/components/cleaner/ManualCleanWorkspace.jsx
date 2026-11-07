@@ -1,10 +1,15 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { Plus, Trash2, CheckCircle2, ChevronRight, PlayCircle, ArrowLeft, MousePointerClick, ChevronDown, Edit2, AlignLeft, Save, X, AlertTriangle, Check, EyeOff, ChevronLeft } from "lucide-react";
+import { Plus, Trash2, CheckCircle2, ChevronRight, PlayCircle, ArrowLeft, MousePointerClick, ChevronDown, Edit2, AlignLeft, Save, X, AlertTriangle, Check, EyeOff, ChevronLeft, HelpCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { TEXT, BTN, CARD } from "../../constants/ui";
-import { manualCleanPreview } from "../../services/cleanerService";
+import { manualCleanPreview, locateRow } from "../../services/cleanerService";
 import { useToast } from "../../contexts/ToastContext";
-import { getColumnWidth, getOrderedErrorCells, getNextError, getPrevError, scrollToCell } from "./tableUtils";
+import { getColumnWidth, getOrderedErrorCells, getNextError, getPrevError, scrollToCell, highlightExcelCell } from "./tableUtils";
+import { colLetter, cellAddress, cellAddressWords } from "../../utils/cellAddress";
+import { GoToCellInput } from "./GoToCellInput";
+import { WindowBar } from "./WindowBar";
+import ErrorListPanel, { ErrorChipsRow } from "./ErrorListPanel";
+import { getCurrentLang } from "../../i18n";
 
 // Từ điển ánh xạ sang Tiếng Việt
 const ACTION_LABELS = {
@@ -22,22 +27,44 @@ const ACTION_LABELS = {
   BATCH_EDIT_CELLS: "Sửa ô thủ công"
 };
 
-export default function ManualCleanWorkspace({ columns, fileHash, onConfirm, onBack, initialPreviewData = null, initialErrorCells = null, onDirtyChange = null }) {
+export default function ManualCleanWorkspace({
+  columns,
+  fileHash,
+  onConfirm,
+  onBack,
+  initialPreviewData = null,
+  initialErrorCells = null,
+  onDirtyChange = null,
+  columnLetters = {},
+  initialColumnIssueCounts = {},
+}) {
   const { t } = useTranslation();
+  const currentLang = getCurrentLang();
+  const [colLetters, setColLetters] = useState(columnLetters || {});
+  const [columnIssueCounts, setColumnIssueCounts] = useState(initialColumnIssueCounts || {});
+  const [isErrorPanelOpen, setIsErrorPanelOpen] = useState(false);
+  const [activeErrorGroupKey, setActiveErrorGroupKey] = useState(null);
   const [actions, setActions] = useState([]);
   const [previewData, setPreviewData] = useState(initialPreviewData || []);
   const [errorCells, setErrorCells] = useState(initialErrorCells || []); // Array of ErrorCell from backend preview
   const [changedCells, setChangedCells] = useState([]);
   const [removedRows, setRemovedRows] = useState([]);
   const [changedTruncated, setChangedTruncated] = useState(false);
-  
+
+  // Row Windowing State
+  const [windowInfo, setWindowInfo] = useState(null);
+  const [windowOffset, setWindowOffset] = useState(0);
+  const [windowMode, setWindowMode] = useState("all");
+  const [isLoadingWindow, setIsLoadingWindow] = useState(false);
+  const activeRequestIdRef = useRef(0);
+
   // Rule 4: Keep the cell highlighted by state, using the ORIGINAL error_cells list (do not drop once fixed)
   const originalErrorCellsRef = useRef(initialErrorCells || []);
   const [pendingCellEdits, setPendingCellEdits] = useState([]); // Array of {row_id, column, new_value}
   const pendingEditsRef = useRef([]);
   const [isFullEditMode, setIsFullEditMode] = useState(false);
   const [isPreviewing, setIsPreviewing] = useState(false);
-  
+
   // cellReviewStates: { [ "row_id:col" ]: "fixed" | "ignored" } (default for any error cell is "pending")
   const [cellReviewStates, setCellReviewStates] = useState({});
 
@@ -53,6 +80,9 @@ export default function ManualCleanWorkspace({ columns, fileHash, onConfirm, onB
     originalErrorCellsRef.current = initialErrorCells || [];
     setPreviewData(initialPreviewData || []);
     setErrorCells(initialErrorCells || []);
+    setWindowOffset(0);
+    setWindowMode("all");
+    setWindowInfo(null);
   }, [fileHash, initialErrorCells, initialPreviewData]);
 
   // Keep originalErrorCellsRef populated if initialErrorCells is passed later
@@ -73,11 +103,11 @@ export default function ManualCleanWorkspace({ columns, fileHash, onConfirm, onB
   // Load ban đầu
   useEffect(() => {
     if (!initialPreviewData || initialPreviewData.length === 0) {
-      handlePreview([]);
+      handlePreview([], 0, "all");
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  
+
   // Unmount: clear timer
   useEffect(() => {
     return () => {
@@ -85,37 +115,57 @@ export default function ManualCleanWorkspace({ columns, fileHash, onConfirm, onB
     };
   }, []);
 
-  const handlePreview = async (currentActions = actions) => {
+  const handlePreview = async (currentActions = actions, offset = windowOffset, mode = windowMode) => {
     setIsPreviewing(true);
+    setIsLoadingWindow(true);
+    const reqId = ++activeRequestIdRef.current;
     try {
-      const res = await manualCleanPreview(fileHash, currentActions);
+      const res = await manualCleanPreview(fileHash, currentActions, offset, mode);
+      if (reqId !== activeRequestIdRef.current) return false;
+
       setPreviewData(res.data.preview_data || []);
+      if (res.data.column_letters) {
+        setColLetters(res.data.column_letters);
+      }
+      if (res.data.column_issue_counts) {
+        setColumnIssueCounts(res.data.column_issue_counts);
+      }
       setErrorCells(res.data.error_cells || []);
       setChangedCells(res.data.changed_cells || []);
       setRemovedRows(res.data.removed_rows || []);
       setChangedTruncated(Boolean(res.data.changed_truncated));
+      if (res.data.window) {
+        setWindowInfo(res.data.window);
+        setWindowOffset(res.data.window.offset);
+        setWindowMode(res.data.window.mode);
+      }
       return true;
     } catch (err) {
-      const detail = err?.response?.data?.detail;
-      showToast(typeof detail === "string" ? detail : t("cleaner.workspace.empty_data"), "error");
+      if (reqId === activeRequestIdRef.current) {
+        const detail = err?.response?.data?.detail;
+        showToast(typeof detail === "string" ? detail : t("cleaner.workspace.empty_data"), "error");
+      }
       return false;
     } finally {
-      setIsPreviewing(false);
+      if (reqId === activeRequestIdRef.current) {
+        setIsPreviewing(false);
+        setIsLoadingWindow(false);
+      }
     }
   };
 
   const handleSavePendingEdits = async () => {
     if (pendingCellEdits.length === 0) return true;
-    
+
     const newAction = {
       action_type: "BATCH_EDIT_CELLS",
       column: "all",
       params: { edits: [...pendingCellEdits] }
     };
-    
+
     const newActions = [...actions, newAction];
-    
-    const success = await handlePreview(newActions);
+
+    const success = await handlePreview(newActions, windowOffset, windowMode);
     if (success) {
       setActions(newActions);
       setPendingCellEdits([]); // Clear pending state only on success
@@ -125,6 +175,95 @@ export default function ManualCleanWorkspace({ columns, fileHash, onConfirm, onB
     } else {
       // Failed to sync (e.g. 400 error). Do not clear pendingCellEdits.
       return false;
+    }
+  };
+
+  const handleWindowSwitch = async (newOffset, newMode) => {
+    if (pendingCellEdits.length > 0) {
+      const saved = await handleSavePendingEdits();
+      if (!saved) return;
+    }
+    handlePreview(actions, newOffset, newMode);
+  };
+
+  const handlePrevWindow = () => {
+    const curOffset = windowInfo?.offset ?? windowOffset;
+    const newOffset = Math.max(0, curOffset - 150);
+    handleWindowSwitch(newOffset, windowMode);
+  };
+
+  const handleNextWindow = () => {
+    const curOffset = windowInfo?.offset ?? windowOffset;
+    const newOffset = curOffset + 150;
+    handleWindowSwitch(newOffset, windowMode);
+  };
+
+  const handleToggleErrorsOnly = () => {
+    const nextMode = windowMode === "errors" ? "all" : "errors";
+    setWindowMode(nextMode);
+    handleWindowSwitch(0, nextMode);
+  };
+
+  const handleLocateAndGo = async ({ excelRow, letter, matchedCol }) => {
+    try {
+      const res = await locateRow({
+        file_hash: fileHash,
+        excel_row: excelRow,
+        mode: windowMode,
+        clean_mode: "manual",
+        actions,
+      });
+      const data = res.data;
+      if (data.status === "removed") {
+        showToast(
+          t("cleaner.goto_row_removed", {
+            row: excelRow,
+            reason: "trùng lặp",
+            defaultValue: `Dòng ${excelRow} đã bị xóa (trùng lặp).`,
+          }),
+          "warning"
+        );
+        return;
+      }
+      if (data.status === "not_found") {
+        showToast(
+          t("cleaner.goto_cell_not_found", {
+            addr: `${letter}${excelRow}`,
+            defaultValue: `Không tìm thấy ô ${letter}${excelRow}`,
+          }),
+          "warning"
+        );
+        return;
+      }
+      if (data.status === "not_in_errors") {
+        showToast(
+          t("cleaner.goto_not_in_errors", {
+            row: excelRow,
+            defaultValue: `Dòng ${excelRow} không có lỗi.`,
+          }),
+          "info"
+        );
+        return;
+      }
+      if (data.status === "found" && data.offset !== null) {
+        if (pendingCellEdits.length > 0) {
+          const saved = await handleSavePendingEdits();
+          if (!saved) return;
+        }
+        await handlePreview(actions, data.offset, windowMode);
+        setTimeout(() => {
+          if (tableContainerRef?.current) {
+            highlightExcelCell(tableContainerRef.current, {
+              addr: `${letter}${excelRow}`,
+              letter,
+              excelRow,
+              colName: matchedCol,
+            });
+          }
+        }, 120);
+      }
+    } catch (_) {
+      showToast(t("cleaner.goto_locate_error", { defaultValue: "Không thể định vị dòng trong file." }), "error");
     }
   };
 
@@ -153,7 +292,7 @@ export default function ManualCleanWorkspace({ columns, fileHash, onConfirm, onB
       [cellKey]: prev[cellKey] === "ignored" ? "pending" : "ignored"
     }));
   };
-  
+
   const executeAction = async (newAction) => {
     if (pendingCellEdits.length > 0) {
       const confirmed = window.confirm(t("cleaner.workspace.unsaved_confirm_action"));
@@ -161,7 +300,7 @@ export default function ManualCleanWorkspace({ columns, fileHash, onConfirm, onB
       setPendingCellEdits([]); // Bỏ qua thay đổi cũ
       pendingEditsRef.current = [];
     }
-    
+
     const newActions = [...actions, newAction];
     const success = await handlePreview(newActions);
     if (success) {
@@ -176,7 +315,7 @@ export default function ManualCleanWorkspace({ columns, fileHash, onConfirm, onB
       setPendingCellEdits([]); // Bỏ qua thay đổi cũ
       pendingEditsRef.current = [];
     }
-    
+
     const newActions = [...actions];
     newActions.splice(index, 1);
     const success = await handlePreview(newActions);
@@ -203,6 +342,22 @@ export default function ManualCleanWorkspace({ columns, fileHash, onConfirm, onB
   const [filterOnlyErrorRows, setFilterOnlyErrorRows] = useState(false);
   const [currentNavError, setCurrentNavError] = useState(null);
   const tableContainerRef = useRef(null);
+
+  const orderedErrors = useMemo(() => {
+    return getOrderedErrorCells(originalErrorList, previewData, columns);
+  }, [originalErrorList, previewData, columns]);
+
+  const currentNavErrorIndex = useMemo(() => {
+    if (!currentNavError || orderedErrors.length === 0) return -1;
+    return orderedErrors.findIndex(e => e.row_id === currentNavError.row_id && e.column === currentNavError.column);
+  }, [currentNavError, orderedErrors]);
+
+  const currentNavAddress = useMemo(() => {
+    if (!currentNavError) return "";
+    const letter = colLetters[currentNavError.column] || colLetter(columns.indexOf(currentNavError.column));
+    const excelRow = (currentNavError.row_id ?? 0) + 2;
+    return cellAddress(letter, excelRow);
+  }, [currentNavError, colLetters, columns]);
 
   const handlePrevError = () => {
     const ordered = getOrderedErrorCells(originalErrorList, previewData, columns);
@@ -245,15 +400,15 @@ export default function ManualCleanWorkspace({ columns, fileHash, onConfirm, onB
   };
 
   return (
-    <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-20">
+    <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-36 sm:pb-20">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-2">
         <div className="flex flex-wrap items-center gap-4">
-          <label 
+          <label
             className="flex items-center gap-2 text-sm font-medium text-ink cursor-pointer select-none"
             title={t("cleaner.tooltip_full_edit_mode")}
           >
-            <input 
-              type="checkbox" 
+            <input
+              type="checkbox"
               checked={isFullEditMode}
               onChange={(e) => setIsFullEditMode(e.target.checked)}
               className="rounded border-border text-forest focus:ring-forest/30"
@@ -262,12 +417,12 @@ export default function ManualCleanWorkspace({ columns, fileHash, onConfirm, onB
             <HelpCircle className="w-3.5 h-3.5 text-muted hover:text-ink transition-colors" />
           </label>
 
-          <label 
+          <label
             className="flex items-center gap-2 text-xs font-medium text-ink cursor-pointer select-none"
             title={t("cleaner.tooltip_filter_error_cols")}
           >
-            <input 
-              type="checkbox" 
+            <input
+              type="checkbox"
               checked={filterOnlyErrorCols}
               onChange={(e) => setFilterOnlyErrorCols(e.target.checked)}
               className="rounded border-border text-forest focus:ring-forest/30"
@@ -276,12 +431,12 @@ export default function ManualCleanWorkspace({ columns, fileHash, onConfirm, onB
             <HelpCircle className="w-3.5 h-3.5 text-muted hover:text-ink transition-colors" />
           </label>
 
-          <label 
+          <label
             className="flex items-center gap-2 text-xs font-medium text-ink cursor-pointer select-none"
             title={t("cleaner.tooltip_filter_error_rows")}
           >
-            <input 
-              type="checkbox" 
+            <input
+              type="checkbox"
               checked={filterOnlyErrorRows}
               onChange={(e) => setFilterOnlyErrorRows(e.target.checked)}
               className="rounded border-border text-forest focus:ring-forest/30"
@@ -307,13 +462,43 @@ export default function ManualCleanWorkspace({ columns, fileHash, onConfirm, onB
         </div>
       </div>
 
+      {/* Error Chips Row & Error List Panel (Inline expand directly below chips row) */}
+      <div className="mb-2">
+        <ErrorChipsRow
+          columnIssueCounts={columnIssueCounts}
+          columnLetters={colLetters}
+          isPanelOpen={isErrorPanelOpen}
+          onTogglePanel={() => setIsErrorPanelOpen((prev) => !prev)}
+          onSelectGroup={(g) => {
+            setIsErrorPanelOpen(true);
+            setActiveErrorGroupKey(g.key);
+          }}
+        />
+
+        <ErrorListPanel
+          isOpen={isErrorPanelOpen}
+          onClose={() => setIsErrorPanelOpen(false)}
+          fileHash={fileHash}
+          actions={actions}
+          overriddenTypes={{}}
+          columnIssueCounts={columnIssueCounts}
+          columnLetters={colLetters}
+          cellReviewStates={cellReviewStates}
+          pendingCellEdits={pendingCellEdits}
+          onLocateCell={handleLocateAndGo}
+          activeGroupKey={activeErrorGroupKey}
+          onActiveGroupKeyChange={setActiveErrorGroupKey}
+        />
+      </div>
+
       <div className="grid grid-cols-1 xl:grid-cols-4 gap-6 items-start">
         {/* Phần Trái: Bảng (chiếm 3/4) */}
         <div className="xl:col-span-3">
-          <PreviewTable 
-            data={previewData} 
-            actions={actions} 
-            originalColumns={columns} 
+          <PreviewTable
+            data={previewData}
+            actions={actions}
+            originalColumns={columns}
+            colLetters={colLetters}
             isLoading={isPreviewing}
             pendingCellEdits={pendingCellEdits}
             errorCells={errorCells}
@@ -335,6 +520,12 @@ export default function ManualCleanWorkspace({ columns, fileHash, onConfirm, onB
               }
               return false;
             }}
+            windowInfo={windowInfo}
+            isLoadingWindow={isLoadingWindow}
+            onPrevWindow={handlePrevWindow}
+            onNextWindow={handleNextWindow}
+            onToggleErrorsOnly={handleToggleErrorsOnly}
+            onLocateRow={handleLocateAndGo}
           />
         </div>
 
@@ -356,7 +547,7 @@ export default function ManualCleanWorkspace({ columns, fileHash, onConfirm, onB
                 </span>
               </div>
             </div>
-            
+
             <div className="flex-1 overflow-y-auto pr-2">
               {actions.length === 0 ? (
                 <div className="flex flex-col items-center justify-center text-muted py-10 opacity-60">
@@ -368,37 +559,37 @@ export default function ManualCleanWorkspace({ columns, fileHash, onConfirm, onB
                   {actions.map((act, idx) => (
                     <div key={idx} className="relative flex items-center justify-between group animate-in slide-in-from-right-2 duration-300">
                       <div className="flex items-center gap-3 bg-white border border-border p-3 rounded-lg w-full hover:border-forest/50 transition-colors shadow-sm">
-                         <div className="w-6 h-6 rounded-full bg-forest text-white flex items-center justify-center text-xs font-bold shrink-0 shadow-sm z-10">
-                            {idx + 1}
-                         </div>
-                         <div className="flex-1 min-w-0">
-                           <p className="text-sm font-medium text-ink truncate">
-                             {t(`cleaner.workspace.actions.${act.action_type}`, { defaultValue: ACTION_LABELS[act.action_type] || act.action_type })}
-                           </p>
-                           <p className="text-xs text-muted truncate mt-0.5">
-                             {t("cleaner.workspace.col_label")} <span className="font-mono bg-sage/30 px-1 rounded text-ink">{act.column}</span>
-                             {act.params?.new_name && ` ➔ ${act.params.new_name}`}
-                             {act.params?.value !== undefined && ` ➔ "${act.params.value}"`}
-                             {act.params?.edits && ` ➔ ${t("cleaner.workspace.cells_count", { count: act.params.edits.length })}`}
-                           </p>
-                         </div>
-                         <button 
-                           onClick={() => handleRemoveAction(idx)}
-                           className="p-1.5 text-muted hover:text-[#9F2F2D] hover:bg-[#FDEBEC] rounded transition-colors opacity-0 group-hover:opacity-100 shrink-0"
-                           title={t("cleaner.workspace.undo_title")}
-                         >
-                           <Trash2 className="w-4 h-4" />
-                         </button>
+                        <div className="w-6 h-6 rounded-full bg-forest text-white flex items-center justify-center text-xs font-bold shrink-0 shadow-sm z-10">
+                          {idx + 1}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-ink truncate">
+                            {t(`cleaner.workspace.actions.${act.action_type}`, { defaultValue: ACTION_LABELS[act.action_type] || act.action_type })}
+                          </p>
+                          <p className="text-xs text-muted truncate mt-0.5">
+                            {t("cleaner.workspace.col_label")} <span className="font-mono bg-sage/30 px-1 rounded text-ink">{act.column}</span>
+                            {act.params?.new_name && ` ➔ ${act.params.new_name}`}
+                            {act.params?.value !== undefined && ` ➔ "${act.params.value}"`}
+                            {act.params?.edits && ` ➔ ${t("cleaner.workspace.cells_count", { count: act.params.edits.length })}`}
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => handleRemoveAction(idx)}
+                          className="p-1.5 text-muted hover:text-[#9F2F2D] hover:bg-[#FDEBEC] rounded transition-colors opacity-0 group-hover:opacity-100 shrink-0"
+                          title={t("cleaner.workspace.undo_title")}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
                       </div>
                     </div>
                   ))}
                 </div>
               )}
             </div>
-            
+
             {/* Advanced Options Toggle */}
             <div className="mt-4 pt-4 border-t border-border">
-               <AdvancedActionForm columns={columns} onExecuteAction={executeAction} />
+              <AdvancedActionForm columns={columns} onExecuteAction={executeAction} />
             </div>
           </div>
         </div>
@@ -430,10 +621,20 @@ export default function ManualCleanWorkspace({ columns, fileHash, onConfirm, onB
               >
                 {t("cleaner.bar_btn_next_error")}
               </button>
+              {currentNavErrorIndex >= 0 && currentNavAddress && (
+                <span className="text-xs font-mono font-medium text-amber-900 bg-amber-50 px-2 py-1 rounded-md border border-amber-200 ml-1 select-none">
+                  {t("cleaner.err_nav_address", {
+                    current: currentNavErrorIndex + 1,
+                    total: orderedErrors.length,
+                    addr: currentNavAddress,
+                    defaultValue: `Lỗi ${currentNavErrorIndex + 1}/${orderedErrors.length} · ${currentNavAddress}`
+                  })}
+                </span>
+              )}
             </div>
           </div>
 
-          <div className="flex flex-col sm:flex-row items-center gap-2.5 w-full sm:w-auto">
+          <div className="flex flex-wrap sm:flex-nowrap items-center justify-end gap-2 w-full sm:w-auto">
             <button
               onClick={handleSavePendingEdits}
               disabled={pendingCellEdits.length === 0 || isPreviewing}
@@ -479,7 +680,7 @@ function AdvancedActionForm({ columns, onExecuteAction }) {
     };
     if (selectedAction === "FILL_MISSING_CUSTOM_VALUE") newAction.params.value = customValue;
     else if (selectedAction === "RENAME_COLUMN") newAction.params.new_name = customValue;
-    
+
     onExecuteAction(newAction);
     setCustomValue("");
     if (selectedAction === "DROP_DUPLICATES") setSelectedAction("");
@@ -487,16 +688,16 @@ function AdvancedActionForm({ columns, onExecuteAction }) {
 
   return (
     <div className="bg-[#FBFBFA] border border-border rounded-lg overflow-hidden">
-      <button 
+      <button
         onClick={() => setIsOpen(!isOpen)}
         className="w-full flex items-center justify-between p-3 text-sm font-medium text-ink hover:bg-sage/20 transition-colors"
       >
         <div className="flex items-center gap-2">
-           <Plus className="w-4 h-4 text-forest" /> {t("cleaner.workspace.advanced_options")}
+          <Plus className="w-4 h-4 text-forest" /> {t("cleaner.workspace.advanced_options")}
         </div>
         <ChevronDown className={`w-4 h-4 transition-transform ${isOpen ? "rotate-180" : ""}`} />
       </button>
-      
+
       {isOpen && (
         <div className="p-3 pt-0 space-y-3 border-t border-border mt-2 bg-white">
           <div className="mt-2">
@@ -519,7 +720,7 @@ function AdvancedActionForm({ columns, onExecuteAction }) {
               className="w-full text-sm border border-border rounded p-1.5 focus:outline-none focus:border-forest"
             >
               <option value="">{t("cleaner.workspace.select_op")}</option>
-              {Object.entries(ACTION_LABELS).filter(([k])=>k!=="BATCH_EDIT_CELLS").map(([key, label]) => (
+              {Object.entries(ACTION_LABELS).filter(([k]) => k !== "BATCH_EDIT_CELLS").map(([key, label]) => (
                 <option key={key} value={key}>
                   {t(`cleaner.workspace.actions.${key}`, { defaultValue: label })}
                 </option>
@@ -571,9 +772,17 @@ function PreviewTable({
   containerRef,
   onAddPendingEdit,
   onExecuteAction,
-  onFlushPendingEdits
+  onFlushPendingEdits,
+  colLetters = {},
+  windowInfo = null,
+  isLoadingWindow = false,
+  onPrevWindow,
+  onNextWindow,
+  onToggleErrorsOnly,
+  onLocateRow,
 }) {
   const { t } = useTranslation();
+  const currentLang = getCurrentLang();
   const [editingCell, setEditingCell] = useState(null); // { rowIdx, col, isDirectEdit: boolean }
   const [editValue, setEditValue] = useState("");
   const [activeErrorPanel, setActiveErrorPanel] = useState(null); // { rowIdx, col, errorCell, currentValue }
@@ -582,20 +791,20 @@ function PreviewTable({
   const [renameValue, setRenameValue] = useState("");
 
   if (!data || data.length === 0) return (
-     <div className={CARD + " h-full flex items-center justify-center min-h-[400px] relative"}>
-       {isLoading ? (
-          <div className="flex flex-col items-center text-muted animate-pulse">
-            <div className="w-8 h-8 rounded-full border-2 border-forest border-t-transparent animate-spin mb-3" />
-            <p className="text-sm">{t("cleaner.workspace.loading_data")}</p>
-          </div>
-       ) : (
-          <p className="text-muted text-sm">{t("cleaner.workspace.empty_data")}</p>
-       )}
-     </div>
+    <div className={CARD + " h-full flex items-center justify-center min-h-[400px] relative"}>
+      {isLoading ? (
+        <div className="flex flex-col items-center text-muted animate-pulse">
+          <div className="w-8 h-8 rounded-full border-2 border-forest border-t-transparent animate-spin mb-3" />
+          <p className="text-sm">{t("cleaner.workspace.loading_data")}</p>
+        </div>
+      ) : (
+        <p className="text-muted text-sm">{t("cleaner.workspace.empty_data")}</p>
+      )}
+    </div>
   );
 
   const currentData = data;
-  
+
   // Changed cells map: `${row_id}:${col}` -> item
   const changedMap = useMemo(() => {
     const map = new Map();
@@ -611,7 +820,7 @@ function PreviewTable({
   actions.filter(a => a.action_type === "RENAME_COLUMN").forEach(a => {
     renamedCols[a.params.new_name] = a.column; // new -> old
   });
-  
+
   const BATCHED_EDITS = actions
     .filter(a => a.action_type === "BATCH_EDIT_CELLS")
     .flatMap(a => a.params.edits || []);
@@ -723,7 +932,7 @@ function PreviewTable({
 
   const handleCellClick = (idx, col, status, isDropped) => {
     if (isDropped) return;
-    
+
     const rowId = visibleData[idx].original_index;
     const cellError = errorList.find(e => e.row_id === rowId && e.column === col);
 
@@ -746,7 +955,7 @@ function PreviewTable({
     if (!canEdit) return;
 
     setEditingCell({ rowIdx: idx, col, isDirectEdit: true });
-    
+
     const pending = pendingCellEdits.find(e => e.row_id === rowId && e.column === col);
     setEditValue(pending ? pending.new_value : (visibleData[idx][col] === null ? "" : visibleData[idx][col]));
   };
@@ -783,15 +992,15 @@ function PreviewTable({
   const handleHeaderAction = (col, actionType, params = {}) => {
     setOpenHeaderMenu(null);
     onExecuteAction({
-       action_type: actionType,
-       column: col,
-       params
+      action_type: actionType,
+      column: col,
+      params
     });
   };
 
   const handleRenameSubmit = (col) => {
     if (renameValue.trim() !== "" && renameValue !== col) {
-       handleHeaderAction(col, "RENAME_COLUMN", { new_name: renameValue });
+      handleHeaderAction(col, "RENAME_COLUMN", { new_name: renameValue });
     }
     setRenamingCol(null);
   };
@@ -799,16 +1008,16 @@ function PreviewTable({
   return (
     <div className={CARD + " h-full flex flex-col relative"}>
       {isLoading && (
-         <div className="absolute inset-0 bg-white/50 z-50 flex items-center justify-center backdrop-blur-[1px] rounded-2xl">
-            <div className="bg-white p-3 rounded-lg shadow-lg flex items-center gap-3 border border-border">
-               <div className="w-5 h-5 rounded-full border-2 border-forest border-t-transparent animate-spin" />
-               <span className="text-sm font-medium text-ink">{t("cleaner.workspace.loading_data")}</span>
-            </div>
-         </div>
+        <div className="absolute inset-0 bg-white/50 z-50 flex items-center justify-center backdrop-blur-[1px] rounded-2xl">
+          <div className="bg-white p-3 rounded-lg shadow-lg flex items-center gap-3 border border-border">
+            <div className="w-5 h-5 rounded-full border-2 border-forest border-t-transparent animate-spin" />
+            <span className="text-sm font-medium text-ink">{t("cleaner.workspace.loading_data")}</span>
+          </div>
+        </div>
       )}
 
       {/* Header and Legend above table */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-2">
         <div className="flex flex-wrap items-center gap-2">
           <h3 className={`${TEXT.sectionTitle} flex items-center gap-2 mb-0`}>
             {t("cleaner.preview_table_title")}
@@ -818,11 +1027,35 @@ function PreviewTable({
           </h3>
         </div>
 
-        {pendingCellEdits.length > 0 && (
-           <span className="text-xs font-medium text-blue-600 bg-blue-50 border border-blue-200 px-2 py-1 rounded-full animate-pulse">
+        <div className="flex items-center gap-3">
+          <GoToCellInput
+            columnLetters={colLetters}
+            allColumns={originalColumns}
+            visibleColumns={displayCols}
+            rows={visibleData}
+            containerRef={containerRef}
+            previewRowsLimit={150}
+            onLocateRow={onLocateRow}
+          />
+          {pendingCellEdits.length > 0 && (
+            <span className="text-xs font-medium text-blue-600 bg-blue-50 border border-blue-200 px-2 py-1 rounded-full animate-pulse">
               {t("cleaner.workspace.syncing_badge", { count: pendingCellEdits.length })}
-           </span>
-        )}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Row Window Pagination Bar */}
+      <div className="mb-2">
+        <WindowBar
+          window={windowInfo}
+          isLoading={isLoadingWindow}
+          onPrev={onPrevWindow}
+          onNext={onNextWindow}
+          onToggleErrorsOnly={onToggleErrorsOnly}
+          totalRows={windowInfo?.total_rows ?? visibleData.length}
+          totalErrorRows={windowInfo?.total_error_rows ?? 0}
+        />
       </div>
 
       {/* Rule 4: Small Legend above table with the states */}
@@ -830,7 +1063,7 @@ function PreviewTable({
         <span className="font-semibold text-muted uppercase tracking-wider text-[10px]">
           {t("cleaner.guided.legend_title")}
         </span>
-        <div 
+        <div
           className="flex items-center gap-1.5 cursor-help"
           title={t("cleaner.tooltip_legend_pending")}
         >
@@ -838,7 +1071,7 @@ function PreviewTable({
           <span>{t("cleaner.guided.legend_pending")}</span>
           <HelpCircle className="w-3 h-3 text-muted" />
         </div>
-        <div 
+        <div
           className="flex items-center gap-1.5 cursor-help"
           title={t("cleaner.tooltip_legend_fixed")}
         >
@@ -846,7 +1079,7 @@ function PreviewTable({
           <span>{t("cleaner.guided.legend_fixed")}</span>
           <HelpCircle className="w-3 h-3 text-muted" />
         </div>
-        <div 
+        <div
           className="flex items-center gap-1.5 cursor-help"
           title={t("cleaner.tooltip_legend_action_changed")}
         >
@@ -854,7 +1087,7 @@ function PreviewTable({
           <span className="text-emerald-900 font-medium">{t("cleaner.legend_action_changed")}</span>
           <HelpCircle className="w-3 h-3 text-muted" />
         </div>
-        <div 
+        <div
           className="flex items-center gap-1.5 cursor-help"
           title={t("cleaner.tooltip_legend_ignored")}
         >
@@ -876,14 +1109,33 @@ function PreviewTable({
             ))}
           </colgroup>
           <thead className="bg-[#F9F9F8] border-b border-border sticky top-0 z-20 shadow-xs">
+            {/* Row of column letters */}
+            <tr className="border-b border-border/60 text-[11px] font-mono text-muted bg-[#F4F4F2]">
+              <th className="px-2.5 py-1 text-center w-12 sticky left-0 z-30 bg-[#F4F4F2] border-r border-border font-semibold select-none">
+                {/* corner */}
+              </th>
+              {displayCols.map(col => {
+                const letter = colLetters[col] || colLetter(originalColumns.indexOf(col));
+                return (
+                  <th
+                    key={`letter-${col}`}
+                    data-col-letter={letter}
+                    className="px-2.5 py-1 text-center font-mono font-semibold text-muted/80 tracking-wider select-none border-r border-border/30 last:border-r-0"
+                    title={t("cleaner.col_letter_tooltip", { letter, defaultValue: `Cột ${letter} trong file gốc` })}
+                  >
+                    {letter}
+                  </th>
+                );
+              })}
+            </tr>
             <tr>
-              <th className="px-2.5 py-2.5 font-semibold text-ink w-12 text-center sticky left-0 z-30 bg-[#F9F9F8] border-r border-border">
-                #
+              <th className="px-2.5 py-2.5 font-semibold text-ink w-12 text-center sticky left-0 z-30 bg-[#F9F9F8] border-r border-border select-none">
+                {t("cleaner.row_header", { defaultValue: "Dòng" })}
               </th>
               {displayCols.map(col => {
                 const isDropped = droppedCols.has(col);
                 const isRenamed = renamedCols[col];
-                
+
                 return (
                   <th
                     key={col}
@@ -893,71 +1145,71 @@ function PreviewTable({
                   >
                     <div className="flex items-start justify-between group/header gap-1">
                       {renamingCol === col ? (
-                         <input 
-                           autoFocus
-                           type="text"
-                           value={renameValue}
-                           onChange={e => setRenameValue(e.target.value)}
-                           onBlur={() => handleRenameSubmit(col)}
-                           onKeyDown={e => { if(e.key === "Enter") handleRenameSubmit(col); if(e.key === "Escape") setRenamingCol(null); }}
-                           className="w-full border border-forest rounded px-1 py-0.5 text-xs font-normal text-ink outline-none"
-                         />
+                        <input
+                          autoFocus
+                          type="text"
+                          value={renameValue}
+                          onChange={e => setRenameValue(e.target.value)}
+                          onBlur={() => handleRenameSubmit(col)}
+                          onKeyDown={e => { if (e.key === "Enter") handleRenameSubmit(col); if (e.key === "Escape") setRenamingCol(null); }}
+                          className="w-full border border-forest rounded px-1 py-0.5 text-xs font-normal text-ink outline-none"
+                        />
                       ) : (
-                         <div className="min-w-0 flex-1">
-                           <span className={`line-clamp-2 break-words text-xs leading-snug ${isDropped ? "line-through" : ""}`}>
-                             {col}
-                           </span>
-                           {isDropped && <span className="text-[10px] text-red-500 font-normal border border-red-200 bg-red-50 px-1 py-0.5 rounded mt-0.5 inline-block">{t("cleaner.workspace.dropped_badge")}</span>}
-                           {isRenamed && <span className="text-[10px] text-blue-600 font-normal border border-blue-200 bg-blue-50 px-1 py-0.5 rounded mt-0.5 inline-block" title={t("cleaner.workspace.old_name_tooltip", { name: isRenamed })}>{t("cleaner.workspace.renamed_badge")}</span>}
-                         </div>
+                        <div className="min-w-0 flex-1">
+                          <span className={`line-clamp-2 break-words text-xs leading-snug ${isDropped ? "line-through" : ""}`}>
+                            {col}
+                          </span>
+                          {isDropped && <span className="text-[10px] text-red-500 font-normal border border-red-200 bg-red-50 px-1 py-0.5 rounded mt-0.5 inline-block">{t("cleaner.workspace.dropped_badge")}</span>}
+                          {isRenamed && <span className="text-[10px] text-blue-600 font-normal border border-blue-200 bg-blue-50 px-1 py-0.5 rounded mt-0.5 inline-block" title={t("cleaner.workspace.old_name_tooltip", { name: isRenamed })}>{t("cleaner.workspace.renamed_badge")}</span>}
+                        </div>
                       )}
-                      
+
                       {!isDropped && renamingCol !== col && (
-                         <div className="relative shrink-0 mt-0.5">
-                            <button 
-                              onClick={() => setOpenHeaderMenu(openHeaderMenu === col ? null : col)}
-                              className="p-1 rounded text-muted hover:bg-gray-200 hover:text-ink opacity-0 group-hover/header:opacity-100 transition-opacity"
-                            >
-                               <ChevronDown className="w-3.5 h-3.5" />
-                            </button>
-                            {openHeaderMenu === col && (
-                               <>
-                                 <div className="fixed inset-0 z-40" onClick={() => setOpenHeaderMenu(null)} />
-                                 <div className="absolute top-full right-0 mt-1 w-48 bg-white border border-border rounded-lg shadow-xl py-1 z-50 animate-in fade-in zoom-in-95 font-normal">
-                                    <button 
-                                      onClick={() => { setRenamingCol(col); setRenameValue(col); setOpenHeaderMenu(null); }} 
-                                      title={t("cleaner.tooltip_menu_rename_col")}
-                                      className="w-full text-left px-3 py-2 text-xs hover:bg-sage/20 text-ink flex items-center gap-2"
-                                    >
-                                       <Edit2 className="w-3.5 h-3.5 text-muted" /> {t("cleaner.workspace.menu_rename_col")}
-                                    </button>
-                                    <div className="h-px bg-border my-1" />
-                                    <button 
-                                      onClick={() => handleHeaderAction(col, "FILL_MISSING_MEAN")} 
-                                      title={t("cleaner.tooltip_menu_fill_mean")}
-                                      className="w-full text-left px-3 py-2 text-xs hover:bg-sage/20 text-ink flex items-center gap-2"
-                                    >
-                                       <AlignLeft className="w-3.5 h-3.5 text-muted" /> {t("cleaner.workspace.menu_fill_mean")}
-                                    </button>
-                                    <button 
-                                      onClick={() => handleHeaderAction(col, "FILL_MISSING_UNKNOWN")} 
-                                      title={t("cleaner.tooltip_menu_fill_unknown")}
-                                      className="w-full text-left px-3 py-2 text-xs hover:bg-sage/20 text-ink flex items-center gap-2"
-                                    >
-                                       <AlignLeft className="w-3.5 h-3.5 text-muted" /> {t("cleaner.workspace.menu_fill_unknown")}
-                                    </button>
-                                    <div className="h-px bg-border my-1" />
-                                    <button 
-                                      onClick={() => handleHeaderAction(col, "DROP_COLUMN")} 
-                                      title={t("cleaner.tooltip_menu_drop_col")}
-                                      className="w-full text-left px-3 py-2 text-xs hover:bg-red-50 text-red-600 flex items-center gap-2"
-                                    >
-                                       <Trash2 className="w-3.5 h-3.5 text-red-500" /> {t("cleaner.workspace.menu_drop_col")}
-                                    </button>
-                                 </div>
-                               </>
-                            )}
-                         </div>
+                        <div className="relative shrink-0 mt-0.5">
+                          <button
+                            onClick={() => setOpenHeaderMenu(openHeaderMenu === col ? null : col)}
+                            className="p-1 rounded text-muted hover:bg-gray-200 hover:text-ink opacity-0 group-hover/header:opacity-100 transition-opacity"
+                          >
+                            <ChevronDown className="w-3.5 h-3.5" />
+                          </button>
+                          {openHeaderMenu === col && (
+                            <>
+                              <div className="fixed inset-0 z-40" onClick={() => setOpenHeaderMenu(null)} />
+                              <div className="absolute top-full right-0 mt-1 w-48 bg-white border border-border rounded-lg shadow-xl py-1 z-50 animate-in fade-in zoom-in-95 font-normal">
+                                <button
+                                  onClick={() => { setRenamingCol(col); setRenameValue(col); setOpenHeaderMenu(null); }}
+                                  title={t("cleaner.tooltip_menu_rename_col")}
+                                  className="w-full text-left px-3 py-2 text-xs hover:bg-sage/20 text-ink flex items-center gap-2"
+                                >
+                                  <Edit2 className="w-3.5 h-3.5 text-muted" /> {t("cleaner.workspace.menu_rename_col")}
+                                </button>
+                                <div className="h-px bg-border my-1" />
+                                <button
+                                  onClick={() => handleHeaderAction(col, "FILL_MISSING_MEAN")}
+                                  title={t("cleaner.tooltip_menu_fill_mean")}
+                                  className="w-full text-left px-3 py-2 text-xs hover:bg-sage/20 text-ink flex items-center gap-2"
+                                >
+                                  <AlignLeft className="w-3.5 h-3.5 text-muted" /> {t("cleaner.workspace.menu_fill_mean")}
+                                </button>
+                                <button
+                                  onClick={() => handleHeaderAction(col, "FILL_MISSING_UNKNOWN")}
+                                  title={t("cleaner.tooltip_menu_fill_unknown")}
+                                  className="w-full text-left px-3 py-2 text-xs hover:bg-sage/20 text-ink flex items-center gap-2"
+                                >
+                                  <AlignLeft className="w-3.5 h-3.5 text-muted" /> {t("cleaner.workspace.menu_fill_unknown")}
+                                </button>
+                                <div className="h-px bg-border my-1" />
+                                <button
+                                  onClick={() => handleHeaderAction(col, "DROP_COLUMN")}
+                                  title={t("cleaner.tooltip_menu_drop_col")}
+                                  className="w-full text-left px-3 py-2 text-xs hover:bg-red-50 text-red-600 flex items-center gap-2"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5 text-red-500" /> {t("cleaner.workspace.menu_drop_col")}
+                                </button>
+                              </div>
+                            </>
+                          )}
+                        </div>
                       )}
                     </div>
                   </th>
@@ -969,66 +1221,75 @@ function PreviewTable({
             {visibleData.map((row, idx) => {
               const rowId = row.original_index;
               const hasErrorInRow = rowId !== undefined && errorRowIdsSet.has(rowId);
+              const excelRow = (rowId !== undefined && rowId !== null ? rowId : idx) + 2;
 
               return (
                 <tr
                   key={rowId !== undefined ? rowId : idx}
                   className={`hover:bg-sage/10 transition-colors ${hasErrorInRow ? "bg-amber-50/20" : ""}`}
                 >
-                  <td className="px-2.5 py-2 text-muted text-center border-r border-border/50 sticky left-0 z-10 bg-[#F9F9F8] font-mono text-xs select-none">
-                    {rowId !== undefined ? rowId : idx + 1}
+                  <td
+                    data-row={excelRow}
+                    className="px-2.5 py-2 text-muted text-center border-r border-border/50 sticky left-0 z-10 bg-[#F9F9F8] font-mono text-xs select-none"
+                  >
+                    {excelRow}
                   </td>
                   {displayCols.map(col => {
                     const isDropped = droppedCols.has(col);
                     if (isDropped) {
                       return <td key={col} className="px-2.5 py-2 text-gray-300 bg-gray-50/50 italic text-xs">-</td>;
                     }
-                    
+
+                    const letter = colLetters[col] || colLetter(originalColumns.indexOf(col));
+                    const cellAddr = `${letter}${excelRow}`;
                     const status = getCellStatus(rowId, col);
                     const isEditing = editingCell?.rowIdx === idx && editingCell?.col === col && editingCell?.isDirectEdit;
-                    
+
                     // Value to display
                     let displayVal = row[col];
                     if (status.type === "pending_edit") displayVal = status.value;
                     else if (status.type === "fixed" && status.value !== undefined) displayVal = status.value;
-                    
+
                     const isNull = displayVal === null || displayVal === undefined;
-                    
+
                     let cellClasses = "px-2.5 py-2 truncate text-xs transition-colors border border-transparent ";
                     let tooltip = null;
-                    
+
                     if (status.type === "ignored") {
                       cellClasses += "bg-gray-100 text-gray-400 line-through cursor-pointer hover:border-gray-300";
-                      tooltip = t("cleaner.guided.ignored");
+                      tooltip = `${cellAddr}: ${t("cleaner.guided.ignored")}`;
                     } else if (status.type === "fixed" || status.type === "pending_edit") {
                       cellClasses += "bg-emerald-50 text-emerald-900 border-emerald-200 font-medium cursor-pointer hover:border-emerald-400";
                       const oldStr = status.originalValue === null || status.originalValue === undefined ? "null" : String(status.originalValue);
                       const newStr = isNull ? "null" : String(displayVal);
-                      tooltip = t("cleaner.guided.fixed_tooltip", { oldVal: oldStr, newVal: newStr });
+                      tooltip = `${cellAddr}: ${t("cleaner.guided.fixed_tooltip", { oldVal: oldStr, newVal: newStr })}`;
                     } else if (status.type === "action_changed") {
                       cellClasses += "bg-emerald-50/70 text-emerald-900 border-emerald-200/80 font-medium cursor-pointer hover:border-emerald-400";
                       const oldStr = status.changedItem.old === null || status.changedItem.old === undefined ? "null" : String(status.changedItem.old);
                       const newStr = isNull ? "null" : String(displayVal);
-                      tooltip = `${oldStr} → ${newStr} (${t("cleaner.legend_action_changed")})`;
+                      tooltip = `${cellAddr}: ${oldStr} → ${newStr} (${t("cleaner.legend_action_changed")})`;
                     } else if (status.type === "error") {
                       cellClasses += "bg-red-50 text-red-900 cursor-pointer border-red-200 hover:border-red-300";
-                      tooltip = t(`cleaner.guided.reasons.${status.issue}`, { defaultValue: t("cleaner.guided.pending") });
+                      tooltip = `${cellAddr}: ${t(`cleaner.guided.reasons.${status.issue}`, { defaultValue: t("cleaner.guided.pending") })}`;
                     } else {
                       cellClasses += "text-ink ";
                       if (isFullEditMode) {
-                         cellClasses += "cursor-pointer hover:border-gray-300 hover:bg-gray-50";
-                         tooltip = t("cleaner.guided.btn_edit_value");
+                        cellClasses += "cursor-pointer hover:border-gray-300 hover:bg-gray-50";
+                        tooltip = `${cellAddr}: ${t("cleaner.guided.btn_edit_value")}`;
                       } else {
-                         tooltip = !isNull ? String(displayVal) : null;
+                        tooltip = `${cellAddr}: ${!isNull ? String(displayVal) : "null"}`;
                       }
                     }
 
                     return (
-                      <td 
-                        key={col} 
+                      <td
+                        key={col}
                         data-cell-id={`${rowId}:${col}`}
+                        data-addr={cellAddr}
+                        data-col-letter={letter}
+                        data-row={excelRow}
                         onClick={() => handleCellClick(idx, col, status, isDropped)}
-                        className={cellClasses} 
+                        className={cellClasses}
                         title={tooltip}
                       >
                         {isEditing ? (
@@ -1083,33 +1344,32 @@ function PreviewTable({
 
       {/* Guided Mode Cell Detail Modal/Panel - responsive, 375px+ compliant */}
       {activeErrorPanel && (
-        <div 
+        <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs"
           onClick={() => setActiveErrorPanel(null)}
         >
-          <div 
+          <div
             className="bg-white border border-border rounded-xl shadow-2xl p-5 w-full max-w-[375px] space-y-4 animate-in fade-in zoom-in-95"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
             <div className="flex items-start justify-between gap-2 border-b border-border pb-3">
               <div>
-                <p className="text-xs uppercase tracking-wider font-semibold text-muted">
-                  {t("cleaner.guided.cell_coordinate", { rowId: activeErrorPanel.rowId, col: activeErrorPanel.col })}
+                <p className="text-xs uppercase tracking-wider font-semibold text-ink font-mono">
+                  {`Ô ${cellAddress(colLetters[activeErrorPanel.col] || colLetter(originalColumns.indexOf(activeErrorPanel.col)), (activeErrorPanel.rowId !== undefined && activeErrorPanel.rowId !== null ? activeErrorPanel.rowId : activeErrorPanel.rowIdx) + 2)} (${cellAddressWords(colLetters[activeErrorPanel.col] || colLetter(originalColumns.indexOf(activeErrorPanel.col)), (activeErrorPanel.rowId !== undefined && activeErrorPanel.rowId !== null ? activeErrorPanel.rowId : activeErrorPanel.rowIdx) + 2, currentLang)}) · ${activeErrorPanel.col}`}
                 </p>
                 <div className="flex items-center gap-2 mt-1">
-                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                    cellReviewStates[`${activeErrorPanel.rowId}:${activeErrorPanel.col}`] === "ignored"
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${cellReviewStates[`${activeErrorPanel.rowId}:${activeErrorPanel.col}`] === "ignored"
                       ? "bg-gray-100 text-gray-700"
                       : cellReviewStates[`${activeErrorPanel.rowId}:${activeErrorPanel.col}`] === "fixed"
-                      ? "bg-emerald-100 text-emerald-800"
-                      : "bg-red-100 text-red-800"
-                  }`}>
+                        ? "bg-emerald-100 text-emerald-800"
+                        : "bg-red-100 text-red-800"
+                    }`}>
                     {cellReviewStates[`${activeErrorPanel.rowId}:${activeErrorPanel.col}`] === "ignored"
                       ? t("cleaner.guided.ignored")
                       : cellReviewStates[`${activeErrorPanel.rowId}:${activeErrorPanel.col}`] === "fixed"
-                      ? t("cleaner.guided.fixed")
-                      : t("cleaner.guided.pending")}
+                        ? t("cleaner.guided.fixed")
+                        : t("cleaner.guided.pending")}
                   </span>
                 </div>
               </div>
@@ -1131,12 +1391,12 @@ function PreviewTable({
                 {activeErrorPanel.errorCell.issue_type === "missing"
                   ? t("cleaner.guided.reasons.missing")
                   : activeErrorPanel.errorCell.issue_type === "type_mismatch"
-                  ? t("cleaner.guided.reasons.type_mismatch")
-                  : activeErrorPanel.errorCell.issue_type === "encoding"
-                  ? t("cleaner.guided.reasons.encoding")
-                  : activeErrorPanel.errorCell.issue_type === "semantic_error"
-                  ? t("cleaner.guided.reasons.semantic_error", { type: activeErrorPanel.errorCell.semantic_type || "" })
-                  : t("cleaner.guided.reasons.default")}
+                    ? t("cleaner.guided.reasons.type_mismatch")
+                    : activeErrorPanel.errorCell.issue_type === "encoding"
+                      ? t("cleaner.guided.reasons.encoding")
+                      : activeErrorPanel.errorCell.issue_type === "semantic_error"
+                        ? t("cleaner.guided.reasons.semantic_error", { type: activeErrorPanel.errorCell.semantic_type || "" })
+                        : t("cleaner.guided.reasons.default")}
               </div>
             </div>
 
@@ -1154,7 +1414,7 @@ function PreviewTable({
                   className="w-full border border-forest rounded-lg p-2 text-sm text-ink outline-none focus:ring-1 focus:ring-forest"
                   placeholder={t("cleaner.guided.enter_new_value")}
                 />
-                
+
                 {/* Rule 3: Hint that typing the word null saves text */}
                 <p className="text-[11px] text-muted italic">
                   {t("cleaner.guided.null_typing_hint")}

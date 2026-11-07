@@ -17,6 +17,7 @@ import {
   CHART_CONFIG,
   getSuggestedChartsForType,
 } from "../../constants/dataTypes";
+import { colLetter } from "../../utils/cellAddress";
 
 const DEFAULT_VISIBLE = 10;
 
@@ -38,16 +39,25 @@ export const ColumnTable = ({
   overrides,
   getEffectiveType,
   handleOverride,
+  filterNeedsReview: controlledFilterNeedsReview,
+  setFilterNeedsReview: controlledSetFilterNeedsReview,
 }) => {
   const { t } = useTranslation();
   const [showAll, setShowAll] = useState(false);
-  const [filterNeedsReview, setFilterNeedsReview] = useState(false);
+  const [uncontrolledFilterNeedsReview, setUncontrolledFilterNeedsReview] = useState(false);
   const [expandedMobileRows, setExpandedMobileRows] = useState({});
-  const [showOverrideHelp, setShowOverrideHelp] = useState(false);
+
+  const filterNeedsReview = controlledFilterNeedsReview !== undefined
+    ? controlledFilterNeedsReview
+    : uncontrolledFilterNeedsReview;
+  const setFilterNeedsReview = controlledSetFilterNeedsReview !== undefined
+    ? controlledSetFilterNeedsReview
+    : setUncontrolledFilterNeedsReview;
 
   if (!result) return null;
 
   const cols = result.columns || [];
+  const getColLetter = (col) => col.letter || (result.column_letters && result.column_letters[col.name]) || colLetter(cols.indexOf(col));
   const lang = getCurrentLang();
   const numberLocale = lang === "vi" ? "vi-VN" : "en-US";
 
@@ -74,128 +84,30 @@ export const ColumnTable = ({
 
   return (
     <div className={CARD}>
-      {/* ── 1. Summary Band Above Table ── */}
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-4 pb-3 border-b border-border">
-        <div className="flex items-center gap-2.5 flex-wrap">
-          <span className="text-sm font-semibold text-ink">
-            {result.total_rows.toLocaleString(numberLocale)}{" "}
-            <span className="font-normal text-muted">{t("profiler.summary_rows", "dòng")}</span>
-            {" · "}
-            {result.total_columns.toLocaleString(numberLocale)}{" "}
-            <span className="font-normal text-muted">{t("profiler.summary_cols", "cột")}</span>
-          </span>
-
-          {attentionCount > 0 && (
-            <button
-              type="button"
-              onClick={() => setFilterNeedsReview((prev) => !prev)}
-              title={
-                filterNeedsReview
-                  ? t("profiler.chip_filter_clear", "Bấm để xem tất cả cột")
-                  : t("profiler.chip_filter_apply", "Bấm để lọc các cột cần xem")
-              }
-              aria-pressed={filterNeedsReview}
-              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold transition-all cursor-pointer ${filterNeedsReview
-                ? "bg-[#D97706] text-white ring-2 ring-[#D97706]/40 shadow-sm"
-                : "bg-[#FEF6E6] text-[#854D0E] border border-[#FDE68A] hover:bg-[#FDF0D5]"
-                }`}
-            >
-              <AlertTriangle size={13} className={filterNeedsReview ? "text-white" : "text-[#D97706]"} aria-hidden="true" />
-              <span>
-                {t("profiler.chip_needs_review", {
-                  count: attentionCount,
-                  defaultValue: `${attentionCount} cột cần xem`,
-                })}
-              </span>
-              {filterNeedsReview && <X size={12} className="ml-0.5" aria-hidden="true" />}
-            </button>
-          )}
-
-          {filterNeedsReview && (
-            <span className="text-xs text-muted">
+      {/* ── Active filter banner if filtering attention columns ── */}
+      {filterNeedsReview && (
+        <div className="flex items-center justify-between mb-3 px-3 py-1.5 rounded-lg bg-[#FEF6E6] border border-[#FDE68A] text-xs text-[#854D0E]">
+          <div className="flex items-center gap-1.5 font-medium">
+            <AlertTriangle size={13} className="text-[#D97706]" />
+            <span>
+              {t("profiler.chip_needs_review", {
+                count: filteredCols.length,
+                defaultValue: `${filteredCols.length} cột cần xem`,
+              })}
+              {" · "}
               {t("profiler.filtering_hint", "Đang lọc hiển thị")}
             </span>
-          )}
-        </div>
-
-        {/* Showing count & Info Help Popover Button */}
-        <div className="flex items-center gap-2 text-xs text-muted">
-          <span>
-            <Trans
-              i18nKey="profiler.col_showing"
-              values={{
-                visible: visible.length.toLocaleString(numberLocale),
-                total: filteredCols.length.toLocaleString(numberLocale),
-              }}
-              components={{
-                1: <strong className="text-ink" />,
-                3: <strong className="text-ink" />,
-              }}
-            />
-          </span>
-
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => setShowOverrideHelp((prev) => !prev)}
-              aria-label={t("profiler.popover_info_title", "Cách hệ thống xử lý ghi đè")}
-              className="p-1 rounded-full text-muted hover:text-ink hover:bg-neutral-100 transition-colors cursor-pointer"
-              title={t("profiler.popover_info_title", "Cách hệ thống xử lý ghi đè")}
-            >
-              <HelpCircle size={15} />
-            </button>
-
-            {showOverrideHelp && (
-              <div
-                role="dialog"
-                className="absolute right-0 top-7 z-30 w-80 p-3.5 bg-white border border-border rounded-xl shadow-lg text-xs text-ink space-y-2 animate-in fade-in"
-              >
-                <div className="flex items-center justify-between font-semibold border-b border-border pb-1.5">
-                  <span className="flex items-center gap-1.5 text-forest">
-                    <Info size={14} />
-                    {t("profiler.popover_info_title", "Tác động khi đổi loại dữ liệu")}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setShowOverrideHelp(false)}
-                    className="p-0.5 text-muted hover:text-ink rounded cursor-pointer"
-                  >
-                    <X size={14} />
-                  </button>
-                </div>
-                <p className="text-muted leading-relaxed">
-                  {t(
-                    "profiler.popover_info_desc",
-                    "Khi đổi kiểu cột, bộ phận Làm sạch (Cleaner) sẽ áp dụng quy tắc tương ứng:"
-                  )}
-                </p>
-                <ul className="space-y-1.5 text-[13px] leading-snug">
-                  <li>
-                    <strong className="text-ink">{t("profiler.type_numeric", "Số liệu")}:</strong>{" "}
-                    {t("profiler.popover_rule_numeric", "Điền ô trống bằng số trung vị (median) & chuyển đổi sang số.")}
-                  </li>
-                  <li>
-                    <strong className="text-ink">{t("profiler.type_categorical", "Danh mục")}:</strong>{" "}
-                    {t("profiler.popover_rule_categorical", "Điền ô trống bằng nhãn 'Không xác định'.")}
-                  </li>
-                  <li>
-                    <strong className="text-ink">{t("profiler.type_multiple_choice", "Nhiều lựa chọn")}:</strong>{" "}
-                    {t("profiler.popover_rule_multiple_choice", "Điền ô trống bằng nhãn 'Không xác định'.")}
-                  </li>
-                  <li>
-                    <strong className="text-ink">{t("profiler.type_datetime", "Thời gian")}:</strong>{" "}
-                    {t("profiler.popover_rule_datetime", "Giữ nguyên ô trống & chuyển đổi sang datetime.")}
-                  </li>
-                  <li>
-                    <strong className="text-ink">{t("profiler.type_text", "Văn bản")}:</strong>{" "}
-                    {t("profiler.popover_rule_text", "Bỏ qua các bước kiểm tra cấu trúc & chuẩn hóa số.")}
-                  </li>
-                </ul>
-              </div>
-            )}
           </div>
+          <button
+            type="button"
+            onClick={() => setFilterNeedsReview(false)}
+            className="text-xs font-semibold text-[#854D0E] hover:underline cursor-pointer"
+          >
+            {t("profiler.chip_filter_clear", "Xem tất cả cột")}
+          </button>
         </div>
-      </div>
+      )}
+
 
       {/* ── 2. Desktop Table with vertical column borders ── */}
       <div className="hidden md:block border border-border rounded-xl overflow-hidden bg-white shadow-sm">
@@ -250,6 +162,15 @@ export const ColumnTable = ({
                     {/* 1. Tên cột: text-left, border-r */}
                     <td className="px-3.5 py-2.5 text-left text-sm text-ink align-middle border-r border-border/80">
                       <div className="flex items-start gap-1.5 min-w-0">
+                        <span
+                          className="inline-flex items-center justify-center px-1.5 py-0.5 text-[10px] font-mono font-semibold text-muted bg-[#F4F4F2] border border-border/80 rounded shrink-0 select-none mt-0.5"
+                          title={t("cleaner.col_letter_tooltip", {
+                            letter: getColLetter(col),
+                            defaultValue: `Cột ${getColLetter(col)} trong file gốc`
+                          })}
+                        >
+                          [{getColLetter(col)}]
+                        </span>
                         <div className="font-medium text-ink min-w-0 flex-1 break-words leading-snug">
                           <ExpandableText text={col.name} />
                         </div>
@@ -383,8 +304,17 @@ export const ColumnTable = ({
               >
                 {/* Card Header: Name + TypeDropdownButton */}
                 <div className="flex items-start justify-between gap-2">
-                  <div className="font-semibold text-sm text-ink break-words flex-1 leading-snug">
-                    {col.name}
+                  <div className="font-semibold text-sm text-ink break-words flex-1 leading-snug flex items-center gap-1.5">
+                    <span
+                      className="inline-flex items-center justify-center px-1.5 py-0.5 text-[10px] font-mono font-semibold text-muted bg-[#F4F4F2] border border-border/80 rounded shrink-0 select-none"
+                      title={t("cleaner.col_letter_tooltip", {
+                        letter: getColLetter(col),
+                        defaultValue: `Cột ${getColLetter(col)} trong file gốc`
+                      })}
+                    >
+                      [{getColLetter(col)}]
+                    </span>
+                    <span>{col.name}</span>
                   </div>
                   <TypeDropdownButton
                     colName={col.name}

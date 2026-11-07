@@ -23,6 +23,7 @@ import {
 import { PAGE, BTN } from "../constants/ui";
 import api from "../services/axiosClient";
 import { getAIUsage, getSessionStatus } from "../services/profilerService";
+import { useAIAction } from "../hooks/useAIAction";
 import FileExpiredBanner from "../components/FileExpiredBanner";
 import UpgradeModal from "../components/UpgradeModal";
 import AIUsageBadge from "../components/AIUsageBadge";
@@ -87,7 +88,6 @@ export default function Report({ pipelineMode, onComplete }) {
   // 1. Loading state initialization
   // Start loading only if there's a fileHash to fetch; otherwise false
   const [loadingState, setLoadingState] = useState(false);
-  const [generatingIntro, setGeneratingIntro] = useState(false);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [isExportingDocx, setIsExportingDocx] = useState(false);
 
@@ -271,19 +271,9 @@ export default function Report({ pipelineMode, onComplete }) {
     updateFileSession({ methodologyText: newVal });
   };
 
-  // Generate / Regenerate Intro via AI
-  const handleGenerateIntroAI = async () => {
-    if (generatingIntro) return;
-
-    // If current text source is "user" (manually edited), confirm before overwriting
-    if (cachedIntroMeta?.source === "user") {
-      const confirmOverwrite = window.confirm(t("report.overview_confirm_overwrite_user"));
-      if (!confirmOverwrite) return;
-    }
-
-    setGeneratingIntro(true);
-
-    try {
+  // AI Action for generating / regenerating Intro
+  const aiAction = useAIAction({
+    actionFn: async ({ signal } = {}) => {
       const schemaFallback = fileSession.statisticalSummary?.columns
         ? Object.entries(fileSession.statisticalSummary.columns).map(([name, info]) => ({ name, detected_type: info.dtype }))
         : [];
@@ -300,7 +290,7 @@ export default function Report({ pipelineMode, onComplete }) {
         lang: lang
       };
 
-      const res = await api.post("/report/intro", payload);
+      const res = await api.post("/report/intro", payload, { signal });
       const data = res.data || {};
 
       if (data.is_fallback) {
@@ -317,7 +307,27 @@ export default function Report({ pipelineMode, onComplete }) {
           setAiUsage(data.usage);
         }
       }
-    } catch (err) {
+      return data;
+    },
+    usage: aiUsage,
+    onUsageUpdated: setAiUsage,
+    onUpgradeClick: () => {
+      if (!user?.is_pro && aiUsage?.is_pro !== true) {
+        setShowUpgradeModal(true);
+      }
+      showToast(t("errors.ERR_AI_QUOTA_EXCEEDED"), "error");
+    },
+    getPreviousContent: () => ({
+      introText,
+      cachedIntroMeta,
+    }),
+    onRestore: (prev) => {
+      if (prev) {
+        setIntroText(prev.introText);
+        setCachedIntroMeta(prev.cachedIntroMeta);
+      }
+    },
+    onError: (err) => {
       const errCode = err?.response?.data?.detail?.code || err?.response?.data?.code;
       const status = err?.response?.status;
 
@@ -331,9 +341,17 @@ export default function Report({ pipelineMode, onComplete }) {
       } else {
         showToast(t("report.toast_ai_unavailable"), "error");
       }
-    } finally {
-      setGeneratingIntro(false);
+    },
+  });
+
+  // Generate / Regenerate Intro via AI
+  const handleGenerateIntroAI = () => {
+    // If current text source is "user" (manually edited), confirm before overwriting
+    if (cachedIntroMeta?.source === "user") {
+      const confirmOverwrite = window.confirm(t("report.overview_confirm_overwrite_user"));
+      if (!confirmOverwrite) return;
     }
+    aiAction.execute();
   };
 
   // Chart order management
@@ -651,25 +669,23 @@ export default function Report({ pipelineMode, onComplete }) {
 
               {/* Action buttons (Not printed) */}
               <div className="print:hidden flex items-center gap-2">
-                {cachedIntroMeta ? (
-                  isChartsHashDifferent && (
-                    <button
-                      onClick={handleGenerateIntroAI}
-                      disabled={generatingIntro}
-                      className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-forest text-white hover:bg-forest/90 transition-colors flex items-center gap-1.5 shadow-sm"
-                    >
-                      <RefreshCw className={`w-3.5 h-3.5 ${generatingIntro ? "animate-spin" : ""}`} />
-                      {generatingIntro ? t("report.overview_generating") : t("report.overview_btn_regenerate")}
-                    </button>
-                  )
+                {aiAction.loading ? (
+                  aiAction.AIRunningBar
+                ) : cachedIntroMeta ? (
+                  <button
+                    onClick={handleGenerateIntroAI}
+                    className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-forest text-white hover:bg-forest/90 transition-colors flex items-center gap-1.5 shadow-sm"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    {t("report.overview_btn_regenerate")}
+                  </button>
                 ) : (
                   <button
                     onClick={handleGenerateIntroAI}
-                    disabled={generatingIntro}
                     className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-forest text-white hover:bg-forest/90 transition-colors flex items-center gap-1.5 shadow-sm"
                   >
-                    <Sparkles className={`w-3.5 h-3.5 ${generatingIntro ? "animate-spin" : ""}`} />
-                    {generatingIntro ? t("report.overview_generating") : t("report.overview_btn_generate")}
+                    <Sparkles className="w-3.5 h-3.5" />
+                    {t("report.overview_btn_generate")}
                   </button>
                 )}
               </div>
@@ -703,10 +719,10 @@ export default function Report({ pipelineMode, onComplete }) {
             </div>
             <textarea
               value={introText}
-              readOnly={generatingIntro || loadingState}
+              readOnly={aiAction.loading || loadingState}
               onChange={(e) => handleIntroChange(e.target.value)}
               className="w-full min-h-[140px] p-4 bg-[#F9F9F8] border border-[#EAEAEA] hover:border-[#D1D5DB] focus:border-forest focus:bg-white rounded-lg text-sm text-ink leading-relaxed outline-none resize-y transition-colors print:border-none print:bg-transparent print:resize-none print:p-0"
-              placeholder={loadingState ? t("report.overview_generating") : t("report.overview_placeholder")}
+              placeholder={loadingState || aiAction.loading ? t("report.overview_generating") : t("report.overview_placeholder")}
             />
           </div>
 
@@ -889,6 +905,7 @@ export default function Report({ pipelineMode, onComplete }) {
       </div>
 
       {/* Upgrade Pro Modal */}
+      {aiAction.AIConfirmModal}
       <UpgradeModal
         isOpen={showUpgradeModal}
         onClose={() => setShowUpgradeModal(false)}

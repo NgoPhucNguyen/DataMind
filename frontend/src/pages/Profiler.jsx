@@ -24,6 +24,7 @@ import {
   MoreHorizontal,
   Download,
   FileSpreadsheet,
+  X,
 } from "lucide-react";
 import PageHeader from "../components/PageHeader";
 import PageHelpDocs from "../components/PageHelpDocs";
@@ -33,14 +34,18 @@ import { getDomainI18nKey } from "../constants/dataTypes";
 // Profiler sub-components
 import { UploadZone } from "../components/Profiler/UploadZone";
 import { LoadingOverlay } from "../components/Profiler/LoadingOverlay";
-import { ColumnTable } from "../components/Profiler/ColumnTable";
+import { ColumnTable, isAttentionColumn } from "../components/Profiler/ColumnTable";
 import MergedDescriptionBox from "../components/Profiler/MergedDescriptionBox";
 import UpgradeModal from "../components/UpgradeModal";
 
-// ── Calm Footer Strip ── contains Cached status & Countdown ──
+// ── Compact Countdown Chip with Info Popover ──
 const SESSION_TTL_MS = 18000 * 1000;
 
-function ProfilerFooterLine({ uploadedAt, filename, isCached, fileExpiresAt }) {
+function ProfilerCountdownChip({ uploadedAt, fileExpiresAt }) {
+  const { t } = useTranslation();
+  const [showPopover, setShowPopover] = useState(false);
+  const popoverRef = useRef(null);
+
   const [secondsLeft, setSecondsLeft] = useState(() => {
     if (fileExpiresAt) {
       const expMs = new Date(fileExpiresAt).getTime();
@@ -51,7 +56,6 @@ function ProfilerFooterLine({ uploadedAt, filename, isCached, fileExpiresAt }) {
     if (!uploadedAt) return SESSION_TTL_MS / 1000;
     return Math.max(0, Math.floor((SESSION_TTL_MS - (Date.now() - uploadedAt)) / 1000));
   });
-  const { t } = useTranslation();
 
   useEffect(() => {
     const tick = () => {
@@ -70,40 +74,64 @@ function ProfilerFooterLine({ uploadedAt, filename, isCached, fileExpiresAt }) {
     return () => clearInterval(id);
   }, [uploadedAt, fileExpiresAt]);
 
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (popoverRef.current && !popoverRef.current.contains(e.target)) {
+        setShowPopover(false);
+      }
+    };
+    if (showPopover) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showPopover]);
+
   const h = Math.floor(secondsLeft / 3600);
   const m = Math.floor((secondsLeft % 3600) / 60);
   const s = secondsLeft % 60;
-  const formatted = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  const formatted = h > 0 ? `${h}:${String(m).padStart(2, "0")}` : `${m}:${String(s).padStart(2, "0")}`;
   const isRed = secondsLeft > 0 && secondsLeft < 300;
   const isAmber = secondsLeft >= 300 && secondsLeft < 1800;
 
   return (
-    <div className={`flex flex-wrap items-center justify-between gap-3 px-3.5 py-2.5 rounded-xl border transition-colors text-xs ${
-      isRed ? "bg-[#FDEBEC] border-[#f5c6cb] text-[#9F2F2D]" : isAmber ? "bg-amber-50/70 border-amber-200 text-amber-800" : "bg-[#FBFBFA] border-border/70 text-muted"
-    }`}>
-      {/* Expiry countdown */}
-      <div className="flex items-center gap-2">
+    <div className="relative inline-block" ref={popoverRef}>
+      <button
+        type="button"
+        onClick={() => setShowPopover((prev) => !prev)}
+        title={t("profiler.why_deletion_title", "Vì sao file bị xóa?")}
+        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-mono font-medium border transition-colors cursor-pointer select-none ${
+          isRed
+            ? "bg-[#FDEBEC] border-[#f5c6cb] text-[#9F2F2D]"
+            : isAmber
+              ? "bg-amber-50 border-amber-200 text-amber-800"
+              : "bg-neutral-50 hover:bg-neutral-100 border-border text-muted hover:text-ink"
+        }`}
+      >
         <Clock className={`w-3.5 h-3.5 shrink-0 ${isRed ? "text-[#9F2F2D]" : isAmber ? "text-amber-600" : "text-muted"}`} />
-        <span>
-          {t("profiler.expiry_file", "File")}{" "}
-          <strong className={isRed ? "text-[#9F2F2D]" : isAmber ? "text-amber-900" : "text-ink"}>{filename}</strong>{" "}
-          {isRed ? (
-            <span className="font-semibold text-[#9F2F2D]">
-              {t("profiler.expiry_urgent", { time: formatted })}
-            </span>
-          ) : (
-            <span>{t("profiler.expiry_normal", { time: formatted })}</span>
-          )}
-        </span>
-      </div>
+        <span>{formatted}</span>
+      </button>
 
-      {/* Cached badge on the footer line */}
-      {isCached && (
-        <div className="flex items-center gap-1.5">
-          <span className="px-2 py-0.5 rounded-full border border-[#C8E0CB] bg-[#EAF2EB] text-[#1B4324] text-[11px] font-medium flex items-center gap-1">
-            <Zap className="w-3 h-3 text-forest" />
-            <span>{t("profiler.badge_cached", "Đã lưu đệm")}</span>
-          </span>
+      {showPopover && (
+        <div className="absolute bottom-full left-0 mb-2 w-72 sm:w-80 p-3.5 bg-white border border-border rounded-xl shadow-xl text-xs text-ink space-y-2 z-50 animate-in fade-in zoom-in-95">
+          <div className="flex items-center justify-between font-bold border-b border-border/80 pb-1.5 text-forest">
+            <span>{t("profiler.why_deletion_title", "Vì sao file bị xóa?")}</span>
+            <button
+              type="button"
+              onClick={() => setShowPopover(false)}
+              className="p-0.5 text-muted hover:text-ink rounded cursor-pointer"
+            >
+              <X size={14} />
+            </button>
+          </div>
+          <p className="text-muted leading-relaxed">
+            {t("profiler.why_deletion_p1")}
+          </p>
+          <p className="text-muted leading-relaxed">
+            {t("profiler.why_deletion_p2")}
+          </p>
+          <p className="text-muted leading-relaxed">
+            {t("profiler.why_deletion_p3")}
+          </p>
         </div>
       )}
     </div>
@@ -160,11 +188,17 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
 
   const [description, setDescription] = useState(fileSession?.userContext?.description || "");
   const [descriptionSource, setDescriptionSource] = useState(fileSession?.userContext?.description_source || "user");
+  const [analyzedDescription, setAnalyzedDescription] = useState(
+    () => fileSession?.analyzedDescription || fileSession?.userContext?.analyzedDescription || null
+  );
   const [contextPurpose, setContextPurpose] = useState(fileSession?.userContext?.purpose || "");
   const [savedAt, setSavedAt] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
   const [aiUsage, setAiUsage] = useState(null);
   const [isFromCache, setIsFromCache] = useState(false);
+  const [filterNeedsReview, setFilterNeedsReview] = useState(false);
+  const cols = result?.columns || [];
+  const attentionCount = cols.filter(isAttentionColumn).length;
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const debounceTimerRef = useRef(null);
 
@@ -198,7 +232,10 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
           }
           if (res.data.semantic_context?.domain && res.data.semantic_context.domain !== "Chưa phân tích") {
             setAiAnalyzed(true);
+            const loadedAnalyzed = fileSession?.analyzedDescription || fileSession?.userContext?.analyzedDescription || res.data.description || "";
+            setAnalyzedDescription((prev) => prev || loadedAnalyzed);
             updateFileSession({
+              analyzedDescription: fileSession?.analyzedDescription || loadedAnalyzed,
               profileData: {
                 ...result,
                 semantic_context: res.data.semantic_context,
@@ -306,6 +343,8 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
     setLoading(true);
     setLastFile(file);
     setAiAnalyzed(false);
+    setAnalyzedDescription(null);
+    updateFileSession({ analyzedDescription: null });
 
     try {
       const res = await profileFile(file, forceRefresh);
@@ -355,15 +394,17 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
     setOverrides({});
     setError(null);
     setAiAnalyzed(false);
+    setAnalyzedDescription(null);
     setDescription("");
     setDescriptionSource("user");
     setSavedAt(null);
     setIsFromCache(false);
     setSavedLang(null);
+    updateFileSession({ analyzedDescription: null });
   };
 
-  const handleAnalyzeAI = async (replace = true) => {
-    if (!result?.file_hash || aiLoading) return;
+  const handleAnalyzeAI = async (replace = true, signal = null) => {
+    if (!result?.file_hash) return;
     setAiLoading(true);
     setIsFromCache(false);
     try {
@@ -372,7 +413,8 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
         result.file_hash,
         currentLanguage,
         replace ? null : description,
-        false
+        false,
+        { signal }
       );
       const data = res.data;
       setResult({
@@ -381,6 +423,11 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
       });
       setAiAnalyzed(true);
       setSavedLang(currentLanguage);
+
+      const newAnalyzedDesc = replace
+        ? (data.draft_summary || data.description || "")
+        : (description || "");
+      setAnalyzedDescription(newAnalyzedDesc);
 
       if (replace) {
         setDescription(data.draft_summary || data.description || "");
@@ -394,30 +441,23 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
       }
       setIsFromCache(Boolean(data.from_cache));
       updateFileSession({
+        analyzedDescription: newAnalyzedDesc,
         userContext: {
           description: replace ? (data.draft_summary || data.description || "") : description,
           purpose: contextPurpose,
           description_source: replace ? "ai_draft" : descriptionSource,
+          analyzedDescription: newAnalyzedDesc,
         },
       });
       showToast(t("profiler.saved_status", { time: formatSavedTime(data.saved_at) }), "success");
-    } catch (err) {
-      const errCode = err?.response?.data?.detail?.code || err?.response?.data?.code;
-      if (errCode === "ERR_AI_QUOTA_EXCEEDED" || err?.response?.status === 429 || err?.response?.status === 402) {
-        if (!user?.is_pro && aiUsage?.is_pro !== true) {
-          setShowUpgradeModal(true);
-        }
-        showToast(translateError("ERR_AI_QUOTA_EXCEEDED"), "error");
-      } else {
-        showToast(translateError(errCode), "error");
-      }
+      return data;
     } finally {
       setAiLoading(false);
     }
   };
 
-  const handleReanalyzeWithCorrection = async () => {
-    if (!result?.file_hash || aiLoading) return;
+  const handleReanalyzeWithCorrection = async (signal = null) => {
+    if (!result?.file_hash) return;
     setAiLoading(true);
     setIsFromCache(false);
     try {
@@ -426,7 +466,8 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
         result.file_hash,
         currentLanguage,
         description,
-        true
+        true,
+        { signal }
       );
       const data = res.data;
       setResult({
@@ -436,6 +477,9 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
       setAiAnalyzed(true);
       setSavedLang(currentLanguage);
       setDescriptionSource("ai_edited");
+      const newAnalyzedDesc = description || "";
+      setAnalyzedDescription(newAnalyzedDesc);
+
       if (data.saved_at) {
         setSavedAt(data.saved_at);
       }
@@ -444,23 +488,16 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
       }
       setIsFromCache(Boolean(data.from_cache));
       updateFileSession({
+        analyzedDescription: newAnalyzedDesc,
         userContext: {
           description,
           purpose: contextPurpose,
           description_source: "ai_edited",
+          analyzedDescription: newAnalyzedDesc,
         },
       });
       showToast(t("profiler.saved_status", { time: formatSavedTime(data.saved_at) }), "success");
-    } catch (err) {
-      const errCode = err?.response?.data?.detail?.code || err?.response?.data?.code;
-      if (errCode === "ERR_AI_QUOTA_EXCEEDED" || err?.response?.status === 429 || err?.response?.status === 402) {
-        if (!user?.is_pro && aiUsage?.is_pro !== true) {
-          setShowUpgradeModal(true);
-        }
-        showToast(translateError("ERR_AI_QUOTA_EXCEEDED"), "error");
-      } else {
-        showToast(translateError(errCode), "error");
-      }
+      return data;
     } finally {
       setAiLoading(false);
     }
@@ -519,7 +556,7 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
 
   return (
     <div className="min-h-screen bg-[#FBFBFA]">
-      <div className={PAGE.wrapper}>
+      <div className={`${PAGE.wrapper} ${result ? "pb-28" : ""}`}>
         {/* ── Header ─────────────────────────────────────────────── */}
         <PageHeader
           title={t("profiler.title")}
@@ -543,70 +580,6 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
                 >
                   <ArrowLeft className="w-4 h-4" /> {t("profiler.btn_home")}
                 </button>
-              )}
-
-              {result && (
-                <>
-                  {/* Secondary button: Tải file khác */}
-                  <button
-                    type="button"
-                    id="profiler-reanalyze-btn"
-                    onClick={handleReset}
-                    className={`${BTN.secondary} flex items-center gap-1.5 text-xs font-medium text-ink`}
-                  >
-                    <FileSpreadsheet size={13} className="text-muted" />
-                    <span>{t("profiler.btn_upload_new", "Tải file khác")}</span>
-                  </button>
-
-                  {/* "..." menu: Re-read file (free) + Download report */}
-                  <div className="relative" ref={moreMenuRef}>
-                    <button
-                      type="button"
-                      onClick={() => setShowMoreMenu((prev) => !prev)}
-                      aria-label={t("profiler.action_menu_more", "Tùy chọn khác")}
-                      className={`${BTN.secondary} p-1.5 text-muted hover:text-ink`}
-                      title={t("profiler.action_menu_more", "Tùy chọn khác")}
-                    >
-                      <MoreHorizontal size={15} />
-                    </button>
-
-                    {showMoreMenu && (
-                      <div className="absolute right-0 top-8 z-30 w-52 py-1 bg-white border border-border rounded-xl shadow-lg text-xs space-y-0.5 animate-in fade-in">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowMoreMenu(false);
-                            handleFile(lastFile, true);
-                          }}
-                          disabled={!lastFile}
-                          className="w-full text-left px-3 py-2 text-ink hover:bg-neutral-50 flex items-center gap-2 disabled:opacity-50"
-                        >
-                          <RotateCw size={13} className="text-forest" />
-                          <span>{t("profiler.btn_reanalyze_file_free", "Đọc lại file (miễn phí)")}</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleDownloadReport}
-                          className="w-full text-left px-3 py-2 text-ink hover:bg-neutral-50 flex items-center gap-2"
-                        >
-                          <Download size={13} className="text-muted" />
-                          <span>{t("profiler.col_download_report", "Tải báo cáo JSON")}</span>
-                        </button>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Primary Button: Tiếp tục: Làm sạch → */}
-                  <button
-                    type="button"
-                    id="profiler-next-btn"
-                    onClick={handleContinueClean}
-                    className={`${BTN.primary} flex items-center gap-1.5 text-xs font-semibold`}
-                  >
-                    <span>{t("profiler.btn_continue_clean", "Tiếp tục: Làm sạch")}</span>
-                    <ArrowRight size={14} />
-                  </button>
-                </>
               )}
             </div>
           }
@@ -650,15 +623,7 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
         {/* ── Results ─────────────────────────────────────────────── */}
         {result && (
           <div className="space-y-4">
-            {/* 1. Column Table */}
-            <ColumnTable
-              result={result}
-              overrides={overrides}
-              getEffectiveType={getEffectiveType}
-              handleOverride={handleOverride}
-            />
-
-            {/* 2. Merged Description & Context panel */}
+            {/* 1. Merged Description & Context panel (AI context box FIRST) */}
             <MergedDescriptionBox
               fileHash={result.file_hash}
               description={description}
@@ -668,6 +633,7 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
               savedAt={savedAt}
               isSaving={isSaving}
               aiAnalyzed={aiAnalyzed}
+              analyzedDescription={analyzedDescription}
               aiLoading={aiLoading}
               semanticContext={result.semantic_context}
               handleAnalyzeAI={handleAnalyzeAI}
@@ -675,21 +641,155 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
               contextPurpose={contextPurpose}
               setContextPurpose={setContextPurpose}
               usage={aiUsage}
+              setAiUsage={setAiUsage}
               isFromCache={isFromCache}
               savedLang={savedLang}
               onUpgradeClick={() => setShowUpgradeModal(true)}
             />
 
-            {/* 3. Calm Footer Line: Countdown + Cached badge */}
-            <ProfilerFooterLine
-              uploadedAt={uploadedAt}
-              filename={result.filename}
-              isCached={Boolean(result.cached)}
-              fileExpiresAt={fileExpiresAt || result.file_expires_at}
+            {/* 2. Column Table (below AI context box) */}
+            <ColumnTable
+              result={result}
+              overrides={overrides}
+              getEffectiveType={getEffectiveType}
+              handleOverride={handleOverride}
+              filterNeedsReview={filterNeedsReview}
+              setFilterNeedsReview={setFilterNeedsReview}
             />
           </div>
         )}
       </div>
+
+      {/* ── Sticky Bottom Bar (Profiler, same bar style as Cleaner/Visualize) ── */}
+      {result && (
+        <div className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-[#E5E5E3] shadow-[0_-4px_20px_rgba(0,0,0,0.06)]">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2.5 flex flex-col sm:flex-row items-center justify-between gap-2.5">
+            {/* Left: Summary + Attention Chip + Countdown + Cached */}
+            <div className="flex items-center gap-2.5 flex-wrap justify-between sm:justify-start w-full sm:w-auto">
+              {/* Row & Column count */}
+              <span className="text-xs font-semibold text-ink">
+                {result.total_rows.toLocaleString(numberLocale)}{" "}
+                <span className="font-normal text-muted">{t("profiler.summary_rows", "dòng")}</span>
+                {" · "}
+                {result.total_columns.toLocaleString(numberLocale)}{" "}
+                <span className="font-normal text-muted">{t("profiler.summary_cols", "cột")}</span>
+              </span>
+
+              {/* Attention Chip */}
+              {attentionCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setFilterNeedsReview((prev) => !prev)}
+                  title={
+                    filterNeedsReview
+                      ? t("profiler.chip_filter_clear", "Bấm để xem tất cả cột")
+                      : t("profiler.chip_filter_apply", "Bấm để lọc các cột cần xem")
+                  }
+                  aria-pressed={filterNeedsReview}
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold transition-all cursor-pointer ${
+                    filterNeedsReview
+                      ? "bg-[#D97706] text-white ring-2 ring-[#D97706]/40 shadow-xs"
+                      : "bg-[#FEF6E6] text-[#854D0E] border border-[#FDE68A] hover:bg-[#FDF0D5]"
+                  }`}
+                >
+                  <AlertTriangle
+                    size={13}
+                    className={filterNeedsReview ? "text-white" : "text-[#D97706]"}
+                    aria-hidden="true"
+                  />
+                  <span>
+                    {t("profiler.chip_needs_review", {
+                      count: attentionCount,
+                      defaultValue: `${attentionCount} cột cần xem`,
+                    })}
+                  </span>
+                  {filterNeedsReview && <X size={12} className="ml-0.5" aria-hidden="true" />}
+                </button>
+              )}
+
+              {/* Compact Countdown Chip with popover */}
+              <ProfilerCountdownChip
+                uploadedAt={uploadedAt}
+                fileExpiresAt={fileExpiresAt || result.file_expires_at}
+              />
+
+              {/* Cached Badge */}
+              {(Boolean(result.cached) || isFromCache) && (
+                <span className="px-2 py-0.5 rounded-full border border-[#C8E0CB] bg-[#EAF2EB] text-[#1B4324] text-[11px] font-medium flex items-center gap-1 select-none">
+                  <Zap className="w-3 h-3 text-forest" />
+                  <span>{t("profiler.badge_cached", "Đã lưu đệm")}</span>
+                </span>
+              )}
+            </div>
+
+            {/* Right: Tải file khác + ... menu + Primary button */}
+            <div className="flex items-center gap-2 justify-end w-full sm:w-auto">
+              {/* Secondary button: Tải file khác */}
+              <button
+                type="button"
+                id="profiler-reanalyze-btn"
+                onClick={handleReset}
+                className={`${BTN.secondary} flex items-center gap-1.5 text-xs font-medium text-ink py-2 px-3 shadow-2xs`}
+              >
+                <FileSpreadsheet size={13} className="text-muted" />
+                <span>{t("profiler.btn_upload_new", "Tải file khác")}</span>
+              </button>
+
+              {/* "..." menu: Re-read file (free) + Download report */}
+              <div className="relative" ref={moreMenuRef}>
+                <button
+                  type="button"
+                  onClick={() => setShowMoreMenu((prev) => !prev)}
+                  aria-label={t("profiler.action_menu_more", "Tùy chọn khác")}
+                  className={`${BTN.secondary} p-2 text-muted hover:text-ink shadow-2xs`}
+                  title={t("profiler.action_menu_more", "Tùy chọn khác")}
+                >
+                  <MoreHorizontal size={15} />
+                </button>
+
+                {showMoreMenu && (
+                  <div className="absolute right-0 bottom-full mb-2 z-50 w-52 py-1 bg-white border border-border rounded-xl shadow-lg text-xs space-y-0.5 animate-in fade-in">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowMoreMenu(false);
+                        handleFile(lastFile, true);
+                      }}
+                      disabled={!lastFile}
+                      className="w-full text-left px-3 py-2 text-ink hover:bg-neutral-50 flex items-center gap-2 disabled:opacity-50"
+                    >
+                      <RotateCw size={13} className="text-forest" />
+                      <span>{t("profiler.btn_reanalyze_file_free", "Đọc lại file (miễn phí)")}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowMoreMenu(false);
+                        handleDownloadReport();
+                      }}
+                      className="w-full text-left px-3 py-2 text-ink hover:bg-neutral-50 flex items-center gap-2"
+                    >
+                      <Download size={13} className="text-muted" />
+                      <span>{t("profiler.col_download_report", "Tải báo cáo JSON")}</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Primary Button: Tiếp tục: Làm sạch → (full width on mobile) */}
+              <button
+                type="button"
+                id="profiler-next-btn"
+                onClick={handleContinueClean}
+                className={`${BTN.primary} flex-1 sm:flex-initial flex items-center justify-center gap-1.5 text-xs font-semibold py-2 px-3.5 shadow-2xs`}
+              >
+                <span>{t("profiler.btn_continue_clean", "Tiếp tục: Làm sạch")}</span>
+                <ArrowRight size={14} />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <UpgradeModal
         isOpen={showUpgradeModal}

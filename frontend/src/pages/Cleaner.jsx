@@ -14,17 +14,21 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation, Trans } from "react-i18next";
 import { useFileSession } from "../contexts/FileSessionContext";
-import { detectIssues, autoClean, confirmClean } from "../services/cleanerService";
+import { detectIssues, autoClean, confirmClean, locateRow } from "../services/cleanerService";
 import { profileFile, getSessionStatus } from "../services/profilerService";
 import FileExpiredBanner from "../components/FileExpiredBanner";
 import { useToast } from "../contexts/ToastContext";
 import { translateError, getCurrentLang } from "../i18n";
-import { ArrowRight, ArrowLeft, Info, CheckCircle, AlertTriangle, Upload, RefreshCw, Eye, MousePointerClick, ShieldCheck, Save, Clock, FolderUp, Download, Lock, Zap, PenTool, Compass, Wand2, ChevronLeft, ChevronRight, Check, HelpCircle } from "lucide-react";
+import { ArrowRight, ArrowLeft, Info, CheckCircle, AlertTriangle, Upload, RefreshCw, Eye, MousePointerClick, ShieldCheck, Save, Clock, FolderUp, Download, Lock, Zap, PenTool, Compass, Wand2, ChevronLeft, ChevronRight, Check, HelpCircle, X } from "lucide-react";
 import PageHeader from "../components/PageHeader";
 import PageHelpDocs from "../components/PageHelpDocs";
 import ManualCleanWorkspace from "../components/cleaner/ManualCleanWorkspace";
 import { TEXT, PAGE, BTN, CARD, BADGE } from "../constants/ui";
-import { getColumnWidth, getOrderedErrorCells, getNextError, getPrevError, scrollToCell } from "../components/cleaner/tableUtils";
+import { getColumnWidth, getOrderedErrorCells, getNextError, getPrevError, scrollToCell, highlightExcelCell } from "../components/cleaner/tableUtils";
+import { colLetter, cellAddress, cellAddressWords } from "../utils/cellAddress";
+import { GoToCellInput } from "../components/cleaner/GoToCellInput";
+import { WindowBar } from "../components/cleaner/WindowBar";
+import ErrorListPanel, { ErrorChipsRow } from "../components/cleaner/ErrorListPanel";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -63,7 +67,15 @@ function Card({ children, className = "" }) {
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
-function IssuesSummary({ issues, previewRows = [], onJumpToCol }) {
+function IssuesSummary({
+  issues,
+  previewRows = [],
+  onJumpToCol,
+  columnLetters = {},
+  isErrorPanelOpen = false,
+  onToggleErrorPanel,
+  onSelectErrorGroup,
+}) {
   const { t } = useTranslation();
   const missingCount = issues.missing_values?.length ?? 0;
   const wrongTypeCount = issues.wrong_types?.length ?? 0;
@@ -77,6 +89,18 @@ function IssuesSummary({ issues, previewRows = [], onJumpToCol }) {
   // map: colName -> { missing: n, wrongType: n, encoding: n, semantic: n }
   const colIssuesMap = useMemo(() => {
     const map = new Map();
+    if (issues.column_issue_counts) {
+      Object.entries(issues.column_issue_counts).forEach(([col, counts]) => {
+        map.set(col, {
+          missing: counts.missing || 0,
+          wrongType: counts.wrong_type || 0,
+          encoding: counts.encoding || 0,
+          semantic: counts.semantic || 0,
+        });
+      });
+      return map;
+    }
+
     const getOrInit = (c) => {
       if (!map.has(c)) map.set(c, { missing: 0, wrongType: 0, encoding: 0, semantic: 0 });
       return map.get(c);
@@ -114,6 +138,20 @@ function IssuesSummary({ issues, previewRows = [], onJumpToCol }) {
     return map;
   }, [issues.error_cells, previewRows]);
 
+  const effectiveColumnIssueCounts = useMemo(() => {
+    if (issues.column_issue_counts) return issues.column_issue_counts;
+    const res = {};
+    colIssuesMap.forEach((v, col) => {
+      res[col] = {
+        missing: v.missing || 0,
+        wrong_type: v.wrongType || 0,
+        encoding: v.encoding || 0,
+        semantic: v.semantic || 0,
+      };
+    });
+    return res;
+  }, [issues.column_issue_counts, colIssuesMap]);
+
   if (!issues.has_issues) {
     return (
       <div className="bg-sage/30 border border-[#c8e0cb] rounded-lg p-3 text-sm text-forest flex items-center gap-2">
@@ -144,119 +182,16 @@ function IssuesSummary({ issues, previewRows = [], onJumpToCol }) {
         </span>
       </div>
 
-      {/* Issue Chips */}
-      <div className="flex flex-wrap gap-2 items-center">
-        {dupCount > 0 && (
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-[#FDEBEC] text-[#9F2F2D] border border-[#f5c6cb]">
-            {t("cleaner.chip_duplicates", { count: dupCount })}
-          </span>
-        )}
-
-        {Array.from(colIssuesMap.entries()).map(([col, counts]) => {
-          const k = previewErrorCountPerCol.get(col) || 0;
-          const parts = [];
-          if (counts.missing > 0) parts.push(t("cleaner.chip_missing", { col, count: counts.missing }));
-          else parts.push(col);
-
-          if (counts.wrongType > 0) parts.push(t("cleaner.chip_wrong_type", { count: counts.wrongType }));
-          if (counts.encoding > 0) parts.push(t("cleaner.chip_encoding", { count: counts.encoding }));
-          if (counts.semantic > 0) parts.push(t("cleaner.chip_semantic", { count: counts.semantic }));
-
-          const chipText = parts.join(" ");
-          const inTableText = t("cleaner.chip_in_table", { count: k });
-          const tooltip = k === 0
-            ? `${t("cleaner.chip_outside_preview")}. ${t("cleaner.tooltip_chip_jump")}.`
-            : `${chipText} ${inTableText}. ${t("cleaner.tooltip_chip_jump")}.`;
-
-          return (
-            <button
-              key={col}
-              type="button"
-              onClick={() => onJumpToCol && onJumpToCol(col)}
-              title={tooltip}
-              aria-label={tooltip}
-              className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium border transition-all cursor-pointer ${k > 0
-                  ? "bg-[#FEF6E6] text-[#854D0E] border-[#FDE68A] hover:bg-[#FDF0D5]"
-                  : "bg-gray-100 text-gray-500 border-gray-200 hover:bg-gray-200"
-                }`}
-            >
-              <span>{chipText}</span>
-              <span className={`text-[11px] font-semibold ${k > 0 ? "text-[#D97706]" : "text-gray-400"}`}>
-                {inTableText}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function CleanerActionBar({ onAutoClean, onManualClean, onSkip, hasIssues }) {
-  const { t } = useTranslation();
-  return (
-    <div className="flex flex-col sm:flex-row items-center gap-3 mt-4">
-      {hasIssues ? (
-        <>
-          <button
-            id="clean-mode-auto-btn"
-            onClick={onAutoClean}
-            title={t("cleaner.tooltip_btn_auto_clean")}
-            aria-label={t("cleaner.tooltip_btn_auto_clean")}
-            className={`${BTN.primary} flex-1 justify-center py-3 text-base flex items-center gap-2`}
-          >
-            <Zap className="w-5 h-5" /> {t("cleaner.btn_auto_clean")}
-          </button>
-          <button
-            id="clean-mode-manual-btn"
-            onClick={onManualClean}
-            title={t("cleaner.tooltip_btn_manual_clean")}
-            aria-label={t("cleaner.tooltip_btn_manual_clean")}
-            className={`${BTN.secondary} flex-1 justify-center py-3 text-base flex items-center gap-2`}
-          >
-            <PenTool className="w-5 h-5" /> {t("cleaner.btn_manual_clean")}
-          </button>
-          <button
-            id="clean-mode-skip-btn"
-            onClick={onSkip}
-            title={t("cleaner.tooltip_btn_skip_cleaning")}
-            aria-label={t("cleaner.tooltip_btn_skip_cleaning")}
-            className={`${BTN.secondary} flex-1 justify-center py-3 text-base flex items-center gap-2 text-muted`}
-          >
-            {t("cleaner.btn_skip_cleaning")}
-          </button>
-        </>
-      ) : (
-        <>
-          <button
-            id="clean-mode-skip-btn-primary"
-            onClick={onSkip}
-            title={t("cleaner.tooltip_btn_skip_cleaning")}
-            aria-label={t("cleaner.tooltip_btn_skip_cleaning")}
-            className={`${BTN.primary} flex-1 justify-center py-3 text-base flex items-center gap-2`}
-          >
-            <CheckCircle className="w-5 h-5" /> {t("cleaner.btn_skip_cleaning_clean")}
-          </button>
-          <button
-            id="clean-mode-auto-btn"
-            onClick={onAutoClean}
-            title={t("cleaner.tooltip_btn_auto_clean")}
-            aria-label={t("cleaner.tooltip_btn_auto_clean")}
-            className={`${BTN.secondary} flex-1 justify-center py-3 text-base flex items-center gap-2`}
-          >
-            <Zap className="w-5 h-5" /> {t("cleaner.btn_auto_clean")}
-          </button>
-          <button
-            id="clean-mode-manual-btn"
-            onClick={onManualClean}
-            title={t("cleaner.tooltip_btn_manual_clean")}
-            aria-label={t("cleaner.tooltip_btn_manual_clean")}
-            className={`${BTN.secondary} flex-1 justify-center py-3 text-base flex items-center gap-2`}
-          >
-            <PenTool className="w-5 h-5" /> {t("cleaner.btn_manual_clean")}
-          </button>
-        </>
-      )}
+      {/* Issue Chips: top 5 issue groups + Xem tất cả lỗi */}
+      <ErrorChipsRow
+        columnIssueCounts={effectiveColumnIssueCounts}
+        columnLetters={columnLetters}
+        duplicateCount={dupCount}
+        semanticErrors={issues?.semantic_errors || []}
+        isPanelOpen={isErrorPanelOpen}
+        onTogglePanel={onToggleErrorPanel}
+        onSelectGroup={onSelectErrorGroup}
+      />
     </div>
   );
 }
@@ -269,7 +204,8 @@ function PreviewTable({
   containerRef: externalContainerRef,
   filterOnlyErrorCols = false,
   filterOnlyErrorRows = false,
-  onCellClick = null
+  onCellClick = null,
+  columnLetters = {}
 }) {
   const { t } = useTranslation();
   const internalContainerRef = useRef(null);
@@ -342,6 +278,8 @@ function PreviewTable({
         return t("cleaner.action_reason_encoding_fixed");
       case "type_converted":
         return t("cleaner.action_reason_type_converted");
+      case "invalid_replaced":
+        return t("cleaner.action_reason_invalid_replaced");
       default:
         return reason || "";
     }
@@ -362,11 +300,30 @@ function PreviewTable({
             ))}
           </colgroup>
           <thead className="bg-[#F9F9F8] border-b border-border sticky top-0 z-20 shadow-xs">
+            {/* Row of column letters */}
+            <tr className="border-b border-border/60 text-[11px] font-mono text-muted bg-[#F4F4F2]">
+              <th className="px-2.5 py-1 text-center w-12 sticky left-0 z-30 bg-[#F4F4F2] border-r border-border font-semibold select-none">
+                {/* corner */}
+              </th>
+              {visibleColumns.map(col => {
+                const letter = columnLetters[col] || colLetter(allColumns.indexOf(col));
+                return (
+                  <th
+                    key={`letter-${col}`}
+                    data-col-letter={letter}
+                    className="px-2.5 py-1 text-center font-mono font-semibold text-muted/80 tracking-wider select-none border-r border-border/30 last:border-r-0"
+                    title={t("cleaner.col_letter_tooltip", { letter, defaultValue: `Cột ${letter} trong file gốc` })}
+                  >
+                    {letter}
+                  </th>
+                );
+              })}
+            </tr>
             <tr>
               <th
-                className="px-2.5 py-2.5 font-semibold text-ink w-12 text-center sticky left-0 z-30 bg-[#F9F9F8] border-r border-border"
+                className="px-2.5 py-2.5 font-semibold text-ink w-12 text-center sticky left-0 z-30 bg-[#F9F9F8] border-r border-border select-none"
               >
-                #
+                {t("cleaner.row_header", { defaultValue: "Dòng" })}
               </th>
               {visibleColumns.map(col => (
                 <th
@@ -386,6 +343,7 @@ function PreviewTable({
             {visibleRows.map((row, idx) => {
               const rowId = row.original_index;
               const hasErrorInRow = rowId !== undefined && errorRowIdsSet.has(rowId);
+              const excelRow = (rowId !== undefined && rowId !== null ? rowId : idx) + 2;
 
               return (
                 <tr
@@ -393,13 +351,16 @@ function PreviewTable({
                   className={`hover:bg-sage/10 transition-colors ${hasErrorInRow ? "bg-amber-50/20" : ""}`}
                 >
                   <td
+                    data-row={excelRow}
                     className="px-2.5 py-2 text-muted text-center border-r border-border/50 sticky left-0 z-10 bg-[#F9F9F8] font-mono text-xs select-none"
                   >
-                    {rowId !== undefined ? rowId : idx + 1}
+                    {excelRow}
                   </td>
                   {visibleColumns.map(col => {
+                    const letter = columnLetters[col] || colLetter(allColumns.indexOf(col));
+                    const cellAddr = `${letter}${excelRow}`;
                     let cellClasses = "px-2.5 py-2 truncate text-xs transition-colors border border-transparent";
-                    let tooltip = row[col] !== null && row[col] !== undefined ? String(row[col]) : "null";
+                    let tooltip = row[col] !== null && row[col] !== undefined ? `${cellAddr}: ${String(row[col])}` : `${cellAddr}: null`;
 
                     const cellError = rowId !== undefined ? errorCells.find(e => e.row_id === rowId && e.column === col) : null;
                     const changedItem = rowId !== undefined ? changedMap.get(`${rowId}:${col}`) : null;
@@ -408,16 +369,16 @@ function PreviewTable({
                       cellClasses = "px-2.5 py-2 truncate text-xs transition-colors bg-emerald-50 text-emerald-900 border-emerald-200 font-medium";
                       const oldDisplay = changedItem.old === null || changedItem.old === undefined ? "null" : String(changedItem.old);
                       const newDisplay = changedItem.new === null || changedItem.new === undefined ? "null" : String(changedItem.new);
-                      tooltip = `${oldDisplay} → ${newDisplay} · ${getReasonLabel(changedItem.reason)}`;
+                      tooltip = `${cellAddr}: ${oldDisplay} → ${newDisplay} · ${getReasonLabel(changedItem.reason)}`;
                     } else if (cellError) {
                       if (cellError.severity === "error") {
                         cellClasses = "px-2.5 py-2 truncate text-xs transition-colors bg-red-50 text-red-900 border-red-200 font-medium";
                       } else {
                         cellClasses = "px-2.5 py-2 truncate text-xs transition-colors bg-[#FEF9C3]/80 text-amber-900 border-[#FEF08A]";
                       }
-                      tooltip = t(`cleaner.guided.reasons.${cellError.issue_type}`, {
+                      tooltip = `${cellAddr}: ${t(`cleaner.guided.reasons.${cellError.issue_type}`, {
                         defaultValue: cellError.semantic_type || t("cleaner.guided.pending")
-                      });
+                      })}`;
                     } else {
                       cellClasses += " text-ink";
                     }
@@ -426,9 +387,12 @@ function PreviewTable({
                       <td
                         key={col}
                         data-cell-id={`${rowId}:${col}`}
+                        data-addr={cellAddr}
+                        data-col-letter={letter}
+                        data-row={excelRow}
                         className={cellClasses}
                         title={tooltip}
-                        onClick={() => onCellClick && onCellClick(rowId, col, row[col])}
+                        onClick={() => onCellClick && onCellClick(rowId, col, row[col], letter, excelRow)}
                       >
                         {row[col] !== null && row[col] !== undefined ? (
                           String(row[col])
@@ -457,10 +421,14 @@ function DiffReportView({
   changedCells = [],
   removedRows = [],
   changedTruncated = false,
-  onConfirm,
-  onBack,
-  confirming,
-  onManualClean
+  columnLetters = {},
+  onCellClick = null,
+  diffWindow = null,
+  isLoadingDiffWindow = false,
+  onPrevDiffWindow,
+  onNextDiffWindow,
+  onToggleDiffErrorsOnly,
+  onLocateRowDiff,
 }) {
   const { t } = useTranslation();
   const tableContainerRef = useRef(null);
@@ -474,6 +442,8 @@ function DiffReportView({
   const missingEntries = Object.entries(diff.missing_filled || {});
   const typeEntries = Object.entries(diff.types_converted || {});
   const encodingEntries = Object.entries(diff.encoding_fixed || {});
+  const invalidEntries = Object.entries(diff.invalid_replaced || {});
+  const formatEntries = Object.entries(diff.format_normalized || {});
   const droppedColumns = diff.columns_dropped || [];
 
   const semanticErrorsCount = errorCells.filter(e => e.severity === "error").length;
@@ -553,45 +523,73 @@ function DiffReportView({
         )}
 
         {/* Interactive Chips per changed column */}
-        {(missingEntries.length > 0 || typeEntries.length > 0 || encodingEntries.length > 0) && (
+        {(missingEntries.length > 0 || typeEntries.length > 0 || encodingEntries.length > 0 || invalidEntries.length > 0) && (
           <div className="mb-3">
             <p className="text-xs font-medium text-ink mb-1.5">{t("cleaner.legend_action_changed")}:</p>
             <div className="flex flex-wrap gap-2">
-              {missingEntries.map(([col, cnt]) => (
-                <button
-                  key={`missing_${col}`}
-                  type="button"
-                  onClick={() => handleJumpToCol(col)}
-                  className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100 transition-colors cursor-pointer"
-                  title={col}
-                >
-                  <span>{t("cleaner.chip_changed_filled", { col, count: cnt })}</span>
-                </button>
-              ))}
+              {missingEntries.map(([col, cnt]) => {
+                const letter = columnLetters[col] || diff?.column_letters?.[col] || '';
+                const letterPrefix = letter ? `${letter} · ` : '';
+                return (
+                  <button
+                    key={`missing_${col}`}
+                    type="button"
+                    onClick={() => handleJumpToCol(col)}
+                    className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100 transition-colors cursor-pointer"
+                    title={col}
+                  >
+                    <span>{letterPrefix}{t("cleaner.chip_changed_filled", { col, count: cnt })}</span>
+                  </button>
+                );
+              })}
 
-              {typeEntries.map(([col, change]) => (
-                <button
-                  key={`type_${col}`}
-                  type="button"
-                  onClick={() => handleJumpToCol(col)}
-                  className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-[#FBF3DB] text-[#956400] border border-[#f0dda0] hover:bg-[#faebc2] transition-colors cursor-pointer"
-                  title={col}
-                >
-                  <span>{t("cleaner.chip_changed_types", { col, change })}</span>
-                </button>
-              ))}
+              {typeEntries.map(([col, change]) => {
+                const letter = columnLetters[col] || diff?.column_letters?.[col] || '';
+                const letterPrefix = letter ? `${letter} · ` : '';
+                return (
+                  <button
+                    key={`type_${col}`}
+                    type="button"
+                    onClick={() => handleJumpToCol(col)}
+                    className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-[#FBF3DB] text-[#956400] border border-[#f0dda0] hover:bg-[#faebc2] transition-colors cursor-pointer"
+                    title={col}
+                  >
+                    <span>{letterPrefix}{t("cleaner.chip_changed_types", { col, change })}</span>
+                  </button>
+                );
+              })}
 
-              {encodingEntries.map(([col, cnt]) => (
-                <button
-                  key={`enc_${col}`}
-                  type="button"
-                  onClick={() => handleJumpToCol(col)}
-                  className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-[#FFF0E6] text-[#A84300] border border-[#ffd0aa] hover:bg-[#ffe3cf] transition-colors cursor-pointer"
-                  title={col}
-                >
-                  <span>{t("cleaner.chip_changed_encoding", { col, count: cnt })}</span>
-                </button>
-              ))}
+              {encodingEntries.map(([col, cnt]) => {
+                const letter = columnLetters[col] || diff?.column_letters?.[col] || '';
+                const letterPrefix = letter ? `${letter} · ` : '';
+                return (
+                  <button
+                    key={`enc_${col}`}
+                    type="button"
+                    onClick={() => handleJumpToCol(col)}
+                    className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-[#FFF0E6] text-[#A84300] border border-[#ffd0aa] hover:bg-[#ffe3cf] transition-colors cursor-pointer"
+                    title={col}
+                  >
+                    <span>{letterPrefix}{t("cleaner.chip_changed_encoding", { col, count: cnt })}</span>
+                  </button>
+                );
+              })}
+
+              {invalidEntries.map(([col, cnt]) => {
+                const letter = columnLetters[col] || diff?.column_letters?.[col] || '';
+                const letterPrefix = letter ? `${letter} · ` : '';
+                return (
+                  <button
+                    key={`inv_${col}`}
+                    type="button"
+                    onClick={() => handleJumpToCol(col)}
+                    className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-rose-50 text-rose-800 border border-rose-200 hover:bg-rose-100 transition-colors cursor-pointer"
+                    title={col}
+                  >
+                    <span>{letterPrefix}{t("cleaner.chip_changed_invalid")}: {col} ({cnt})</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
         )}
@@ -610,7 +608,33 @@ function DiffReportView({
           </div>
         )}
 
-        {missingEntries.length === 0 && typeEntries.length === 0 && encodingEntries.length === 0 && diff.duplicate_rows_removed === 0 && droppedColumns.length === 0 && (
+        {/* Invalid values replaced */}
+        {invalidEntries.length > 0 && (
+          <div className="mb-3">
+            <p className="text-xs font-medium text-ink mb-1.5">{t("cleaner.diff_invalid_replaced")}</p>
+            <div className="flex flex-wrap gap-1.5">
+              {invalidEntries.map(([col, cnt]) => (
+                <span key={col} className="text-xs px-2.5 py-0.5 rounded-full bg-rose-50 text-rose-800 border border-rose-200">
+                  {col}: {cnt}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Format-only normalized */}
+        {formatEntries.length > 0 && (
+          <div className="mb-3 space-y-1">
+            {formatEntries.map(([col, cnt]) => (
+              <p key={col} className="text-xs text-muted flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-slate-400 inline-block" />
+                {t("cleaner.diff_format_normalized_line", { col, count: cnt })}
+              </p>
+            ))}
+          </div>
+        )}
+
+        {missingEntries.length === 0 && typeEntries.length === 0 && encodingEntries.length === 0 && invalidEntries.length === 0 && formatEntries.length === 0 && diff.duplicate_rows_removed === 0 && droppedColumns.length === 0 && (
           <p className="text-sm text-muted">{t("cleaner.diff_no_changes")}</p>
         )}
       </Card>
@@ -635,6 +659,32 @@ function DiffReportView({
         </div>
       )}
 
+      {/* GoToCellInput toolbar */}
+      <div className="flex justify-end mt-2 mb-2">
+        <GoToCellInput
+          columnLetters={diff?.column_letters || columnLetters || {}}
+          allColumns={Object.keys(previewData[0] || {}).filter(c => c !== "original_index")}
+          visibleColumns={Object.keys(previewData[0] || {}).filter(c => c !== "original_index")}
+          rows={previewData}
+          containerRef={tableContainerRef}
+          previewRowsLimit={150}
+          onLocateRow={onLocateRowDiff}
+        />
+      </div>
+
+      {/* Row Window Pagination Bar */}
+      <div className="mb-2">
+        <WindowBar
+          window={diffWindow}
+          isLoading={isLoadingDiffWindow}
+          onPrev={onPrevDiffWindow}
+          onNext={onNextDiffWindow}
+          onToggleErrorsOnly={onToggleDiffErrorsOnly}
+          totalRows={diffWindow?.total_rows ?? diff?.clean_rows ?? previewData.length}
+          totalErrorRows={diffWindow?.total_error_rows ?? 0}
+        />
+      </div>
+
       {/* Preview Table */}
       <PreviewTable
         data={previewData}
@@ -642,12 +692,14 @@ function DiffReportView({
         changedCells={changedCells}
         containerRef={tableContainerRef}
         title={t("cleaner.cleaned_preview_title")}
+        columnLetters={diff?.column_letters || columnLetters || {}}
+        onCellClick={onCellClick}
       />
     </div>
   );
 }
 
-function ConfirmedView({ result, previewData, onGoHome, onGoVisualize, onBackToEdit, isSkip }) {
+function ConfirmedView({ result, previewData, isSkip }) {
   const { t } = useTranslation();
   const summary = result.summary_for_module3;
   const currentLang = getCurrentLang();
@@ -697,34 +749,6 @@ function ConfirmedView({ result, previewData, onGoHome, onGoVisualize, onBackToE
 
       {/* Preview Table */}
       <PreviewTable data={previewData} />
-
-      {/* Next steps */}
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex gap-3">
-          <button
-            id="cleaner-go-home-btn"
-            onClick={onGoHome}
-            className={`${BTN.secondary} flex items-center gap-2`}
-          >
-            <ArrowLeft className="w-4 h-4 inline-block mr-1" /> {t("cleaner.btn_go_home")}
-          </button>
-          {onBackToEdit && (
-            <button
-              onClick={onBackToEdit}
-              className={`${BTN.secondary} flex items-center gap-2`}
-            >
-              <ArrowLeft className="w-4 h-4 inline-block mr-1" /> {t("cleaner.btn_back_to_edit")}
-            </button>
-          )}
-        </div>
-        <button
-          id="cleaner-go-module3-btn"
-          onClick={onGoVisualize}
-          className={`${BTN.primary} flex items-center gap-2`}
-        >
-          {t("cleaner.btn_visualize")} <ArrowRight className="w-4 h-4 inline-block ml-1" />
-        </button>
-      </div>
     </div>
   );
 }
@@ -752,6 +776,7 @@ function LoadingStep({ message }) {
 
 export default function Cleaner({ pipelineMode, onComplete, onError }) {
   const { t } = useTranslation();
+  const currentLang = getCurrentLang();
   const location = useLocation();
   const navigate = useNavigate();
   const { showToast } = useToast();
@@ -813,9 +838,57 @@ export default function Cleaner({ pipelineMode, onComplete, onError }) {
   const [filterOnlyErrorCols, setFilterOnlyErrorCols] = useState(false);
   const [filterOnlyErrorRows, setFilterOnlyErrorRows] = useState(false);
 
+  // Row Windowing State for issues preview
+  const [issuesOffset, setIssuesOffset] = useState(0);
+  const [issuesMode, setIssuesMode] = useState("all");
+  const [isLoadingIssuesWindow, setIsLoadingIssuesWindow] = useState(false);
+  const issuesReqIdRef = useRef(0);
+
+  // Row Windowing State for diff preview
+  const [diffWindow, setDiffWindow] = useState(null);
+  const [diffOffset, setDiffOffset] = useState(0);
+  const [diffMode, setDiffMode] = useState("all");
+  const [isLoadingDiffWindow, setIsLoadingDiffWindow] = useState(false);
+  const diffReqIdRef = useRef(0);
+
   // Error navigation state
+  const [isIssuesErrorPanelOpen, setIsIssuesErrorPanelOpen] = useState(false);
+  const [activeIssuesErrorGroupKey, setActiveIssuesErrorGroupKey] = useState(null);
   const [currentNavError, setCurrentNavError] = useState(null);
+  const [selectedCellDetail, setSelectedCellDetail] = useState(null);
   const previewTableContainerRef = useRef(null);
+
+  const orderedErrors = useMemo(() => {
+    return getOrderedErrorCells(issues?.error_cells || [], previewData, profileData?.columns?.map(c => c.name) || []);
+  }, [issues?.error_cells, previewData, profileData?.columns]);
+
+  const currentErrorIndex = useMemo(() => {
+    if (!currentNavError || orderedErrors.length === 0) return -1;
+    return orderedErrors.findIndex(e => e.row_id === currentNavError.row_id && e.column === currentNavError.column);
+  }, [currentNavError, orderedErrors]);
+
+  const currentNavAddress = useMemo(() => {
+    if (!currentNavError) return "";
+    const letter = (issues?.column_letters?.[currentNavError.column]) || (profileData?.column_letters?.[currentNavError.column]) || colLetter(profileData?.columns?.findIndex(c => c.name === currentNavError.column) ?? -1);
+    const excelRow = (currentNavError.row_id ?? 0) + 2;
+    return cellAddress(letter, excelRow);
+  }, [currentNavError, issues?.column_letters, profileData]);
+
+  const handleCellClick = (rowId, col, val, letter, excelRow) => {
+    const l = letter || issues?.column_letters?.[col] || profileData?.column_letters?.[col] || '';
+    const r = excelRow || (rowId !== undefined && rowId !== null ? rowId + 2 : null);
+    const cellError = (issues?.error_cells || []).find(e => e.row_id === rowId && e.column === col);
+    const changedItem = (diffReport?.changed_cells || autoCleanChangedCells || []).find(c => c.row_id === rowId && c.column === col);
+    setSelectedCellDetail({
+      rowId,
+      col,
+      val,
+      letter: l,
+      excelRow: r,
+      cellError,
+      changedItem,
+    });
+  };
 
   // Cleanup abort controller on unmount
   useEffect(() => {
@@ -887,9 +960,11 @@ export default function Cleaner({ pipelineMode, onComplete, onError }) {
 
     try {
       setLoadingMsg(t("cleaner.loading_scanning"));
-      const res = await detectIssues(fileHash, overrides);
+      const res = await detectIssues(fileHash, overrides, 0, "all");
       setIssues(res.data);
       setPreviewData(res.data.preview_data || []);
+      setIssuesOffset(res.data.window?.offset ?? 0);
+      setIssuesMode(res.data.window?.mode ?? "all");
       setError(null);
       setStep("previewing_issues");
     } catch (err) {
@@ -908,6 +983,27 @@ export default function Cleaner({ pipelineMode, onComplete, onError }) {
       setStep("error");
     } finally {
       isDetectingRef.current = false;
+    }
+  };
+
+  const fetchIssuesWindow = async (offset = issuesOffset, mode = issuesMode) => {
+    setIsLoadingIssuesWindow(true);
+    const reqId = ++issuesReqIdRef.current;
+    try {
+      const res = await detectIssues(fileHash, overrides, offset, mode);
+      if (reqId !== issuesReqIdRef.current) return;
+      setIssues(res.data);
+      setPreviewData(res.data.preview_data || []);
+      setIssuesOffset(res.data.window?.offset ?? offset);
+      setIssuesMode(res.data.window?.mode ?? mode);
+    } catch (err) {
+      if (reqId === issuesReqIdRef.current) {
+        showToast(t("cleaner.error_scan_failed"), "error");
+      }
+    } finally {
+      if (reqId === issuesReqIdRef.current) {
+        setIsLoadingIssuesWindow(false);
+      }
     }
   };
 
@@ -930,13 +1026,16 @@ export default function Cleaner({ pipelineMode, onComplete, onError }) {
       setLoadingMsg(t("cleaner.loading_auto_cleaning"));
       setStep("cleaning");
       const finalOverrides = Object.fromEntries(Object.entries(overrides).filter(([_, v]) => v !== "auto"));
-      const res = await autoClean(fileHash, finalOverrides);
+      const res = await autoClean(fileHash, finalOverrides, 0, "all");
       setDiffReport(res.data.diff_report);
       setPreviewData(res.data.preview_data || []);
       setAutoCleanErrorCells(res.data.error_cells || []);
       setAutoCleanChangedCells(res.data.changed_cells || []);
       setAutoCleanRemovedRows(res.data.removed_rows || []);
       setAutoCleanChangedTruncated(Boolean(res.data.changed_truncated));
+      setDiffWindow(res.data.window || null);
+      setDiffOffset(res.data.window?.offset ?? 0);
+      setDiffMode(res.data.window?.mode ?? "all");
       setError(null);
 
       if (res.data.validation && !res.data.validation.can_proceed) {
@@ -965,6 +1064,153 @@ export default function Cleaner({ pipelineMode, onComplete, onError }) {
       setStep("error");
     } finally {
       isAutoCleaningRef.current = false;
+    }
+  };
+
+  const fetchDiffWindow = async (offset = diffOffset, mode = diffMode) => {
+    setIsLoadingDiffWindow(true);
+    const reqId = ++diffReqIdRef.current;
+    try {
+      const finalOverrides = Object.fromEntries(Object.entries(overrides).filter(([_, v]) => v !== "auto"));
+      const res = await autoClean(fileHash, finalOverrides, offset, mode);
+      if (reqId !== diffReqIdRef.current) return;
+      setDiffReport(res.data.diff_report);
+      setPreviewData(res.data.preview_data || []);
+      setAutoCleanErrorCells(res.data.error_cells || []);
+      setAutoCleanChangedCells(res.data.changed_cells || []);
+      setAutoCleanRemovedRows(res.data.removed_rows || []);
+      setAutoCleanChangedTruncated(Boolean(res.data.changed_truncated));
+      setDiffWindow(res.data.window || null);
+      setDiffOffset(res.data.window?.offset ?? offset);
+      setDiffMode(res.data.window?.mode ?? mode);
+    } catch (err) {
+      if (reqId === diffReqIdRef.current) {
+        showToast(t("cleaner.error_clean_failed"), "error");
+      }
+    } finally {
+      if (reqId === diffReqIdRef.current) {
+        setIsLoadingDiffWindow(false);
+      }
+    }
+  };
+
+  const handleLocateAndGoIssues = async ({ excelRow, letter, matchedCol }) => {
+    try {
+      const res = await locateRow({
+        file_hash: fileHash,
+        excel_row: excelRow,
+        mode: issuesMode,
+        clean_mode: "detect",
+        overridden_types: overrides,
+      });
+      const data = res.data;
+      if (data.status === "removed") {
+        showToast(
+          t("cleaner.goto_row_removed", {
+            row: excelRow,
+            reason: "trùng lặp",
+            defaultValue: `Dòng ${excelRow} đã bị xóa (trùng lặp).`,
+          }),
+          "warning"
+        );
+        return;
+      }
+      if (data.status === "not_found") {
+        showToast(
+          t("cleaner.goto_cell_not_found", {
+            addr: `${letter}${excelRow}`,
+            defaultValue: `Không tìm thấy ô ${letter}${excelRow}`,
+          }),
+          "warning"
+        );
+        return;
+      }
+      if (data.status === "not_in_errors") {
+        showToast(
+          t("cleaner.goto_not_in_errors", {
+            row: excelRow,
+            defaultValue: `Dòng ${excelRow} không có lỗi.`,
+          }),
+          "info"
+        );
+        return;
+      }
+      if (data.status === "found" && data.offset !== null) {
+        await fetchIssuesWindow(data.offset, issuesMode);
+        setTimeout(() => {
+          if (previewTableContainerRef.current) {
+            highlightExcelCell(previewTableContainerRef.current, {
+              addr: `${letter}${excelRow}`,
+              letter,
+              excelRow,
+              colName: matchedCol,
+            });
+          }
+        }, 120);
+      }
+    } catch (_) {
+      showToast(t("cleaner.goto_locate_error", { defaultValue: "Không thể định vị dòng trong file." }), "error");
+    }
+  };
+
+  const handleLocateAndGoDiff = async ({ excelRow, letter, matchedCol }) => {
+    try {
+      const finalOverrides = Object.fromEntries(Object.entries(overrides).filter(([_, v]) => v !== "auto"));
+      const res = await locateRow({
+        file_hash: fileHash,
+        excel_row: excelRow,
+        mode: diffMode,
+        clean_mode: "auto",
+        overridden_types: finalOverrides,
+      });
+      const data = res.data;
+      if (data.status === "removed") {
+        showToast(
+          t("cleaner.goto_row_removed", {
+            row: excelRow,
+            reason: "trùng lặp",
+            defaultValue: `Dòng ${excelRow} đã bị xóa (trùng lặp).`,
+          }),
+          "warning"
+        );
+        return;
+      }
+      if (data.status === "not_found") {
+        showToast(
+          t("cleaner.goto_cell_not_found", {
+            addr: `${letter}${excelRow}`,
+            defaultValue: `Không tìm thấy ô ${letter}${excelRow}`,
+          }),
+          "warning"
+        );
+        return;
+      }
+      if (data.status === "not_in_errors") {
+        showToast(
+          t("cleaner.goto_not_in_errors", {
+            row: excelRow,
+            defaultValue: `Dòng ${excelRow} không có lỗi.`,
+          }),
+          "info"
+        );
+        return;
+      }
+      if (data.status === "found" && data.offset !== null) {
+        await fetchDiffWindow(data.offset, diffMode);
+        setTimeout(() => {
+          const container = document.querySelector(".overflow-x-auto");
+          if (container) {
+            highlightExcelCell(container, {
+              addr: `${letter}${excelRow}`,
+              letter,
+              excelRow,
+              colName: matchedCol,
+            });
+          }
+        }, 120);
+      }
+    } catch (_) {
+      showToast(t("cleaner.goto_locate_error", { defaultValue: "Không thể định vị dòng trong file." }), "error");
     }
   };
 
@@ -1081,12 +1327,29 @@ export default function Cleaner({ pipelineMode, onComplete, onError }) {
     }
   };
 
-  const handleNextError = () => {
+  const handleNextError = async () => {
     const ordered = getOrderedErrorCells(issues?.error_cells || [], previewData, profileData?.columns?.map(c => c.name) || []);
     if (ordered.length === 0) {
+      const win = issues?.window;
+      if (win && win.offset + win.size < win.total_error_rows) {
+        await fetchIssuesWindow(win.offset + win.size, "errors");
+        return;
+      }
       showToast(t("cleaner.bar_no_errors_in_preview"), "info");
       return;
     }
+    const idx = currentNavError
+      ? ordered.findIndex(e => e.row_id === currentNavError.row_id && e.column === currentNavError.column)
+      : -1;
+
+    if (idx === ordered.length - 1) {
+      const win = issues?.window;
+      if (win && win.offset + win.size < (win.mode === "errors" ? win.total_error_rows : win.total_rows)) {
+        await fetchIssuesWindow(win.offset + win.size, win.mode);
+        return;
+      }
+    }
+
     const next = getNextError(ordered, currentNavError);
     if (next) {
       setCurrentNavError(next);
@@ -1094,12 +1357,29 @@ export default function Cleaner({ pipelineMode, onComplete, onError }) {
     }
   };
 
-  const handlePrevError = () => {
+  const handlePrevError = async () => {
     const ordered = getOrderedErrorCells(issues?.error_cells || [], previewData, profileData?.columns?.map(c => c.name) || []);
     if (ordered.length === 0) {
+      const win = issues?.window;
+      if (win && win.offset > 0) {
+        await fetchIssuesWindow(Math.max(0, win.offset - win.size), "errors");
+        return;
+      }
       showToast(t("cleaner.bar_no_errors_in_preview"), "info");
       return;
     }
+    const idx = currentNavError
+      ? ordered.findIndex(e => e.row_id === currentNavError.row_id && e.column === currentNavError.column)
+      : -1;
+
+    if (idx <= 0) {
+      const win = issues?.window;
+      if (win && win.offset > 0) {
+        await fetchIssuesWindow(Math.max(0, win.offset - win.size), win.mode);
+        return;
+      }
+    }
+
     const prev = getPrevError(ordered, currentNavError);
     if (prev) {
       setCurrentNavError(prev);
@@ -1108,7 +1388,7 @@ export default function Cleaner({ pipelineMode, onComplete, onError }) {
   };
 
   return (
-    <div className="min-h-screen bg-[#FBFBFA] pb-24">
+    <div className="min-h-screen bg-[#FBFBFA] pb-36 sm:pb-24">
       <div className={PAGE.wrapper}>
         <PageHeader
           title={t("cleaner.title")}
@@ -1119,7 +1399,7 @@ export default function Cleaner({ pipelineMode, onComplete, onError }) {
               {!pipelineMode && (
                 <>
                   <button
-                    onClick={() => navigate(fileHash ? "/dashboard/profiler" : "/dashboard/profiler")}
+                    onClick={() => navigate("/dashboard/profiler")}
                     className={`${BTN.secondary} flex items-center gap-1.5`}
                   >
                     <ArrowLeft className="w-4 h-4" /> {t("cleaner.back_to_profiler")}
@@ -1293,41 +1573,116 @@ export default function Cleaner({ pipelineMode, onComplete, onError }) {
             {/* ── Step: previewing_issues ── */}
             {step === "previewing_issues" && issues && (
               <div className="space-y-4">
+                {/* Duplicate / Near-empty warning */}
+                {issues.duplicates?.warning && (
+                  <div className="bg-[#FFF0E6] border border-[#ffd0aa] rounded-xl p-3.5 flex items-start gap-3 text-xs text-[#A84300]">
+                    <AlertTriangle className="w-4 h-4 shrink-0 text-[#A84300] mt-0.5" />
+                    <div>
+                      <p className="font-semibold text-sm">
+                        {issues.duplicates.warning}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Semantic validation notice */}
+                {(issues.semantic_status === "not_run" || (issues.semantic_status === undefined && issues.semantic_checked === false)) && (
+                  <div className="bg-[#F7F7F5] border border-[#EAEAEA] rounded-xl p-3 flex items-start gap-2.5 text-xs text-muted">
+                    <Info className="w-4 h-4 shrink-0 text-muted mt-0.5" />
+                    <div className="flex-1">
+                      <span>{t("cleaner.semantic_notice_text")} </span>
+                      <button
+                        type="button"
+                        onClick={() => navigate("/dashboard/profiler")}
+                        className="text-forest underline font-medium hover:text-forest/80 cursor-pointer ml-1 inline-flex items-center gap-1"
+                      >
+                        {t("cleaner.semantic_notice_link")}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {issues.semantic_status === "no_special_columns" && (
+                  <div className="text-xs text-muted/80 italic py-1 px-1">
+                    {t("cleaner.semantic_no_special_columns", {
+                      defaultValue: "AI không thấy cột email, số điện thoại hay họ tên trong file này, nên không cần kiểm tra định dạng."
+                    })}
+                  </div>
+                )}
+
                 <IssuesSummary
                   issues={issues}
                   previewRows={previewData}
                   onJumpToCol={handleJumpToCol}
+                  columnLetters={issues?.column_letters || profileData?.column_letters || {}}
+                  isErrorPanelOpen={isIssuesErrorPanelOpen}
+                  onToggleErrorPanel={() => setIsIssuesErrorPanelOpen((prev) => !prev)}
+                  onSelectErrorGroup={(g) => {
+                    setIsIssuesErrorPanelOpen(true);
+                    setActiveIssuesErrorGroupKey(g.key);
+                  }}
                 />
 
-                {/* Filter toggles */}
-                <div className="flex flex-wrap items-center gap-3 pt-1">
-                  <label
-                    className="inline-flex items-center gap-2 text-xs font-medium text-ink cursor-pointer select-none"
-                    title={t("cleaner.tooltip_filter_error_cols")}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={filterOnlyErrorCols}
-                      onChange={(e) => setFilterOnlyErrorCols(e.target.checked)}
-                      className="rounded border-border text-forest focus:ring-forest w-3.5 h-3.5"
-                    />
-                    <span>{t("cleaner.filter_only_error_cols")}</span>
-                    <HelpCircle className="w-3.5 h-3.5 text-muted hover:text-ink transition-colors" />
-                  </label>
+                <ErrorListPanel
+                  isOpen={isIssuesErrorPanelOpen}
+                  onClose={() => setIsIssuesErrorPanelOpen(false)}
+                  fileHash={fileHash}
+                  actions={[]}
+                  overriddenTypes={overrides}
+                  columnIssueCounts={issues?.column_issue_counts || {}}
+                  columnLetters={issues?.column_letters || profileData?.column_letters || {}}
+                  cellReviewStates={{}}
+                  semanticErrors={issues?.semantic_errors || []}
+                  onLocateCell={handleLocateAndGoIssues}
+                  activeGroupKey={activeIssuesErrorGroupKey}
+                  onActiveGroupKeyChange={setActiveIssuesErrorGroupKey}
+                />
 
-                  <label
-                    className="inline-flex items-center gap-2 text-xs font-medium text-ink cursor-pointer select-none"
-                    title={t("cleaner.tooltip_filter_error_rows")}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={filterOnlyErrorRows}
-                      onChange={(e) => setFilterOnlyErrorRows(e.target.checked)}
-                      className="rounded border-border text-forest focus:ring-forest w-3.5 h-3.5"
-                    />
-                    <span>{t("cleaner.filter_only_error_rows")}</span>
-                    <HelpCircle className="w-3.5 h-3.5 text-muted hover:text-ink transition-colors" />
-                  </label>
+                {/* Filter toggles & Go to cell */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <label
+                      className="inline-flex items-center gap-2 text-xs font-medium text-ink cursor-pointer select-none"
+                      title={t("cleaner.tooltip_filter_error_cols")}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={filterOnlyErrorCols}
+                        onChange={(e) => setFilterOnlyErrorCols(e.target.checked)}
+                        className="rounded border-border text-forest focus:ring-forest w-3.5 h-3.5"
+                      />
+                      <span>{t("cleaner.filter_only_error_cols")}</span>
+                      <HelpCircle className="w-3.5 h-3.5 text-muted hover:text-ink transition-colors" />
+                    </label>
+
+                  </div>
+
+                  <GoToCellInput
+                    columnLetters={issues?.column_letters || profileData?.column_letters || {}}
+                    allColumns={profileData?.columns?.map(c => c.name) || Object.keys(previewData[0] || {}).filter(c => c !== "original_index")}
+                    visibleColumns={Object.keys(previewData[0] || {}).filter(c => c !== "original_index")}
+                    rows={previewData}
+                    containerRef={previewTableContainerRef}
+                    previewRowsLimit={issues?.preview_rows || 150}
+                    onLocateRow={handleLocateAndGoIssues}
+                  />
+                </div>
+
+                {/* WindowBar for Issues Preview */}
+                <div className="mb-2">
+                  <WindowBar
+                    window={issues?.window}
+                    isLoading={isLoadingIssuesWindow}
+                    onPrev={() => fetchIssuesWindow(Math.max(0, (issues?.window?.offset ?? 0) - 150), issuesMode)}
+                    onNext={() => fetchIssuesWindow((issues?.window?.offset ?? 0) + 150, issuesMode)}
+                    onToggleErrorsOnly={() => {
+                      const nextMode = issuesMode === "errors" ? "all" : "errors";
+                      setIssuesMode(nextMode);
+                      fetchIssuesWindow(0, nextMode);
+                    }}
+                    totalRows={issues?.window?.total_rows ?? issues?.total_rows ?? previewData.length}
+                    totalErrorRows={issues?.window?.total_error_rows ?? 0}
+                  />
                 </div>
 
                 <PreviewTable
@@ -1337,6 +1692,8 @@ export default function Cleaner({ pipelineMode, onComplete, onError }) {
                   filterOnlyErrorCols={filterOnlyErrorCols}
                   filterOnlyErrorRows={filterOnlyErrorRows}
                   title={t("cleaner.preview_table_title")}
+                  columnLetters={issues?.column_letters || profileData?.column_letters || {}}
+                  onCellClick={handleCellClick}
                 />
               </div>
             )}
@@ -1351,9 +1708,11 @@ export default function Cleaner({ pipelineMode, onComplete, onError }) {
                   onBack={handleBackToOriginal}
                   initialPreviewData={previewData}
                   initialErrorCells={selectedMode === "auto" ? autoCleanErrorCells : (issues?.error_cells || [])}
+                  initialColumnIssueCounts={issues?.column_issue_counts || {}}
                   onDirtyChange={(isDirty) => {
                     manualWorkspaceDirtyRef.current = isDirty;
                   }}
+                  columnLetters={issues?.column_letters || profileData?.column_letters || {}}
                 />
               </div>
             )}
@@ -1369,10 +1728,18 @@ export default function Cleaner({ pipelineMode, onComplete, onError }) {
                 changedCells={autoCleanChangedCells}
                 removedRows={autoCleanRemovedRows}
                 changedTruncated={autoCleanChangedTruncated}
-                onConfirm={() => handleConfirmClean()}
-                onBack={() => setStep("previewing_issues")}
-                confirming={confirming}
-                onManualClean={() => setStep("manual_workspace")}
+                columnLetters={diffReport?.column_letters || issues?.column_letters || profileData?.column_letters || {}}
+                onCellClick={handleCellClick}
+                diffWindow={diffWindow}
+                isLoadingDiffWindow={isLoadingDiffWindow}
+                onPrevDiffWindow={() => fetchDiffWindow(Math.max(0, (diffWindow?.offset ?? 0) - 150), diffMode)}
+                onNextDiffWindow={() => fetchDiffWindow((diffWindow?.offset ?? 0) + 150, diffMode)}
+                onToggleDiffErrorsOnly={() => {
+                  const nextMode = diffMode === "errors" ? "all" : "errors";
+                  setDiffMode(nextMode);
+                  fetchDiffWindow(0, nextMode);
+                }}
+                onLocateRowDiff={handleLocateAndGoDiff}
               />
             )}
 
@@ -1382,23 +1749,6 @@ export default function Cleaner({ pipelineMode, onComplete, onError }) {
                 result={confirmedResult}
                 previewData={confirmedResult.preview_data && confirmedResult.preview_data.length > 0 ? confirmedResult.preview_data : previewData}
                 isSkip={isSkip}
-                onGoHome={() => navigate("/dashboard/profiler")}
-                onGoVisualize={() => {
-                  updateFileSession({
-                    sessionId: confirmedResult.session_id,
-                    capabilities: confirmedResult.validation?.capabilities || null,
-                    warnings: confirmedResult.validation?.warnings || []
-                  });
-                  if (pipelineMode && onComplete) onComplete();
-                  else navigate("/dashboard/visualize");
-                }}
-                onBackToEdit={() => {
-                  // Rule 1: No confirm dialog when clicking "Quay lại sửa tiếp" on confirmed screen
-                  manualWorkspaceDirtyRef.current = false;
-                  setIsSkip(false);
-                  setStep("previewing_issues");
-                  setConfirmedResult(null);
-                }}
               />
             )}
           </>
@@ -1447,10 +1797,20 @@ export default function Cleaner({ pipelineMode, onComplete, onError }) {
                     >
                       {t("cleaner.bar_btn_next_error")}
                     </button>
+                    {currentErrorIndex >= 0 && currentNavAddress && (
+                      <span className="text-xs font-mono font-medium text-amber-900 bg-amber-50 px-2 py-1 rounded-md border border-amber-200 ml-1 select-none">
+                        {t("cleaner.err_nav_address", {
+                          current: currentErrorIndex + 1,
+                          total: orderedErrors.length,
+                          addr: currentNavAddress,
+                          defaultValue: `Lỗi ${currentErrorIndex + 1}/${orderedErrors.length} · ${currentNavAddress}`
+                        })}
+                      </span>
+                    )}
                   </div>
                 </div>
 
-                <div className="flex flex-col sm:flex-row items-center gap-2.5 w-full sm:w-auto">
+                <div className="flex flex-wrap sm:flex-nowrap items-center justify-end gap-2 w-full sm:w-auto">
                   {issues.has_issues ? (
                     <>
                       <button
@@ -1532,7 +1892,7 @@ export default function Cleaner({ pipelineMode, onComplete, onError }) {
                   </span>
                 </div>
 
-                <div className="flex flex-col sm:flex-row items-center gap-2.5 w-full sm:w-auto">
+                <div className="flex flex-wrap sm:flex-nowrap items-center justify-end gap-2 w-full sm:w-auto">
                   <button
                     id="cleaner-back-to-mode-btn"
                     onClick={() => setStep("previewing_issues")}
@@ -1580,7 +1940,7 @@ export default function Cleaner({ pipelineMode, onComplete, onError }) {
                   </span>
                 </div>
 
-                <div className="flex flex-col sm:flex-row items-center gap-2.5 w-full sm:w-auto">
+                <div className="flex flex-wrap sm:flex-nowrap items-center justify-end gap-2 w-full sm:w-auto">
                   <button
                     id="cleaner-go-home-btn"
                     onClick={() => navigate("/dashboard/profiler")}
@@ -1617,6 +1977,76 @@ export default function Cleaner({ pipelineMode, onComplete, onError }) {
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Cell Detail Modal */}
+      {selectedCellDetail && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs"
+          onClick={() => setSelectedCellDetail(null)}
+        >
+          <div
+            className="bg-white border border-border rounded-xl shadow-2xl p-5 w-full max-w-sm space-y-4 animate-in fade-in zoom-in-95"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-2 border-b border-border pb-3">
+              <div>
+                <p className="text-xs uppercase tracking-wider font-semibold text-ink font-mono">
+                  {`Ô ${cellAddress(selectedCellDetail.letter, selectedCellDetail.excelRow)} (${cellAddressWords(selectedCellDetail.letter, selectedCellDetail.excelRow, currentLang)})`}
+                </p>
+                <h4 className="font-semibold text-sm text-ink mt-0.5">
+                  {selectedCellDetail.col}
+                </h4>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedCellDetail(null)}
+                className="p-1 rounded-md text-muted hover:bg-neutral-100 hover:text-ink cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-2 text-xs">
+              <div className="bg-[#F9F9F8] p-2.5 rounded-lg border border-border/80">
+                <span className="text-muted block text-[11px] mb-0.5">{t("cleaner.guided.current_value")}:</span>
+                <span className="font-mono font-medium text-ink break-words">
+                  {selectedCellDetail.val !== null && selectedCellDetail.val !== undefined ? String(selectedCellDetail.val) : <span className="text-gray-400 italic">null</span>}
+                </span>
+              </div>
+
+              {selectedCellDetail.cellError && (
+                <div className="bg-red-50 p-2.5 rounded-lg border border-red-200 text-red-900">
+                  <span className="font-semibold block mb-0.5">{t("cleaner.guided.reason_title")}:</span>
+                  <span>
+                    {t(`cleaner.guided.reasons.${selectedCellDetail.cellError.issue_type}`, {
+                      defaultValue: selectedCellDetail.cellError.semantic_type || t("cleaner.guided.pending")
+                    })}
+                  </span>
+                </div>
+              )}
+
+              {selectedCellDetail.changedItem && (
+                <div className="bg-emerald-50 p-2.5 rounded-lg border border-emerald-200 text-emerald-900">
+                  <span className="font-semibold block mb-0.5">{t("cleaner.legend_action_changed")}:</span>
+                  <span>
+                    {String(selectedCellDetail.changedItem.old)} → {String(selectedCellDetail.changedItem.new)}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end pt-2 border-t border-border">
+              <button
+                type="button"
+                onClick={() => setSelectedCellDetail(null)}
+                className="px-3 py-1.5 text-xs font-medium border border-border rounded-md bg-white hover:bg-neutral-50 text-ink cursor-pointer"
+              >
+                {t("common.close")}
+              </button>
+            </div>
           </div>
         </div>
       )}

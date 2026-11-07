@@ -1,9 +1,9 @@
 import axiosClient from "./axiosClient";
 import { getCurrentLang } from "../i18n";
 
-export const explainChart = async (data) => {
+export const explainChart = async (data, config = {}) => {
     const lang = data.lang || getCurrentLang();
-    const response = await axiosClient.post("/visualize/explain", { ...data, lang });
+    const response = await axiosClient.post("/visualize/explain", { ...data, lang }, config);
     return response.data;
 };
 

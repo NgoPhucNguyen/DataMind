@@ -1,10 +1,12 @@
 from slowapi.errors import RateLimitExceeded
 from slowapi import _rate_limit_exceeded_handler
 from app.core.limiter import limiter
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import os
+import time
+import logging
 from dotenv import load_dotenv
 
 load_dotenv(override=True)
@@ -50,6 +52,16 @@ raw_frontend_urls = os.getenv(
 # 🛠️ Parse the comma-separated string into a python list
 FRONTEND_URLS = [url.strip() for url in raw_frontend_urls.split(",")]
 
+logger = logging.getLogger("timing")
+
+@app.middleware("http")
+async def log_request_timing(request: Request, call_next):
+    start = time.perf_counter()
+    response = await call_next(request)
+    duration_ms = int((time.perf_counter() - start) * 1000)
+    logger.info("req %s %s %s ms=%d", request.method, request.url.path, response.status_code, duration_ms)
+    return response
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=FRONTEND_URLS,
@@ -80,7 +92,7 @@ def get_shared_ai_usage(
 
 
 @app.get("/health")
-async def health():
+def health():
     return {"status": "ok", "message": "DataMind API is running"}
 
 if __name__ == "__main__":

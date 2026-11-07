@@ -1,3 +1,8 @@
+---
+title: Tổng quan về Đánh giá dữ liệu (Profiler)
+updated: 2026-11-02
+---
+
 # Tổng quan về Đánh giá dữ liệu (Profiler) {#overview}
 
 Bước **Đánh giá dữ liệu** (Profiler) là điểm khởi đầu trong quy trình phân tích của DataMind. Khi bạn tải lên một tệp bảng tính (Excel hoặc CSV), hệ thống sẽ lập tức quét toàn bộ cấu trúc để hiểu rõ số lượng dòng, số lượng cột, kiểm tra chất lượng từng thuộc tính và định hướng các bước xử lý tiếp theo.

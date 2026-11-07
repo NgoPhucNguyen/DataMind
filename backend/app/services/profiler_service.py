@@ -19,6 +19,7 @@ from app.core.rules import (
     DISGUISED_NUMERIC_THRESHOLD,
     THOUSANDS_NUMERIC_THRESHOLD,
     NULL_WARNING_PCT_THRESHOLD,
+    HIGH_MISSING_PCT,
     SAMPLE_VALUE_LIMIT,
 )
 
@@ -431,7 +432,7 @@ def profile_dataframe(df: pd.DataFrame) -> list[dict]:
             skip_chart = True
             skip_reason = "Không đủ variance (unique_count ≤ 1)"
             
-        if detected_type == "text" or null_pct > NULL_WARNING_PCT_THRESHOLD:
+        if detected_type == "text" or null_pct >= HIGH_MISSING_PCT:
             low_confidence = True
 
         if detected_type in ("text", "categorical"):

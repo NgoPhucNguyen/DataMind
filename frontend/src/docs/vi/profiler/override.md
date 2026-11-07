@@ -1,3 +1,8 @@
+---
+title: Ghi đè kiểu dữ liệu và Ảnh hưởng
+updated: 2026-11-02
+---
+
 # Ghi đè kiểu dữ liệu và Ảnh hưởng {#override}
 
 Mặc dù giải thuật nhận diện tự động có độ chính xác rất cao, nhưng trong một số trường hợp nghiệp vụ, máy móc không thể hiểu hết ý định của người thu thập dữ liệu (ví dụ: cột "Mã bưu điện" chứa các con số như 70000, 10000 nhưng về bản chất đây là mã định danh khu vực chứ không phải số lượng để cộng trừ).

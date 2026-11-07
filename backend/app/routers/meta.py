@@ -19,7 +19,7 @@ router = APIRouter(prefix="/meta", tags=["Metadata"])
 
 
 @router.get("/rules", summary="Lấy danh mục các quy tắc, ngưỡng và hằng số hệ thống")
-async def get_system_rules() -> dict[str, Any]:
+def get_system_rules() -> dict[str, Any]:
     """
     Trả về toàn bộ hằng số và ngưỡng tính toán gom nhóm theo {profiler, cleaner, session, ai}
     kèm theo đơn vị đo, mô tả tiếng Việt và phiên bản quy tắc hiện tại.
@@ -38,7 +38,7 @@ class ClassifyRequest(BaseModel):
 
 @router.post("/classify", summary="Phân loại thử nghiệm kiểu dữ liệu cho một danh sách giá trị")
 @limiter.limit("30/minute")
-async def classify_values(
+def classify_values(
     request: Request,
     body: ClassifyRequest,
 ) -> dict[str, Any]:
