@@ -1,6 +1,10 @@
 ---
 title: Sửa thủ công & Không gian làm việc
 updated: 2026-11-04
+related:
+  - profiler/override
+  - visualize/chart-settings
+  - report/methodology
 ---
 
 # Sửa thủ công & Không gian làm việc {#manual-clean}

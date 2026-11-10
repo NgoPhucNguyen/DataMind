@@ -166,6 +166,7 @@ class ExplainRequest(BaseModel):
     is_reanalyze: bool = False
     chart_config: dict | None = None
     plotted_data: list | None = None
+    correlation_data: dict | None = None
 
 @router.post("/explain", summary="Giải thích biểu đồ bằng AI")
 async def explain_chart(
@@ -289,6 +290,30 @@ async def explain_chart(
     
     col_stats = {}
     if body.chart_type in ("heatmap", "scatter"):
+        corr_data = body.correlation_data or (body.chart_config.get("correlation_data") if body.chart_config else None)
+        if body.chart_type == "heatmap" and not corr_data and summary.get("correlation_v2"):
+            corr_v2 = summary["correlation_v2"]
+            def_method = corr_v2.get("default_method", "spearman")
+            col_letters = {c["name"]: c.get("letter", "") for c in corr_v2.get("columns", [])}
+            raw_pairs = corr_v2.get("pairs", [])
+            valid_pairs = [p for p in raw_pairs if p.get(def_method) is not None]
+            valid_pairs.sort(key=lambda p: abs(p.get(def_method, 0)), reverse=True)
+            top10 = [
+                {
+                    "a_letter": col_letters.get(p["a"], "A"),
+                    "a": p["a"],
+                    "b_letter": col_letters.get(p["b"], "B"),
+                    "b": p["b"],
+                    "r": p[def_method],
+                    "n": p.get("n", 0),
+                }
+                for p in valid_pairs[:10]
+            ]
+            corr_data = {
+                "method": def_method,
+                "pairs": top10
+            }
+
         corr_matrix = summary.get("correlation_matrix", {})
         r_val = corr_matrix.get(body.col_x, {}).get(body.col_y, "N/A")
         if r_val == "N/A":
@@ -310,6 +335,8 @@ async def explain_chart(
             "col_x_semantic": col_x_sem,
             "col_y_semantic": col_y_sem
         }
+        if corr_data:
+            col_stats["correlation_data"] = corr_data
     else:
         col_stats = summary.get("columns", {}).get(body.col_x, {})
 

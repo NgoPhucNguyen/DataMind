@@ -1,24 +1,28 @@
+import { useTranslation } from "react-i18next";
+
 export default function HowItWorks() {
+    const { t } = useTranslation();
+
     const steps = [
         {
             number: "01",
-            title: "Tải dữ liệu lên",
-            description: "Tải lên tập dữ liệu của bạn dưới dạng CSV, Excel hoặc JSON. DataMind hỗ trợ mọi định dạng phổ biến.",
+            title: t("howItWorks.step1_title", "Tải dữ liệu lên"),
+            description: t("howItWorks.step1_desc", "Tải lên tập dữ liệu của bạn dưới dạng CSV, Excel hoặc JSON. DataMind hỗ trợ mọi định dạng phổ biến."),
         },
         {
             number: "02",
-            title: "Phân tích tự động",
-            description: "Hệ thống AI của chúng tôi tự động phân tích, làm sạch và trực quan hóa dữ liệu trong vài giây.",
+            title: t("howItWorks.step2_title", "Phân tích tự động"),
+            description: t("howItWorks.step2_desc", "Hệ thống AI của chúng tôi tự động phân tích, làm sạch và trực quan hóa dữ liệu trong vài giây."),
         },
         {
             number: "03",
-            title: "Nhận insights",
-            description: "Nhận báo cáo chi tiết với các xu hướng, bất thường và khuyến nghị hành động cụ thể.",
+            title: t("howItWorks.step3_title", "Nhận insights"),
+            description: t("howItWorks.step3_desc", "Nhận báo cáo chi tiết với các xu hướng, bất thường và khuyến nghị hành động cụ thể."),
         },
         {
             number: "04",
-            title: "Xuất kết quả",
-            description: "Xuất báo cáo dưới dạng PDF, chia sẻ dashboard hoặc tích hợp qua API vào hệ thống của bạn.",
+            title: t("howItWorks.step4_title", "Xuất kết quả"),
+            description: t("howItWorks.step4_desc", "Xuất báo cáo dưới dạng PDF, chia sẻ dashboard hoặc tích hợp qua API vào hệ thống của bạn."),
         },
     ];
 
@@ -27,10 +31,10 @@ export default function HowItWorks() {
             <div className="max-w-4xl mx-auto px-4 sm:px-6 py-12 sm:py-20">
                 <div className="text-center mb-16">
                     <h1 className="text-3xl sm:text-4xl font-serif tracking-tight mb-4 text-ink">
-                        Cách <span className="text-forest italic font-semibold">hoạt động</span>
+                        {t("howItWorks.badge", "Cách")} <span className="text-forest italic font-semibold">{t("howItWorks.badge_highlight", "hoạt động")}</span>
                     </h1>
                     <p className="text-muted max-w-xl mx-auto">
-                        Chỉ 4 bước đơn giản để biến dữ liệu thô thành insights có giá trị.
+                        {t("howItWorks.subtitle", "Chỉ 4 bước đơn giản để biến dữ liệu thô thành insights có giá trị.")}
                     </p>
                 </div>
 

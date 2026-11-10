@@ -158,6 +158,7 @@ def _compute_column_stats(
                 pass
 
     col_summary = {
+        "letter": _get_column_letter(df, col, col_idx),
         "dtype": dtype,
         "missing_pct": missing_pct,
         "unique_count": unique_count,
@@ -285,6 +286,39 @@ def _compute_column_stats(
                     })
             else:
                 col_summary["is_discrete"] = False
+                try:
+                    q1_f = float(valid_series.quantile(0.25))
+                    med_f = float(valid_series.median())
+                    q3_f = float(valid_series.quantile(0.75))
+                    iqr_f = float(q3_f - q1_f)
+                    mean_f = float(valid_series.mean())
+                    lower_bound = q1_f - 1.5 * iqr_f
+                    upper_bound = q3_f + 1.5 * iqr_f
+
+                    in_whiskers_low = valid_series[valid_series >= lower_bound]
+                    whisker_low = float(in_whiskers_low.min()) if not in_whiskers_low.empty else val_min
+
+                    in_whiskers_high = valid_series[valid_series <= upper_bound]
+                    whisker_high = float(in_whiskers_high.max()) if not in_whiskers_high.empty else val_max
+
+                    outlier_series = valid_series[(valid_series < whisker_low) | (valid_series > whisker_high)]
+                    outliers_total = int(len(outlier_series))
+                    outliers_unique_sorted = sorted([float(x) for x in outlier_series.unique()])[:50]
+
+                    col_summary["box"] = {
+                        "q1": q1_f,
+                        "median": med_f,
+                        "q3": q3_f,
+                        "iqr": iqr_f,
+                        "whisker_low": whisker_low,
+                        "whisker_high": whisker_high,
+                        "mean": mean_f,
+                        "outliers": outliers_unique_sorted,
+                        "outliers_total": outliers_total,
+                    }
+                except Exception:
+                    pass
+
                 if num_unique > VIZ_DISCRETE_MAX_UNIQUE:
                     try:
                         counts, bin_edges = np.histogram(valid_series, bins=20)
@@ -455,8 +489,9 @@ def compute_statistics_df(
             cleaning_log=cleaning_log,
             col_idx=col_idx
         )
-        summary["columns"][col] = col_stats
         letter = column_letters.get(col) or cleaner_service.col_index_to_letter(col_idx)
+        col_stats["letter"] = letter
+        summary["columns"][col] = col_stats
 
         if col_stats.get("skip_chart"):
             skipped_columns.append({

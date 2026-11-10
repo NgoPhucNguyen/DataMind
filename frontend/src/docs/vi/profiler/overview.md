@@ -1,11 +1,24 @@
 ---
 title: Tổng quan về Đánh giá dữ liệu (Profiler)
 updated: 2026-11-02
+related:
+  - cleaner/overview
+  - visualize/overview
+  - report/overview
 ---
 
 # Tổng quan về Đánh giá dữ liệu (Profiler) {#overview}
 
 Bước **Đánh giá dữ liệu** (Profiler) là điểm khởi đầu trong quy trình phân tích của DataMind. Khi bạn tải lên một tệp bảng tính (Excel hoặc CSV), hệ thống sẽ lập tức quét toàn bộ cấu trúc để hiểu rõ số lượng dòng, số lượng cột, kiểm tra chất lượng từng thuộc tính và định hướng các bước xử lý tiếp theo.
+
+```flow
+nhan:
+- Tệp CSV / Excel thô từ người dùng (tối đa 10MB)
+- Tự động nạp vào bộ nhớ tạm RAM (không lưu đĩa)
+chuyen:
+- Cấu trúc cột & kiểu dữ liệu 5 loại đã xác nhận
+- Danh sách cột chứa vấn đề sang 2. Cleaner
+```
 
 ```dm-callout tip
 Toàn bộ quá trình quét cấu trúc bảng tính diễn ra hoàn toàn trong bộ nhớ tạm của máy chủ (RAM), không lưu file vĩnh viễn và hoàn toàn miễn phí.

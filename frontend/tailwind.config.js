@@ -12,7 +12,7 @@ export default {
         border: '#EAEAEA',
       },
       fontFamily: {
-        sans: ["'Be Vietnam Pro'", "Plus Jakarta Sans", "sans-serif"],
+        sans: ["'Be Vietnam Pro'", "system-ui", "-apple-system", "'Segoe UI'", "Roboto", "Arial", "sans-serif"],
         mono: ["'Geist Mono'", "SF Mono", "monospace"],
       },
       screens: {

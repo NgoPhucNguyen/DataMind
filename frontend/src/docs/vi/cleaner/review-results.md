@@ -1,6 +1,10 @@
 ---
 title: Xem kết quả thay đổi (Báo cáo sai khác)
 updated: 2026-11-04
+related:
+  - profiler/column-stats
+  - visualize/overview
+  - report/methodology
 ---
 
 # Xem kết quả thay đổi (Báo cáo sai khác) {#review-results}

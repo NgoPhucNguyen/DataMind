@@ -6,7 +6,10 @@ import App from "./App";
 import "./index.css";
 import { ToastProvider } from "./contexts/ToastContext";
 import { initAnalytics } from "./lib/analytics";
+import { checkSessionOnStartup } from "./utils/sessionManager";
 
+// Proactively check JWT expiry before app mounting
+checkSessionOnStartup();
 initAnalytics();
 ReactDOM.createRoot(
     document.getElementById("root")

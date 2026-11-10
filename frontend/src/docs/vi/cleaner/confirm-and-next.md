@@ -1,6 +1,9 @@
 ---
 title: Chốt dữ liệu & Chuyển sang Trực quan hóa
 updated: 2026-11-04
+related:
+  - visualize/overview
+  - report/methodology
 ---
 
 # Chốt dữ liệu & Chuyển sang Trực quan hóa {#confirm-and-next}

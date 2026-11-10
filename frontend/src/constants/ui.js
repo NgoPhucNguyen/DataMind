@@ -1,10 +1,10 @@
 // Typography classes — dùng thống nhất toàn app
 export const TEXT = {
-  pageTitle: "text-2xl font-semibold tracking-tight text-[#121A14]",
-  sectionTitle: "text-base font-semibold text-[#121A14]",
-  body: "text-sm text-[#121A14] leading-relaxed",
-  secondary: "text-sm text-[#626C65]",
-  caption: "text-xs text-[#626C65] tracking-wide",
+  pageTitle: "type-page-title tracking-tight text-[#121A14]",
+  sectionTitle: "type-section-title text-[#121A14]",
+  body: "type-body text-[#121A14]",
+  secondary: "type-body text-[#626C65]",
+  caption: "type-caption",
   mono: "font-mono text-sm text-[#121A14]",
 }
 

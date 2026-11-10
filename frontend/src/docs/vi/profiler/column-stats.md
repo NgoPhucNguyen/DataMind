@@ -1,6 +1,10 @@
 ---
 title: Thống kê cột và Gợi ý biểu đồ
 updated: 2026-11-02
+related:
+  - cleaner/find-errors
+  - visualize/reading-insights
+  - report/key-findings
 ---
 
 # Thống kê cột và Gợi ý biểu đồ {#column-stats}

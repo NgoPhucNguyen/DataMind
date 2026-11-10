@@ -1,6 +1,10 @@
 ---
 title: Ghi đè kiểu dữ liệu và Ảnh hưởng
 updated: 2026-11-02
+related:
+  - cleaner/manual-clean
+  - visualize/chart-settings
+  - report/methodology
 ---
 
 # Ghi đè kiểu dữ liệu và Ảnh hưởng {#override}

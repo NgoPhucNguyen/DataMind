@@ -110,7 +110,21 @@ def build_chart_context(chart_type: str, col_x: str, col_stats: dict, col_y: str
 
     # Stats
     md += "\n### Statistical Distribution\n"
-    if chart_type in ("heatmap", "scatter"):
+    corr_data = col_stats.get("correlation_data")
+    if chart_type == "heatmap" and corr_data and corr_data.get("pairs"):
+        method_name = str(corr_data.get("method", "spearman")).capitalize()
+        pairs = corr_data.get("pairs", [])
+        md += f"Dữ liệu các cặp cột có hệ số tương quan mạnh nhất (phương pháp {method_name}):\n"
+        for idx, p in enumerate(pairs, 1):
+            a_let = p.get("a_letter", "")
+            a_name = p.get("a", "")
+            b_let = p.get("b_letter", "")
+            b_name = p.get("b", "")
+            r_val = p.get("r")
+            r_str = f"{r_val:.2f}" if isinstance(r_val, (int, float)) else str(r_val)
+            n_val = p.get("n", "")
+            md += f"  {idx}. [{a_let}] {a_name} ↔ [{b_let}] {b_name}: r = {r_str} (n = {n_val})\n"
+    elif chart_type in ("heatmap", "scatter"):
         r_val = col_stats.get("r", "N/A")
         if isinstance(r_val, (int, float)):
             r_val = round(r_val, 4)
@@ -234,6 +248,14 @@ NGUYÊN TẮC BẮT BUỘC:
 1. CẤM: Bịa đặt hoặc thay đổi số liệu không khớp với phần thông tin ở trên.
 2. ĐƯỢC PHÉP và KHUYẾN KHÍCH: Đưa ra góc nhìn sâu sắc về nghiệp vụ và quy luật xu hướng dựa trên các điểm dữ liệu cụ thể.
 3. Nếu thiếu thông tin để phân tích một khía cạnh cụ thể, nói rõ: "Không đủ dữ liệu để phân tích điểm này."
+"""
+
+    if chart_type == "heatmap" and col_stats.get("correlation_data"):
+        md += """
+HƯỚNG DẪN RIÊNG CHO PHÂN TÍCH TƯƠNG QUAN / CORRELATION INSTRUCTIONS:
+- Hãy giải thích bằng ngôn ngữ đời thường, dễ hiểu về ý nghĩa thực tế mà các cặp tương quan mạnh nhất gợi ra (hoặc bằng tiếng Anh nếu có yêu cầu ngôn ngữ).
+- BẮT BUỘC nhắc đến nguyên tắc: tương quan không đồng nghĩa với quan hệ nhân quả (correlation does not imply causation).
+- Khi nhắc đến các cột, hãy quy chiếu bằng ký tự đại diện và tên ngắn gọn (ví dụ: [A] Tên cột).
 """
 
     if is_unedited_ai_draft:

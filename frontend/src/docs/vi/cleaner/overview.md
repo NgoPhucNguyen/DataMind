@@ -1,11 +1,24 @@
 ---
 title: Tổng quan Làm sạch dữ liệu
 updated: 2026-11-04
+related:
+  - profiler/overview
+  - visualize/overview
+  - report/methodology
 ---
 
 # Tổng quan Làm sạch dữ liệu {#overview}
 
 Sau khi hoàn tất bước Đánh giá dữ liệu (Profiler), hệ thống DataMind sẽ đưa bạn đến bước **Làm sạch dữ liệu (Cleaner)**. Đây là chặng xử lý quan trọng giúp dữ liệu của bạn trở nên chuẩn xác, đồng nhất và sẵn sàng để tạo nên những biểu đồ trực quan sắc nét mà không gặp phải lỗi gián đoạn.
+
+```flow
+nhan:
+- Kiểu dữ liệu 5 loại đã xác nhận từ 1. Profiler
+- Danh sách cột cần chú ý & tỷ lệ ô trống
+chuyen:
+- Bảng dữ liệu sạch chuẩn hóa sang 3. Visualize
+- Nhật ký thao tác & khóa băm làm sạch sang 4. Report
+```
 
 ```dm-callout:tip
 Quá trình làm sạch dữ liệu tại DataMind hoàn toàn không ghi đè lên tệp gốc của bạn. Bạn luôn có thể tải lại file hoặc thử nghiệm các thao tác mà không sợ mất mát dữ liệu ban đầu.

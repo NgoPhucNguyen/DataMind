@@ -39,10 +39,12 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 @app.exception_handler(DataMindException)
 async def datamind_exception_handler(request, exc: DataMindException):
-    status_code = 503 if exc.code == "ERR_AI_UNAVAILABLE" else 400
+    status_code = getattr(exc, "status_code", None) or (503 if exc.code == "ERR_AI_UNAVAILABLE" else 400)
+    data = exc.to_schema().dict()
+    data["detail"] = {"code": exc.code, "message": exc.user_message}
     return JSONResponse(
         status_code=status_code,
-        content=exc.to_schema().dict()
+        content=data
     )
 raw_frontend_urls = os.getenv(
     "FRONTEND_URLS", 

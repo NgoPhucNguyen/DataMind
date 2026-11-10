@@ -42,13 +42,15 @@ class DataMindException(Exception):
         severity: ErrorSeverity,
         user_message: str,
         technical_detail: dict,
-        suggested_action: Optional[dict] = None
+        suggested_action: Optional[dict] = None,
+        status_code: int = 400
     ):
         self.code = code
         self.severity = severity
         self.user_message = user_message
         self.technical_detail = technical_detail
         self.suggested_action = suggested_action
+        self.status_code = status_code
         super().__init__(self.user_message)
         # Validate ngay lập tức để fail fast
         self.to_schema()

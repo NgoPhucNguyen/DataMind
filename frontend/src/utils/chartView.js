@@ -54,16 +54,21 @@ export function sortCategories(items, sortMode, locale = "vi-VN") {
 }
 
 /**
- * Generate monochromatic green shades for ordered data (e.g. Likert scales)
- * from lightest (lowest level) to darkest (highest level, theme green #1B4324).
+ * Generate monochromatic shades for ordered data (e.g. Likert scales)
+ * from lightest (lowest level) to darkest (highest level, palette.primary).
  */
-export function getOrderedGreenShades(n) {
+export function getOrderedShades(primaryHex = "#1B4324", n = 5) {
   if (n <= 0) return [];
-  if (n === 1) return ["#1B4324"];
+  if (n === 1) return [primaryHex];
 
-  const baseR = 27;
-  const baseG = 67;
-  const baseB = 36;
+  let cleanHex = String(primaryHex || "#1B4324").replace("#", "");
+  if (cleanHex.length === 3) {
+    cleanHex = cleanHex.split("").map((c) => c + c).join("");
+  }
+  const baseR = parseInt(cleanHex.substring(0, 2), 16) || 0;
+  const baseG = parseInt(cleanHex.substring(2, 4), 16) || 0;
+  const baseB = parseInt(cleanHex.substring(4, 6), 16) || 0;
+
   const whiteR = 255;
   const whiteG = 255;
   const whiteB = 255;
@@ -80,17 +85,16 @@ export function getOrderedGreenShades(n) {
   return shades;
 }
 
+export function getOrderedGreenShades(n) {
+  return getOrderedShades("#1B4324", n);
+}
+
 export function computeEffectiveChart(chart, stats, settings = {}, summary, t, currentLang) {
   const locale = currentLang?.startsWith("en") ? "en-US" : "vi-VN";
 
   // 1. Continuous numeric
   if (stats?.dtype === "numeric" && !stats?.is_discrete) {
-    const canBox =
-      stats?.min !== undefined &&
-      stats?.p25 !== undefined &&
-      stats?.median !== undefined &&
-      stats?.p75 !== undefined &&
-      stats?.max !== undefined;
+    const canBox = Boolean(stats?.box);
     const displayType = (settings.display_type === "box" && canBox) ? "box" : "histogram";
     return {
       displayType,
@@ -268,4 +272,7 @@ export function computeEffectiveChart(chart, stats, settings = {}, summary, t, c
     hasSettings: false,
   };
 }
+
+export * from "./reportNumbering";
+
 

@@ -1,6 +1,9 @@
 ---
 title: Ngữ cảnh AI và Lĩnh vực dữ liệu
 updated: 2026-11-02
+related:
+  - visualize/ai-explain
+  - report/ai-overview
 ---
 
 # Ngữ cảnh AI và Lĩnh vực dữ liệu {#ai-context}
@@ -29,7 +32,7 @@ Mỗi lần bạn bấm nút "Phân tích AI" hoặc nút phân tích lại, h�
 
 ## Các mức độ tin cậy của AI {#ai-confidence-levels}
 
-- **Độ tin cậy cao** (Huy hiệu xanh lá): Các thuộc tính và giá trị mẫu mang đặc trưng ngành nghề rất rõ nét (ví dụ: có các cột `giá_bán`, `doanh_thu`, `mã_đơn` $\rightarrow$ chắc chắn là Thương mại điện tử).
+- **Độ tin cậy cao** (Huy hiệu xanh lá): Các thuộc tính và giá trị mẫu mang đặc trưng ngành nghề rất rõ nét (ví dụ: có các cột `giá_bán`, `doanh_thu`, `mã_đơn` → chắc chắn là Thương mại điện tử).
 - **Cần xác nhận lại** (Huy hiệu vàng cam): Dữ liệu có tính đa dụng, chưa thể hiện rạch ròi một ngành duy nhất.
 - **Tham khảo thêm** (Huy hiệu đỏ nhạt): Cột bị viết tắt hoặc giá trị mẫu quá ít để kết luận chắc chắn.
 

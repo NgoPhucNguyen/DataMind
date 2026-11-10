@@ -1,6 +1,10 @@
 ---
 title: Tự động sửa với 1 cú click
 updated: 2026-11-04
+related:
+  - profiler/data-types
+  - visualize/to-report
+  - report/methodology
 ---
 
 # Tự động sửa với 1 cú click {#auto-clean}

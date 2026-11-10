@@ -18,6 +18,7 @@ import { detectIssues, autoClean, confirmClean, locateRow } from "../services/cl
 import { profileFile, getSessionStatus } from "../services/profilerService";
 import FileExpiredBanner from "../components/FileExpiredBanner";
 import { useToast } from "../contexts/ToastContext";
+import { useConfirm } from "../components/ui/ConfirmDialog";
 import { translateError, getCurrentLang } from "../i18n";
 import { ArrowRight, ArrowLeft, Info, CheckCircle, AlertTriangle, Upload, RefreshCw, Eye, MousePointerClick, ShieldCheck, Save, Clock, FolderUp, Download, Lock, Zap, PenTool, Compass, Wand2, ChevronLeft, ChevronRight, Check, HelpCircle, X } from "lucide-react";
 import PageHeader from "../components/PageHeader";
@@ -777,6 +778,7 @@ function LoadingStep({ message }) {
 export default function Cleaner({ pipelineMode, onComplete, onError }) {
   const { t } = useTranslation();
   const currentLang = getCurrentLang();
+  const confirm = useConfirm();
   const location = useLocation();
   const navigate = useNavigate();
   const { showToast } = useToast();
@@ -1239,7 +1241,14 @@ export default function Cleaner({ pipelineMode, onComplete, onError }) {
       (issues?.duplicates?.duplicate_count ?? 0) +
       (issues?.semantic_errors?.length ?? 0);
     if (totalIssues > 0) {
-      if (!window.confirm(t("cleaner.confirm_skip_with_issues", { count: totalIssues }))) return;
+      const ok = await confirm({
+        title: t("cleaner.skip_banner_title", { defaultValue: "Bỏ qua làm sạch?" }),
+        message: t("cleaner.confirm_skip_with_issues", { count: totalIssues }),
+        tone: "danger",
+        confirmText: t("common.continue", { defaultValue: "Tiếp tục" }),
+        cancelText: t("common.cancel", { defaultValue: "Hủy" }),
+      });
+      if (!ok) return;
     }
     // Confirm with manual mode + empty actions = skip (no changes)
     setIsSkip(true);
@@ -1268,11 +1277,16 @@ export default function Cleaner({ pipelineMode, onComplete, onError }) {
     }
   };
 
-  const handleBackToOriginal = () => {
+  const handleBackToOriginal = async () => {
     if (manualWorkspaceDirtyRef.current) {
-      if (!window.confirm(t("cleaner.nav.confirm_back_to_original"))) {
-        return;
-      }
+      const ok = await confirm({
+        title: t("common.confirm", { defaultValue: "Xác nhận" }),
+        message: t("cleaner.nav.confirm_back_to_original"),
+        tone: "danger",
+        confirmText: t("common.confirm", { defaultValue: "Đồng ý" }),
+        cancelText: t("common.cancel", { defaultValue: "Hủy" }),
+      });
+      if (!ok) return;
     }
     manualWorkspaceDirtyRef.current = false;
     setConfirmedResult(null);
@@ -1281,11 +1295,16 @@ export default function Cleaner({ pipelineMode, onComplete, onError }) {
     setStep("previewing_issues");
   };
 
-  const handleStartOver = () => {
+  const handleStartOver = async () => {
     if (manualWorkspaceDirtyRef.current) {
-      if (!window.confirm(t("cleaner.nav.confirm_start_over"))) {
-        return;
-      }
+      const ok = await confirm({
+        title: t("common.confirm", { defaultValue: "Xác nhận" }),
+        message: t("cleaner.nav.confirm_start_over"),
+        tone: "danger",
+        confirmText: t("common.confirm", { defaultValue: "Bắt đầu lại" }),
+        cancelText: t("common.cancel", { defaultValue: "Hủy" }),
+      });
+      if (!ok) return;
     }
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
@@ -1757,7 +1776,10 @@ export default function Cleaner({ pipelineMode, onComplete, onError }) {
 
       {/* ── Sticky Bottom Action Bar ── */}
       {fileHash && step !== "detecting" && step !== "cleaning" && step !== "error" && step !== "manual_workspace" && (
-        <div className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-[#E5E5E3] shadow-[0_-4px_20px_rgba(0,0,0,0.06)]">
+        <div
+          className="fixed bottom-0 max-md:bottom-16 right-0 z-30 bg-white/95 backdrop-blur-md border-t border-[#E5E5E3] shadow-[0_-4px_20px_rgba(0,0,0,0.06)] transition-all duration-300"
+          style={{ left: "var(--app-sidebar-w, 0px)" }}
+        >
           <div className="max-w-7xl mx-auto px-4 sm:px-8 py-3 flex flex-col sm:flex-row items-center justify-between gap-3">
             {/* 1. previewing_issues bar */}
             {step === "previewing_issues" && issues && (

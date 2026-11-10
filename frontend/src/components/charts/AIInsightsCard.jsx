@@ -88,23 +88,40 @@ export default function AIInsightsCard({ sessionId, fileHash, chart, autoInsight
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chartId]);
 
-  const currentX =
-    chart.type === "heatmap"
-      ? anchorPair
-        ? anchorPair.colA
-        : chart.topCorr?.length > 0
-        ? chart.topCorr[0].col_a
-        : chart.col
-      : chart.col;
+  const isHeatmap = chart.type === "heatmap";
 
-  const currentY =
-    chart.type === "heatmap"
-      ? anchorPair
-        ? anchorPair.colB
-        : chart.topCorr?.length > 0
-        ? chart.topCorr[0].col_b
-        : null
-      : null;
+  // For heatmap, use a stable col_x so changing UI chips or selection never alters cache key
+  const currentX = isHeatmap ? "all" : chart.col;
+  const currentY = isHeatmap ? null : null;
+
+  // Compute top 10 pairs by |r| using default_method for heatmap
+  let correlationData = null;
+  if (isHeatmap) {
+    const corrV2 = chart.correlation_v2 || fileSession.statisticalSummary?.correlation_v2;
+    if (corrV2?.pairs && corrV2.columns) {
+      const defaultMethod = corrV2.default_method || "spearman";
+      const colLetterMap = new Map();
+      corrV2.columns.forEach(c => colLetterMap.set(c.name, c.letter));
+
+      const sortedPairs = [...corrV2.pairs]
+        .filter(p => p[defaultMethod] !== null && p[defaultMethod] !== undefined && !isNaN(p[defaultMethod]))
+        .sort((p1, p2) => Math.abs(p2[defaultMethod]) - Math.abs(p1[defaultMethod]));
+
+      const top10 = sortedPairs.slice(0, 10).map(p => ({
+        a_letter: colLetterMap.get(p.a) || "A",
+        a: p.a,
+        b_letter: colLetterMap.get(p.b) || "B",
+        b: p.b,
+        r: p[defaultMethod],
+        n: p.n
+      }));
+
+      correlationData = {
+        method: defaultMethod,
+        pairs: top10
+      };
+    }
+  }
 
   const isMismatch =
     displayedCols &&
@@ -125,6 +142,10 @@ export default function AIInsightsCard({ sessionId, fileHash, chart, autoInsight
   const aiAction = useAIAction({
     actionFn: async ({ signal, isReanalyze }) => {
       setLastError(null);
+      const baseConfig = getChartConfig(chart);
+      const chartConfig = correlationData ? { ...baseConfig, correlation_data: correlationData } : baseConfig;
+      const plotted = correlationData ? correlationData.pairs : getPlottedData(chart);
+
       const res = await explainChart(
         {
           session_id: sessionId,
@@ -133,8 +154,9 @@ export default function AIInsightsCard({ sessionId, fileHash, chart, autoInsight
           col_y: currentY,
           tier: "tier1",
           is_reanalyze: Boolean(isReanalyze),
-          chart_config: getChartConfig(chart),
-          plotted_data: getPlottedData(chart),
+          chart_config: chartConfig,
+          plotted_data: plotted,
+          correlation_data: correlationData,
         },
         { signal }
       );
@@ -247,12 +269,12 @@ export default function AIInsightsCard({ sessionId, fileHash, chart, autoInsight
   if (!insightData && !aiAction.loading && !lastError) {
     return (
       <div className="mt-4 pt-3 border-t border-border flex flex-wrap justify-between items-center gap-2 min-w-0">
-        <p className="text-sm text-muted shrink-0">{t("visualize.ai_prompt")}</p>
+        <p className="type-caption shrink-0">{t("visualize.ai_prompt")}</p>
         <button
           id={`ai-explain-btn-${chart.id || chart.col}`}
           onClick={() => handleExplain(false)}
           disabled={isQuotaExhausted || aiAction.loading}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium transition-colors shrink-0 ${
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded type-label font-medium transition-colors shrink-0 ${
             isQuotaExhausted
               ? "bg-neutral-100 text-[#8C948D] cursor-not-allowed opacity-60"
               : "bg-[#EAF2EB] text-[#1B4324] hover:bg-[#dceddd] cursor-pointer"
@@ -271,7 +293,7 @@ export default function AIInsightsCard({ sessionId, fileHash, chart, autoInsight
   if (!insightData && aiAction.loading) {
     return (
       <div className="mt-4 pt-3 border-t border-border flex flex-wrap justify-between items-center gap-2 min-w-0">
-        <p className="text-sm text-muted shrink-0">{t("visualize.ai_prompt")}</p>
+        <p className="type-caption shrink-0">{t("visualize.ai_prompt")}</p>
         {aiAction.AIRunningBar}
       </div>
     );
@@ -281,13 +303,13 @@ export default function AIInsightsCard({ sessionId, fileHash, chart, autoInsight
   if (!insightData && !aiAction.loading && lastError) {
     return (
       <div className="mt-4 pt-3 border-t border-border flex flex-wrap justify-between items-center gap-2 min-w-0">
-        <p className="text-sm text-red-500 flex items-center gap-1 shrink min-w-0">
+        <p className="type-caption text-red-500 flex items-center gap-1 shrink min-w-0">
           <AlertTriangle className="w-4 h-4 shrink-0" />
           <span className="truncate">{lastError}</span>
         </p>
         <button
           onClick={() => { setLastError(null); handleExplain(false); }}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-[#EAF2EB] text-[#1B4324] hover:bg-[#dceddd] rounded text-sm font-medium transition-colors shrink-0 cursor-pointer"
+          className="flex items-center gap-1.5 px-3 py-1.5 bg-[#EAF2EB] text-[#1B4324] hover:bg-[#dceddd] rounded type-label font-medium transition-colors shrink-0 cursor-pointer"
         >
           <RefreshCw className="w-3.5 h-3.5" />
           {t("visualize.ai_btn_retry")}
@@ -309,7 +331,7 @@ export default function AIInsightsCard({ sessionId, fileHash, chart, autoInsight
       {/* Header row */}
       <div className="flex justify-between items-center mb-2 flex-wrap gap-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap min-w-0">
-          <span className="text-sm font-semibold text-ink flex items-center gap-1.5 shrink-0">
+          <span className="type-label font-semibold text-ink flex items-center gap-1.5 shrink-0">
             <Sparkles className="w-4 h-4 text-forest" />
             {t("visualize.ai_title")}
           </span>
@@ -342,7 +364,7 @@ export default function AIInsightsCard({ sessionId, fileHash, chart, autoInsight
             </button>
             <button
               onClick={() => setIsExpanded(!isExpanded)}
-              className="text-xs text-muted hover:text-ink underline underline-offset-2"
+              className="type-caption hover:text-ink underline underline-offset-2"
             >
               {isExpanded ? t("visualize.ai_collapse") : t("visualize.ai_expand")}
             </button>
@@ -414,7 +436,7 @@ export default function AIInsightsCard({ sessionId, fileHash, chart, autoInsight
 
       {/* Content area */}
       {!loading && isExpanded && insightData && (
-        <div className="mt-3 bg-[#F9F9F8] rounded-md border border-border p-3 text-sm text-ink leading-relaxed min-w-0">
+        <div className="mt-3 bg-[#F9F9F8] rounded-md border border-border p-3 type-body text-ink leading-relaxed min-w-0">
           {isEditing ? (
             <div className="space-y-3">
               <textarea

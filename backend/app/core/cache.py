@@ -373,18 +373,25 @@ def get_cleaning_log(user_id: int, file_hash: str) -> list | None:
         logger.warning("Redis GET cleaning_log lỗi: %s", e)
         return None
 
-def set_report_section(user_id: int, file_hash: str, section_name: str, data: dict, ttl: int = 86400) -> None:
-    """Cập nhật hoặc thêm một section vào report_sections."""
+def set_report_section(user_id: int, file_hash: str, section_name: str, data: dict | None, ttl: int = 86400) -> None:
+    """Cập nhật hoặc thêm một section vào report_sections. Nếu data là None thì xóa section đó."""
     client = _get_client()
     if client is None: return
     try:
         key = f"report_sections:{user_id}:{file_hash}"
         raw = client.get(key)
         sections = json.loads(raw) if raw and isinstance(raw, str) else json.loads(raw.decode()) if raw else {}
-        sections[section_name] = data
+        if data is None:
+            sections.pop(section_name, None)
+        else:
+            sections[section_name] = data
         client.set(key, json.dumps(sections), ex=ttl)
     except Exception as e:
         logger.warning("Redis SET report_section lỗi: %s", e)
+
+def delete_report_section(user_id: int, file_hash: str, section_name: str) -> None:
+    """Xóa một section khỏi report_sections."""
+    set_report_section(user_id, file_hash, section_name, None)
 
 def get_all_report_sections(user_id: int, file_hash: str) -> dict | None:
     """Lấy toàn bộ các report sections."""

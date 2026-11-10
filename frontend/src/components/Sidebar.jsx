@@ -1,9 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
-import { FileSearch, Wand2, PieChart, Workflow, ChevronLeft, ChevronRight, LogOut, PanelLeftClose, PanelLeftOpen, FileText, Crown, Sparkles } from "lucide-react";
+import { FileSearch, Wand2, PieChart, Workflow, ChevronLeft, ChevronRight, LogOut, PanelLeftClose, PanelLeftOpen, FileText, Crown, Sparkles, Settings } from "lucide-react";
 import UpgradeModal from "./UpgradeModal";
-import LanguageToggle from "./LanguageToggle";
 
 export default function Sidebar() {
   const [sidebarState, setSidebarState] = useState(() => {
@@ -14,6 +13,27 @@ export default function Sidebar() {
   const navigate = useNavigate();
   const { user, logout, subscription, reloadSubscription } = useAuth();
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+
+  useEffect(() => {
+    const updateSidebarWidth = () => {
+      const isDesktop = window.matchMedia("(min-width: 768px)").matches;
+      let w = "0px";
+      if (isDesktop) {
+        if (sidebarState === "expanded") w = "16rem";
+        else if (sidebarState === "canva-collapsed") w = "5rem";
+        else if (sidebarState === "hidden") w = "0px";
+        else w = "16rem";
+      }
+      document.documentElement.style.setProperty("--app-sidebar-w", w);
+    };
+
+    updateSidebarWidth();
+    window.addEventListener("resize", updateSidebarWidth);
+    return () => {
+      window.removeEventListener("resize", updateSidebarWidth);
+      document.documentElement.style.setProperty("--app-sidebar-w", "0px");
+    };
+  }, [sidebarState]);
 
   const updateState = (newState) => {
     setSidebarState(newState);
@@ -26,6 +46,7 @@ export default function Sidebar() {
     { path: "/dashboard/visualize", label: "Trực quan hóa", icon: <PieChart className="w-5 h-5" /> },
     { path: "/dashboard/report", label: "Báo cáo", icon: <FileText className="w-5 h-5" /> },
     { path: "/dashboard/pipeline", label: "Tự động", icon: <Workflow className="w-5 h-5" /> },
+    { path: "/dashboard/settings", label: "Cài đặt", icon: <Settings className="w-5 h-5" /> },
   ];
 
   let widthClass = "md:w-64";
@@ -136,9 +157,6 @@ export default function Sidebar() {
                     <Sparkles className="w-4 h-4" /> Nâng cấp Pro
                   </button>
                 )}
-                <div className="flex justify-center w-full my-1">
-                  <LanguageToggle />
-                </div>
                 <button
                   onClick={() => updateState("hidden")}
                   className="flex items-center justify-center gap-2 py-2 w-full text-xs text-muted hover:text-ink hover:bg-sage/40 rounded-lg transition-colors border border-transparent"
@@ -152,10 +170,6 @@ export default function Sidebar() {
                   <div className="w-10 h-10 rounded-full bg-forest flex items-center justify-center text-white font-bold shrink-0">
                     {user.full_name?.charAt(0) || user.email?.charAt(0) || "U"}
                   </div>
-                </div>
-                
-                <div className="flex justify-center w-full my-0.5">
-                  <LanguageToggle />
                 </div>
 
                 <button

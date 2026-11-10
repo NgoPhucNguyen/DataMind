@@ -9,7 +9,9 @@ import {
 import { useEffect } from "react";
 import { useToast } from "./contexts/ToastContext";
 import { FileSessionProvider } from "./contexts/FileSessionContext";
+import { ChartThemeProvider } from "./contexts/ChartThemeContext";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
+import { ConfirmProvider } from "./components/ui/ConfirmDialog";
 
 import LandingPage from "./pages/LandingPage";
 import Login from "./pages/Login";
@@ -22,6 +24,7 @@ import Visualize from "./pages/Visualize";
 import Report from "./pages/Report";
 import Docs from "./pages/Docs";
 import Pipeline from "./pages/Pipeline";
+import Settings from "./pages/Settings";
 
 import Navbar from "./components/Navbar";
 import Sidebar from "./components/Sidebar";
@@ -34,14 +37,23 @@ function RequireAuth({ children }) {
   const { showToast } = useToast();
   const { user } = useAuth();
 
+  const isExpired =
+    typeof window !== "undefined" &&
+    (sessionStorage.getItem("datamind_session_expired") === "true" ||
+      new URLSearchParams(window.location.search).get("reason") === "expired");
+
   useEffect(() => {
-    if (!user) {
+    if (!user && !isExpired) {
       showToast("Vui lòng đăng nhập để tiếp tục sử dụng tính năng này.", "warning");
     }
-  }, []);
+  }, [user, isExpired]);
 
   if (!user) {
-    return <Navigate to="/login" state={{ from: location }} replace />;
+    const returnPath = location.pathname + location.search;
+    const loginTarget = isExpired
+      ? `/login?reason=expired&next=${encodeURIComponent(returnPath)}`
+      : `/login?next=${encodeURIComponent(returnPath)}`;
+    return <Navigate to={loginTarget} state={{ from: location }} replace />;
   }
 
   return children;
@@ -62,7 +74,7 @@ function GuestOnly({ children }) {
 // Navbar on top, page content below via <Outlet>
 function PublicLayout() {
   return (
-    <div className="min-h-screen bg-canvas text-ink flex flex-col">
+    <div className="min-h-screen bg-canvas text-ink flex flex-col" style={{ "--app-topbar-h": "65px" }}>
       <Navbar />
       <main className="flex-1 relative">
         <Outlet />
@@ -75,20 +87,24 @@ function PublicLayout() {
 // Sidebar (desktop) + mobile bottom Navbar, page content via <Outlet>
 function DashboardLayout() {
   return (
-    <div className="min-h-screen bg-canvas text-ink flex md:flex-row max-md:flex-col">
+    <div className="min-h-screen bg-canvas text-ink flex md:flex-row max-md:flex-col print:block print:min-h-0 print:bg-white">
       {/* Sidebar for Desktop */}
-      <Sidebar />
+      <div className="print:hidden shrink-0 z-50">
+        <Sidebar />
+      </div>
 
-      <div className="flex-1 flex flex-col h-screen overflow-hidden max-md:pb-16">
+      <div className="flex-1 flex flex-col h-screen overflow-hidden max-md:pb-16 print:h-auto print:overflow-visible print:block">
         {/* Top Navbar for Mobile only */}
-        <div className="md:hidden">
+        <div className="md:hidden print:hidden" style={{ "--app-topbar-h": "65px" }}>
           <Navbar />
         </div>
 
         {/* Expired Pro Banner */}
-        <ExpiredProBanner />
+        <div className="print:hidden">
+          <ExpiredProBanner />
+        </div>
 
-        <main className="flex-1 relative overflow-y-auto">
+        <main className="flex-1 relative overflow-y-auto print:h-auto print:overflow-visible print:block">
           <ErrorBoundary>
             <Outlet />
           </ErrorBoundary>
@@ -128,9 +144,11 @@ function AppRoutes() {
         <Route path="pipeline" element={<Pipeline />} />
         <Route path="pipeline/:step" element={<Pipeline />} />
         <Route path="subscription" element={<Subscription />} />
+        <Route path="settings" element={<Settings />} />
       </Route>
 
       {/* ── Redirect shims for old flat URLs ── */}
+      <Route path="/settings" element={<Navigate to="/dashboard/settings" replace />} />
       <Route path="/profiler" element={<Navigate to="/dashboard/profiler" replace />} />
       <Route path="/cleaner" element={<Navigate to="/dashboard/cleaner" replace />} />
       <Route path="/visualize" element={<Navigate to="/dashboard/visualize" replace />} />
@@ -155,7 +173,11 @@ function App() {
     <BrowserRouter>
       <AuthProvider>
         <FileSessionProvider>
-          <AppRoutes />
+          <ChartThemeProvider>
+            <ConfirmProvider>
+              <AppRoutes />
+            </ConfirmProvider>
+          </ChartThemeProvider>
         </FileSessionProvider>
       </AuthProvider>
     </BrowserRouter>

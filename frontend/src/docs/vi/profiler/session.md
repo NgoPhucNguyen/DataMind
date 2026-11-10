@@ -1,6 +1,9 @@
 ---
 title: Phiên làm việc và Bộ nhớ tạm
 updated: 2026-11-02
+related:
+  - cleaner/confirm-and-next
+  - report/export
 ---
 
 # Phiên làm việc và Bộ nhớ tạm {#session}

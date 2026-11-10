@@ -1,8 +1,9 @@
 import os
+import json
 import logging
 from fastapi import APIRouter, Depends, Request, Query
 from fastapi.responses import JSONResponse
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Literal
 from datetime import datetime, timezone
 import hashlib
 from pydantic import BaseModel, Field
@@ -18,27 +19,55 @@ from app.core.ai_client import get_dev_provider
 router = APIRouter(tags=["report"])
 logger = logging.getLogger(__name__)
 
+def get_stable_chart_id(item: Any) -> str:
+    """
+    Trích xuất chart id ổn định không phụ thuộc vào user_title:
+    1. chart_id hoặc id nếu có.
+    2. Nếu không có, suy ra từ type + column (+ col_y) ví dụ 'bar:<column>' hoặc 'scatter:<col_x>:<col_y>'.
+    Tuyệt đối không dùng user_title hay title.
+    """
+    if isinstance(item, str):
+        return item
+    if not isinstance(item, dict):
+        return str(item) if item else ""
+    cid = item.get("chart_id") or item.get("id")
+    if cid:
+        return str(cid)
+    ctype = item.get("type") or item.get("display_type") or "chart"
+    col = item.get("column") or item.get("col") or item.get("col_x") or ""
+    col_y = item.get("col_y") or ""
+    if col_y:
+        return f"{ctype}:{col}:{col_y}"
+    return f"{ctype}:{col}"
+
 def compute_charts_hash(charts_or_ids: List[Any] | None) -> str:
     """
-    charts_hash = md5 of sorted chart_ids (first 12 chars).
-    charts_or_ids can be list of chart objects with 'chart_id'/'id' or list of string chart_ids.
+    Stable charts_hash algorithm (v2):
+    MD5 (first 12 hex chars) of comma-separated sorted stable chart IDs.
+    Stable chart ID = chart_id or id; if both missing, derived as '{type}:{column}'
+    or '{type}:{column}:{col_y}'.
+    Renaming user_title, reordering, or changing chart display settings does NOT change this hash.
+    Only adding or removing charts changes it.
+    Both backend (report.py) and frontend (Report.jsx) implement this exact algorithm.
     """
     if not charts_or_ids:
         return hashlib.md5("".encode("utf-8")).hexdigest()[:12]
     
-    ids: List[str] = []
-    for item in charts_or_ids:
-        if isinstance(item, dict):
-            cid = item.get("chart_id") or item.get("id") or item.get("user_title") or item.get("title") or ""
-            ids.append(str(cid))
-        elif isinstance(item, str):
-            ids.append(item)
-        else:
-            ids.append(str(item))
-            
+    ids: List[str] = [get_stable_chart_id(item) for item in charts_or_ids]
+    ids = [i for i in ids if i]
     ids.sort()
     combined = ",".join(ids)
     return hashlib.md5(combined.encode("utf-8")).hexdigest()[:12]
+
+def compute_cleaning_hash(cleaning_log: Any) -> str:
+    """
+    MD5 (first 12 hex chars) của cleaning_log được tuần tự hóa nhất quán.
+    Dùng để phát hiện dữ liệu có bị làm sạch lại sau khi methodology được lưu hay không.
+    """
+    if not cleaning_log:
+        return hashlib.md5("".encode("utf-8")).hexdigest()[:12]
+    serialized = json.dumps(cleaning_log, sort_keys=True, separators=(',', ':'))
+    return hashlib.md5(serialized.encode("utf-8")).hexdigest()[:12]
 
 class ReportIntroRequest(BaseModel):
     file_hash: str | None = None
@@ -57,6 +86,19 @@ class SaveReportIntroRequest(BaseModel):
     text: str
     chart_ids: Optional[List[str]] = None
 
+class SaveReportMethodologyRequest(BaseModel):
+    file_hash: str
+    text: str = ""
+    cleaning_hash: Optional[str] = None
+
+class SaveReportTextRequest(BaseModel):
+    file_hash: str
+    section: Literal["methodology", "key_findings"]
+    text: str = ""
+    cleaning_hash: Optional[str] = None
+    charts_hash: Optional[str] = None
+    chart_ids: Optional[List[Any]] = None
+
 @router.get("/report/state")
 def get_report_state(
     file_hash: str = Query(...),
@@ -68,14 +110,19 @@ def get_report_state(
     - intro: giá trị đã cache (source: ai/user, text, charts_hash, generated_at) hoặc null.
     - cleaner: thông tin report section 'cleaner' (clean_mode, stats, actions_taken count, ignored_cells_count) hoặc null.
     - context: {description, description_source, domain} từ profiler_context hoặc null.
+    - methodology: {text, source: 'user', cleaning_hash, updated_at} từ report_sections hoặc null.
+    - key_findings: {text, source: 'user', charts_hash, updated_at} từ report_sections hoặc null.
+    - cleaning_hash: hash của cleaning_log hiện tại.
     """
     user_id = current_user["user_id"]
     cached_intro = cache.get_report_intro(user_id, file_hash, lang)
     
-    # Cleaner & Visualize sections từ report_sections
+    # Cleaner, Visualize, Methodology & Key Findings sections từ report_sections
     sections = cache.get_all_report_sections(user_id, file_hash) or {}
     cleaner_section = sections.get("cleaner")
     visualize_section = sections.get("visualize")
+    methodology_section = sections.get("methodology")
+    key_findings_section = sections.get("key_findings")
     
     # Profiler context
     p_ctx = cache.get_profiler_context(user_id, file_hash)
@@ -88,11 +135,24 @@ def get_report_state(
             "domain": sem_ctx.get("domain") or p_ctx.get("domain")
         }
 
+    # Current cleaning_hash
+    current_cleaning_hash = None
+    if cleaner_section:
+        current_cleaning_hash = compute_cleaning_hash(cleaner_section.get("actions_taken"))
+        cleaner_section["cleaning_hash"] = current_cleaning_hash
+    else:
+        raw_log = cache.get_cleaning_log(user_id, file_hash)
+        if raw_log:
+            current_cleaning_hash = compute_cleaning_hash(raw_log)
+
     return {
         "intro": cached_intro,
         "cleaner": cleaner_section,
         "visualize": visualize_section,
-        "context": context_data
+        "context": context_data,
+        "methodology": methodology_section,
+        "key_findings": key_findings_section,
+        "cleaning_hash": current_cleaning_hash,
     }
 
 @router.post("/report/intro")
@@ -155,6 +215,7 @@ async def get_report_intro(
                     "text": intro_text,
                     "source": "ai",
                     "charts_hash": charts_hash,
+                    "hash_version": 2,
                     "generated_at": datetime.now(timezone.utc).isoformat()
                 }
             )
@@ -191,10 +252,80 @@ def save_report_intro(
         "text": body.text,
         "source": "user",
         "charts_hash": charts_hash,
+        "hash_version": 2,
         "generated_at": datetime.now(timezone.utc).isoformat()
     }
     cache.set_report_intro(user_id, body.file_hash, norm_lang, data)
     return {"message": "Đã lưu bản chỉnh sửa.", "data": data}
+
+@router.post("/report/text/save")
+def save_report_text(
+    body: SaveReportTextRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Lưu văn bản do user trực tiếp chỉnh sửa (source: 'user') cho section:
+    'methodology' hoặc 'key_findings' vào report_sections.
+    Không tiêu tốn quota AI, không gọi Gemini.
+    Nếu text rỗng hoặc chỉ khoảng trắng -> xóa bản user (quay lại auto text).
+    """
+    user_id = current_user["user_id"]
+    if not body.text or not body.text.strip():
+        cache.delete_report_section(user_id, body.file_hash, body.section)
+        return {"message": f"Đã xóa bản chỉnh sửa {body.section} (khôi phục auto text).", "data": None}
+
+    if body.section == "methodology":
+        cleaning_hash = body.cleaning_hash
+        if not cleaning_hash:
+            cleaner_sec = (cache.get_all_report_sections(user_id, body.file_hash) or {}).get("cleaner")
+            actions = cleaner_sec.get("actions_taken") if cleaner_sec else None
+            cleaning_hash = compute_cleaning_hash(actions or cache.get_cleaning_log(user_id, body.file_hash))
+
+        data = {
+            "text": body.text,
+            "source": "user",
+            "cleaning_hash": cleaning_hash,
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }
+        cache.set_report_section(user_id, body.file_hash, "methodology", data)
+        return {"message": "Đã lưu bản chỉnh sửa methodology.", "data": data}
+
+    elif body.section == "key_findings":
+        charts_hash = body.charts_hash
+        if not charts_hash:
+            if body.chart_ids is not None:
+                charts_hash = compute_charts_hash(body.chart_ids)
+            else:
+                vis_sec = (cache.get_all_report_sections(user_id, body.file_hash) or {}).get("visualize")
+                charts = vis_sec.get("charts") if vis_sec else None
+                charts_hash = compute_charts_hash(charts or [])
+
+        data = {
+            "text": body.text,
+            "source": "user",
+            "charts_hash": charts_hash,
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }
+        cache.set_report_section(user_id, body.file_hash, "key_findings", data)
+        return {"message": "Đã lưu bản chỉnh sửa key_findings.", "data": data}
+
+@router.post("/report/methodology/save")
+def save_report_methodology(
+    body: SaveReportMethodologyRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Backward-compatible wrapper for save_report_text with section='methodology'.
+    """
+    return save_report_text(
+        SaveReportTextRequest(
+            file_hash=body.file_hash,
+            section="methodology",
+            text=body.text,
+            cleaning_hash=body.cleaning_hash
+        ),
+        current_user=current_user
+    )
 
 
 

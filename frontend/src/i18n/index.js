@@ -63,13 +63,38 @@ export function getCurrentLang() {
   return SUPPORTED_LANGS.includes(current) ? current : DEFAULT_LANG;
 }
 
-export function translateError(code, fallback) {
-  if (code && typeof code === "string") {
-    const key = `errors.${code}`;
+const KNOWN_ERROR_MAP = {
+  "Email này đã được sử dụng. Vui lòng dùng email khác.": "ERR_EMAIL_IN_USE",
+  "Email hoặc mật khẩu không đúng.": "ERR_INVALID_CREDENTIALS",
+  "Không thể xác thực tài khoản Google. Vui lòng thử lại.": "ERR_GOOGLE_AUTH_FAILED",
+  "Email Google chưa được xác minh.": "ERR_GOOGLE_EMAIL_UNVERIFIED",
+  "Họ tên phải có ít nhất 2 ký tự": "ERR_NAME_TOO_SHORT",
+  "Mật khẩu phải có ít nhất 6 ký tự": "ERR_PASSWORD_TOO_SHORT",
+};
+
+export function translateError(errorOrCode, fallback) {
+  if (!errorOrCode) return fallback || i18n.t("errors.generic");
+
+  let code = errorOrCode;
+  if (Array.isArray(errorOrCode) && errorOrCode.length > 0) {
+    const first = errorOrCode[0];
+    code = (first?.msg || "").replace(/^Value error,\s*/, "");
+  }
+
+  if (typeof code === "string") {
+    const trimmed = code.trim();
+    if (KNOWN_ERROR_MAP[trimmed]) {
+      return i18n.t(`errors.${KNOWN_ERROR_MAP[trimmed]}`);
+    }
+    const key = `errors.${trimmed}`;
     if (i18n.exists(key)) {
       return i18n.t(key);
     }
+    // Return original message if it's already a descriptive custom string, else fallback
+    if (fallback) return fallback;
+    return trimmed;
   }
+
   return fallback || i18n.t("errors.generic");
 }
 

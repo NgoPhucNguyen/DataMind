@@ -662,7 +662,10 @@ export default function Profiler({ pipelineMode, onComplete, onError }) {
 
       {/* ── Sticky Bottom Bar (Profiler, same bar style as Cleaner/Visualize) ── */}
       {result && (
-        <div className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-[#E5E5E3] shadow-[0_-4px_20px_rgba(0,0,0,0.06)]">
+        <div
+          className="fixed bottom-0 max-md:bottom-16 right-0 z-30 bg-white/95 backdrop-blur-md border-t border-[#E5E5E3] shadow-[0_-4px_20px_rgba(0,0,0,0.06)] transition-all duration-300"
+          style={{ left: "var(--app-sidebar-w, 0px)" }}
+        >
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2.5 flex flex-col sm:flex-row items-center justify-between gap-2.5">
             {/* Left: Summary + Attention Chip + Countdown + Cached */}
             <div className="flex items-center gap-2.5 flex-wrap justify-between sm:justify-start w-full sm:w-auto">

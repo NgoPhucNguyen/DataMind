@@ -2,9 +2,58 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --app-topbar-h: 0px;
+  --app-sidebar-w: 0px;
+}
+
 /* ── Base ──────────────────────────────────────────────────── */
-body {
+html, body {
+  font-family: 'Be Vietnam Pro', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
+}
+
+/* ── Shared Semantic Type Scale ────────────────────────────── */
+@layer components {
+  .type-page-title {
+    font-size: 24px;
+    line-height: 32px;
+    font-weight: 700;
+  }
+  .type-section-title {
+    font-size: 18px;
+    line-height: 28px;
+    font-weight: 600;
+  }
+  .type-card-title {
+    font-size: 16px;
+    line-height: 24px;
+    font-weight: 600;
+  }
+  .type-body {
+    font-size: 15px;
+    line-height: 24px;
+    font-weight: 400;
+  }
+  .type-body-strong {
+    font-size: 15px;
+    line-height: 24px;
+    font-weight: 600;
+  }
+  .type-label {
+    font-size: 13px;
+    line-height: 20px;
+    font-weight: 500;
+  }
+  .type-caption {
+    font-size: 13px;
+    line-height: 20px;
+    font-weight: 400;
+    color: #626C65;
+  }
+  .type-number {
+    font-variant-numeric: tabular-nums;
+  }
 }
 
 /* ── Slide-in (existing) ───────────────────────────────────── */
@@ -117,4 +166,389 @@ a:focus-visible {
   outline-offset: -1px !important;
   position: relative !important;
   z-index: 35 !important;
+}
+
+/* ── Print & PDF Export Stylesheet ─────────────────────────── */
+.print-only {
+  display: none;
+}
+
+html.is-printing .report-print-root {
+  width: 718px !important;
+  max-width: 718px !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+}
+
+html.is-printing .report-section-excluded {
+  display: none !important;
+}
+
+/* 2-column grid active when is-printing preview or @media print */
+html.is-printing .report-charts-grid,
+@media print {
+  .report-charts-grid {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 10pt !important;
+  }
+  .report-charts-grid > * {
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+  }
+  .report-chart-full {
+    grid-column: 1 / -1 !important;
+  }
+  .report-chart-half {
+    grid-column: span 1 !important;
+  }
+  .report-chart-half .report-chart-container {
+    height: 170px !important;
+    min-height: 170px !important;
+    max-height: 170px !important;
+  }
+  .report-chart-full .report-chart-container {
+    height: 220px !important;
+    min-height: 220px !important;
+  }
+  .report-chart-full[data-chart-type="heatmap"] .report-chart-container,
+  .report-chart-full[data-chart-type="corr_pair"] .report-chart-container {
+    height: auto !important;
+    min-height: auto !important;
+    max-height: none !important;
+  }
+}
+
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 16mm 14mm;
+    @bottom-left {
+      content: "DataMind";
+      font-size: 8pt;
+      color: #626C65;
+      font-family: 'Be Vietnam Pro', system-ui, -apple-system, sans-serif;
+    }
+    @bottom-right {
+      content: "Trang " counter(page) " / " counter(pages);
+      font-size: 8pt;
+      color: #626C65;
+      font-family: 'Be Vietnam Pro', system-ui, -apple-system, sans-serif;
+    }
+  }
+
+  *, *::before, *::after {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  html, body {
+    background: #ffffff !important;
+    color: #111827 !important;
+    font-family: 'Be Vietnam Pro', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif !important;
+    font-size: 11pt !important;
+    line-height: 1.5 !important;
+  }
+
+  /* Unconstrain containers for natural multi-page flow */
+  html, body, #root, #root > div, main,
+  div.h-screen, div.overflow-hidden, div.overflow-y-auto, div.min-h-screen {
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    position: static !important;
+    background: #ffffff !important;
+  }
+
+  /* Hide app chrome, navigation, toolbars, buttons, dialogs, toasts */
+  nav,
+  header,
+  footer,
+  aside,
+  .no-print,
+  .print-hidden,
+  .print\:hidden,
+  button,
+  [role="tooltip"],
+  .toast-container {
+    display: none !important;
+  }
+
+  .print-only {
+    display: block !important;
+  }
+
+  /* Report document root styling */
+  .report-print-root {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: #ffffff !important;
+  }
+
+  /* Compact header (print only) */
+  .report-print-root .report-screen-header {
+    display: none !important;
+  }
+  .report-print-root .report-print-header {
+    display: block !important;
+    padding-top: 0 !important;
+    margin-top: 0 !important;
+    margin-bottom: 12pt !important;
+    padding-bottom: 6pt !important;
+    border-bottom: 1.5pt solid #1B4324 !important;
+    text-align: left !important;
+  }
+  .report-print-root .report-print-header h1 {
+    font-size: 18pt !important;
+    line-height: 1.25 !important;
+    font-weight: 700 !important;
+    color: #111827 !important;
+    margin-bottom: 3pt !important;
+  }
+  .report-print-root .report-print-header .report-meta-line {
+    font-size: 9.5pt !important;
+    line-height: 1.35 !important;
+    color: #626C65 !important;
+  }
+
+  /* Section spacing & removing horizontal dividers */
+  .report-print-root .report-section {
+    margin-bottom: 13pt !important;
+    padding-bottom: 0 !important;
+    border-bottom: none !important;
+  }
+  .report-section-excluded,
+  .report-print-root .report-section-excluded {
+    display: none !important;
+  }
+  .report-print-root hr,
+  .report-print-root .border-b {
+    border-bottom-color: transparent !important;
+  }
+
+  /* Section titles */
+  .report-print-root h2,
+  .report-print-root .report-section-title {
+    color: #1B4324 !important;
+    font-size: 13pt !important;
+    line-height: 1.35 !important;
+    font-weight: 600 !important;
+    margin-bottom: 6pt !important;
+    border-bottom: none !important;
+    padding-bottom: 0 !important;
+    break-after: avoid !important;
+    page-break-after: avoid !important;
+  }
+  .report-print-root h2 svg,
+  .report-print-root .report-section-title svg {
+    display: none !important;
+  }
+
+  /* Text boxes (overview, method, AI text) - 2pt left border in theme green, no gray bg */
+  .report-print-root .report-textbox {
+    background: transparent !important;
+    background-color: transparent !important;
+    border-top: none !important;
+    border-right: none !important;
+    border-bottom: none !important;
+    border-left: 2pt solid #1B4324 !important;
+    border-radius: 0 !important;
+    padding: 3pt 0 3pt 8pt !important;
+    margin-top: 4pt !important;
+    margin-bottom: 4pt !important;
+    font-size: 10.5pt !important;
+    line-height: 1.45 !important;
+    color: #111827 !important;
+    box-shadow: none !important;
+  }
+
+  /* Body typography scale */
+  .report-print-root p,
+  .report-print-root .report-body {
+    font-size: 10.5pt !important;
+    line-height: 1.45 !important;
+  }
+
+  .report-print-root .report-caption,
+  .report-print-root .text-xs,
+  .report-print-root .text-\[11px\] {
+    font-size: 8.5pt !important;
+    line-height: 1.35 !important;
+  }
+
+  .report-print-root h3 {
+    font-size: 12pt !important;
+    line-height: 1.4 !important;
+    font-weight: 600 !important;
+  }
+
+  .report-print-root a {
+    color: inherit !important;
+    text-decoration: none !important;
+  }
+
+  .report-print-root textarea {
+    display: none !important;
+  }
+
+  /* Chart Cards & Badges */
+  .report-chart-card {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+    border: 1px solid #EAEAEA !important;
+    border-radius: 8px !important;
+    padding: 8pt !important;
+    background: #ffffff !important;
+  }
+
+  .report-chart-badge {
+    background-color: #1B4324 !important;
+    color: #ffffff !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    width: 20px !important;
+    height: 20px !important;
+    font-size: 8.5pt !important;
+  }
+
+  .report-chart-title {
+    font-size: 11pt !important;
+    line-height: 1.3 !important;
+    font-weight: 600 !important;
+    margin-bottom: 4pt !important;
+    break-after: avoid !important;
+    page-break-after: avoid !important;
+  }
+
+  .report-chart-half .report-chart-title-text {
+    font-size: 10.5pt !important;
+    line-height: 1.25 !important;
+    display: -webkit-box !important;
+    -webkit-line-clamp: 3 !important;
+    -webkit-box-orient: vertical !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: normal !important;
+  }
+
+  .report-chart-half text,
+  .report-chart-half .recharts-cartesian-axis-tick text,
+  .report-chart-half .recharts-legend-item-text {
+    font-size: 8pt !important;
+  }
+
+  .report-chart-half .report-auto-insights {
+    margin-top: 3pt !important;
+    padding-top: 3pt !important;
+    border-top: 1px solid #EAEAEA !important;
+  }
+  .report-chart-half .report-auto-insights p {
+    font-size: 8.5pt !important;
+    margin-bottom: 1.5pt !important;
+  }
+  .report-chart-half .report-auto-insights li {
+    font-size: 8.5pt !important;
+    line-height: 1.25 !important;
+  }
+
+  .report-chart-full .report-chart-title-text {
+    font-size: 11.5pt !important;
+  }
+
+  /* Page breaks */
+  .report-print-root .break-inside-avoid,
+  .report-print-root table,
+  .report-print-root tr {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
+
+  .report-print-root h1,
+  .report-print-root h2,
+  .report-print-root h3,
+  .report-print-root h4 {
+    break-after: avoid !important;
+    page-break-after: avoid !important;
+  }
+
+  /* Unclip text in print */
+  .report-print-root .line-clamp-1,
+  .report-print-root .line-clamp-2,
+  .report-print-root .truncate {
+    overflow: visible !important;
+    text-overflow: clip !important;
+    white-space: normal !important;
+    display: block !important;
+    -webkit-line-clamp: unset !important;
+    max-height: none !important;
+  }
+
+  /* Correlation block page-break & layout polish */
+  .report-print-root .report-card-heatmap,
+  .report-print-root [data-chart-type="heatmap"] {
+    break-inside: auto !important;
+    page-break-inside: auto !important;
+  }
+
+  .report-card-heatmap .report-chart-title,
+  .report-card-heatmap .report-corr-header {
+    break-after: avoid !important;
+    page-break-after: avoid !important;
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
+
+  .report-corr-pairs-block {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+    margin-bottom: 8pt !important;
+  }
+
+  .report-corr-pairs-block .report-table-caption {
+    break-after: avoid !important;
+    page-break-after: avoid !important;
+    font-size: 9pt !important;
+    font-weight: 600 !important;
+    color: #121A14 !important;
+    margin-bottom: 3pt !important;
+  }
+
+  .report-corr-table {
+    font-size: 8.5pt !important;
+  }
+  .report-corr-table th,
+  .report-corr-table td {
+    padding: 3pt 6pt !important;
+    font-size: 8.5pt !important;
+    line-height: 1.35 !important;
+  }
+
+  .report-corr-matrix-block {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+    margin-bottom: 8pt !important;
+  }
+
+  .report-corr-letter-key {
+    break-inside: auto !important;
+    page-break-inside: auto !important;
+  }
+  .report-corr-letter-key-title {
+    break-after: avoid !important;
+    page-break-after: avoid !important;
+  }
+  .report-corr-letter-item {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
+
+  /* Correlation table font */
+  .report-print-root table {
+    font-size: 8.5pt !important;
+  }
 }

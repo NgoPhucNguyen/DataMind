@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { TEXT, BTN, CARD } from "../../constants/ui";
 import { manualCleanPreview, locateRow } from "../../services/cleanerService";
 import { useToast } from "../../contexts/ToastContext";
+import { useConfirm } from "../ui/ConfirmDialog";
 import { getColumnWidth, getOrderedErrorCells, getNextError, getPrevError, scrollToCell, highlightExcelCell } from "./tableUtils";
 import { colLetter, cellAddress, cellAddressWords } from "../../utils/cellAddress";
 import { GoToCellInput } from "./GoToCellInput";
@@ -40,6 +41,7 @@ export default function ManualCleanWorkspace({
 }) {
   const { t } = useTranslation();
   const currentLang = getCurrentLang();
+  const confirm = useConfirm();
   const [colLetters, setColLetters] = useState(columnLetters || {});
   const [columnIssueCounts, setColumnIssueCounts] = useState(initialColumnIssueCounts || {});
   const [isErrorPanelOpen, setIsErrorPanelOpen] = useState(false);
@@ -295,8 +297,14 @@ export default function ManualCleanWorkspace({
 
   const executeAction = async (newAction) => {
     if (pendingCellEdits.length > 0) {
-      const confirmed = window.confirm(t("cleaner.workspace.unsaved_confirm_action"));
-      if (!confirmed) return;
+      const ok = await confirm({
+        title: t("common.confirm", { defaultValue: "Xác nhận" }),
+        message: t("cleaner.workspace.unsaved_confirm_action"),
+        tone: "danger",
+        confirmText: t("cleaner.workspace.discard", { defaultValue: "Bỏ thay đổi" }),
+        cancelText: t("common.cancel", { defaultValue: "Hủy" }),
+      });
+      if (!ok) return;
       setPendingCellEdits([]); // Bỏ qua thay đổi cũ
       pendingEditsRef.current = [];
     }
@@ -310,8 +318,14 @@ export default function ManualCleanWorkspace({
 
   const handleRemoveAction = async (index) => {
     if (pendingCellEdits.length > 0) {
-      const confirmed = window.confirm(t("cleaner.workspace.unsaved_confirm_action"));
-      if (!confirmed) return;
+      const ok = await confirm({
+        title: t("common.confirm", { defaultValue: "Xác nhận" }),
+        message: t("cleaner.workspace.unsaved_confirm_action"),
+        tone: "danger",
+        confirmText: t("cleaner.workspace.discard", { defaultValue: "Bỏ thay đổi" }),
+        cancelText: t("common.cancel", { defaultValue: "Hủy" }),
+      });
+      if (!ok) return;
       setPendingCellEdits([]); // Bỏ qua thay đổi cũ
       pendingEditsRef.current = [];
     }
@@ -379,9 +393,15 @@ export default function ManualCleanWorkspace({
     }
   };
 
-  const handleFinalConfirm = () => {
+  const handleFinalConfirm = async () => {
     if (pendingCount > 0) {
-      const proceed = window.confirm(t("cleaner.guided.warn_pending_cells", { count: pendingCount }));
+      const proceed = await confirm({
+        title: t("cleaner.guided.warn_title", { defaultValue: "Cảnh báo ô chưa lưu" }),
+        message: t("cleaner.guided.warn_pending_cells", { count: pendingCount }),
+        tone: "danger",
+        confirmText: t("common.continue", { defaultValue: "Tiếp tục" }),
+        cancelText: t("common.cancel", { defaultValue: "Hủy" }),
+      });
       if (!proceed) return;
     }
 
@@ -513,7 +533,14 @@ export default function ManualCleanWorkspace({
             onAddPendingEdit={handleAddPendingEdit}
             onExecuteAction={executeAction}
             onFlushPendingEdits={async () => {
-              if (window.confirm(t("cleaner.workspace.unsaved_confirm_action"))) {
+              const ok = await confirm({
+                title: t("common.confirm", { defaultValue: "Xác nhận" }),
+                message: t("cleaner.workspace.unsaved_confirm_action"),
+                tone: "danger",
+                confirmText: t("cleaner.workspace.discard", { defaultValue: "Bỏ thay đổi" }),
+                cancelText: t("common.cancel", { defaultValue: "Hủy" }),
+              });
+              if (ok) {
                 setPendingCellEdits([]);
                 pendingEditsRef.current = [];
                 return true;
@@ -596,7 +623,10 @@ export default function ManualCleanWorkspace({
       </div>
 
       {/* Sticky Bottom Bar for Manual Workspace */}
-      <div className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-[#E5E5E3] shadow-[0_-4px_20px_rgba(0,0,0,0.06)]">
+      <div
+        className="fixed bottom-0 max-md:bottom-16 right-0 z-30 bg-white/95 backdrop-blur-md border-t border-[#E5E5E3] shadow-[0_-4px_20px_rgba(0,0,0,0.06)] transition-all duration-300"
+        style={{ left: "var(--app-sidebar-w, 0px)" }}
+      >
         <div className="max-w-7xl mx-auto px-4 sm:px-8 py-3 flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-start">
             <span className="text-xs font-semibold text-ink">
@@ -783,6 +813,7 @@ function PreviewTable({
 }) {
   const { t } = useTranslation();
   const currentLang = getCurrentLang();
+  const confirm = useConfirm();
   const [editingCell, setEditingCell] = useState(null); // { rowIdx, col, isDirectEdit: boolean }
   const [editValue, setEditValue] = useState("");
   const [activeErrorPanel, setActiveErrorPanel] = useState(null); // { rowIdx, col, errorCell, currentValue }

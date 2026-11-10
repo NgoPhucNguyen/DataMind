@@ -1,13 +1,17 @@
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { ZoomIn, ZoomOut } from "lucide-react";
+import { ZoomIn, ZoomOut, ChevronDown, ChevronUp } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer,
   LineChart, Line, PieChart, Pie, Cell, LabelList
 } from "recharts";
-import { getOrderedGreenShades } from "../../utils/chartView";
+import { getOrderedShades, getOrderedGreenShades } from "../../utils/chartView";
+import { useChartTheme, BASE_CHART_THEME } from "../../contexts/ChartThemeContext";
+
+export { useChartTheme };
 
 export const CHART_THEME = {
+  fontFamily: "'Be Vietnam Pro', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif",
   primary: "#1B4324",
   textMuted: "#626C65",
   textDark: "#121A14",
@@ -26,12 +30,14 @@ export const CHART_THEME = {
 
 export const DistributionChart = React.memo(({
   data = [],
-  color = CHART_THEME.primary,
+  color,
   isDiscrete = false,
   isAnimationActive = true,
   debounce,
 }) => {
   const { t } = useTranslation();
+  const theme = useChartTheme();
+  const activeColor = color || theme.primary;
   const isDiscreteMode = Boolean(isDiscrete || (data.length > 0 && data[0]?.label !== undefined));
 
   const chartData = data.map(d => {
@@ -76,25 +82,25 @@ export const DistributionChart = React.memo(({
   return (
     <ResponsiveContainer width="100%" height="100%" debounce={debounce}>
       <BarChart data={chartData}>
-        <CartesianGrid strokeDasharray="3 3" stroke={CHART_THEME.borderGrid} vertical={false} />
+        <CartesianGrid strokeDasharray="3 3" stroke={theme.borderGrid} vertical={false} />
         <XAxis
           dataKey="name"
-          stroke={CHART_THEME.tickColor}
-          tick={{ fill: CHART_THEME.tickColor, fontWeight: CHART_THEME.tickFontWeight }}
+          stroke={theme.tickColor}
+          tick={{ fill: theme.tickColor, fontWeight: theme.tickFontWeight, fontFamily: theme.fontFamily }}
           fontSize={10}
           tickFormatter={isDiscreteMode ? undefined : (val) => val.split(" - ")[0]}
         />
         <YAxis
-          stroke={CHART_THEME.tickColor}
-          tick={{ fill: CHART_THEME.tickColor, fontWeight: CHART_THEME.tickFontWeight }}
+          stroke={theme.tickColor}
+          tick={{ fill: theme.tickColor, fontWeight: theme.tickFontWeight, fontFamily: theme.fontFamily }}
           fontSize={10}
         />
         <Tooltip
           content={<CustomTooltip />}
-          cursor={{ fill: CHART_THEME.tooltipCursor }}
-          wrapperStyle={{ zIndex: 1000 }}
+          cursor={{ fill: theme.tooltipCursor }}
+          wrapperStyle={{ zIndex: 1000, fontFamily: theme.fontFamily }}
         />
-        <Bar dataKey="count" fill={color} radius={[4, 4, 0, 0]} isAnimationActive={isAnimationActive}>
+        <Bar dataKey="count" fill={activeColor} radius={[4, 4, 0, 0]} isAnimationActive={isAnimationActive}>
           {isDiscreteMode && (
             <LabelList
               dataKey="count"
@@ -106,10 +112,11 @@ export const DistributionChart = React.memo(({
                     <text
                       x={x + width / 2}
                       y={y - 4}
-                      fill={CHART_THEME.valueMutedColor}
+                      fill={theme.valueMutedColor}
                       textAnchor="middle"
                       fontSize={11}
-                      fontWeight={CHART_THEME.valueFontWeight}
+                      fontWeight={theme.valueFontWeight}
+                      fontFamily={theme.fontFamily}
                     >
                       0
                     </text>
@@ -127,11 +134,13 @@ export const DistributionChart = React.memo(({
 
 export const CategoricalChart = React.memo(({
   data = [],
-  color = CHART_THEME.primary,
+  color,
   isAnimationActive = true,
   debounce,
 }) => {
   const { t } = useTranslation();
+  const theme = useChartTheme();
+  const activeColor = color || theme.primary;
 
   const getLabel = (val, entry) => {
     if (val === "__other__") {
@@ -173,8 +182,9 @@ export const CategoricalChart = React.memo(({
           x={-6}
           y={line2 ? -4 : 3}
           textAnchor="end"
-          fill={CHART_THEME.tickColor}
-          fontWeight={CHART_THEME.tickFontWeight}
+          fill={theme.tickColor}
+          fontWeight={theme.tickFontWeight}
+          fontFamily={theme.fontFamily}
           fontSize={10}
           className="select-none"
         >
@@ -234,11 +244,11 @@ export const CategoricalChart = React.memo(({
   return (
     <ResponsiveContainer width="100%" height="100%" debounce={debounce}>
       <BarChart data={data} layout="vertical" margin={{ left: 10, right: 20, top: 4, bottom: 4 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke={CHART_THEME.borderGrid} horizontal={false} />
+        <CartesianGrid strokeDasharray="3 3" stroke={theme.borderGrid} horizontal={false} />
         <XAxis
           type="number"
-          stroke={CHART_THEME.tickColor}
-          tick={{ fill: CHART_THEME.tickColor, fontWeight: CHART_THEME.tickFontWeight }}
+          stroke={theme.tickColor}
+          tick={{ fill: theme.tickColor, fontWeight: theme.tickFontWeight, fontFamily: theme.fontFamily }}
           fontSize={10}
         />
         <YAxis 
@@ -247,12 +257,12 @@ export const CategoricalChart = React.memo(({
           width={130} 
           tick={renderYTick}
         />
-        <Tooltip content={<CustomTooltip />} cursor={{ fill: CHART_THEME.tooltipCursor }} wrapperStyle={{ zIndex: 1000 }} />
+        <Tooltip content={<CustomTooltip />} cursor={{ fill: theme.tooltipCursor }} wrapperStyle={{ zIndex: 1000, fontFamily: theme.fontFamily }} />
         <Bar dataKey="count" radius={[0, 4, 4, 0]} isAnimationActive={isAnimationActive}>
           {data.map((entry, index) => (
             <Cell
               key={`cell-${index}`}
-              fill={entry.value === "__other__" ? CHART_THEME.otherCategory : color}
+              fill={entry.value === "__other__" ? theme.other : activeColor}
             />
           ))}
         </Bar>
@@ -263,27 +273,30 @@ export const CategoricalChart = React.memo(({
 
 export const TrendChart = React.memo(({
   data = [],
-  color = CHART_THEME.primary,
+  color,
   isAnimationActive = true,
   debounce,
 }) => {
+  const theme = useChartTheme();
+  const activeColor = color || theme.primary;
+
   return (
     <ResponsiveContainer width="100%" height="100%" debounce={debounce}>
       <LineChart data={data}>
-        <CartesianGrid strokeDasharray="3 3" stroke={CHART_THEME.borderGrid} vertical={false} />
+        <CartesianGrid strokeDasharray="3 3" stroke={theme.borderGrid} vertical={false} />
         <XAxis
           dataKey="period"
-          stroke={CHART_THEME.tickColor}
-          tick={{ fill: CHART_THEME.tickColor, fontWeight: CHART_THEME.tickFontWeight }}
+          stroke={theme.tickColor}
+          tick={{ fill: theme.tickColor, fontWeight: theme.tickFontWeight, fontFamily: theme.fontFamily }}
           fontSize={10}
         />
         <YAxis
-          stroke={CHART_THEME.tickColor}
-          tick={{ fill: CHART_THEME.tickColor, fontWeight: CHART_THEME.tickFontWeight }}
+          stroke={theme.tickColor}
+          tick={{ fill: theme.tickColor, fontWeight: theme.tickFontWeight, fontFamily: theme.fontFamily }}
           fontSize={10}
         />
-        <Tooltip contentStyle={{ backgroundColor: "#ffffff", border: `1px solid ${CHART_THEME.borderGrid}`, borderRadius: 8, color: CHART_THEME.textDark }} wrapperStyle={{ zIndex: 1000 }} />
-        <Line type="monotone" dataKey="count" stroke={color} strokeWidth={2} dot={{ r: 3, fill: color }} isAnimationActive={isAnimationActive} />
+        <Tooltip contentStyle={{ backgroundColor: "#ffffff", border: `1px solid ${theme.borderGrid}`, borderRadius: 8, color: theme.textDark, fontFamily: theme.fontFamily }} wrapperStyle={{ zIndex: 1000, fontFamily: theme.fontFamily }} />
+        <Line type="monotone" dataKey="count" stroke={activeColor} strokeWidth={2} dot={{ r: 3, fill: activeColor }} isAnimationActive={isAnimationActive} />
       </LineChart>
     </ResponsiveContainer>
   );
@@ -428,32 +441,33 @@ export const CorrelationHeatmap = React.memo(({ matrix, topCorr, onCellClick, an
 
 export const PieChartComponent = React.memo(({
   data = [],
-  color = CHART_THEME.primary,
+  color,
   isDiscrete = false,
   isScale = false,
   isAnimationActive = true,
   debounce,
 }) => {
   const { t } = useTranslation();
+  const theme = useChartTheme();
 
   if (!data || data.length === 0) return null;
 
   const isOrdered = Boolean(isDiscrete || isScale);
   const nonOtherItems = data.filter((d) => (d.value ?? d.name) !== "__other__");
-  const orderedShades = isOrdered ? getOrderedGreenShades(nonOtherItems.length) : [];
+  const orderedShades = isOrdered ? getOrderedShades(theme.primary, nonOtherItems.length) : [];
 
   let nonOtherIdx = 0;
   const sliceColors = data.map((entry) => {
     const val = entry.value ?? entry.name;
     if (val === "__other__") {
-      return CHART_THEME.otherCategory;
+      return theme.other;
     }
     if (isOrdered) {
-      const c = orderedShades[nonOtherIdx] || color || CHART_THEME.primary;
+      const c = orderedShades[nonOtherIdx] || color || theme.primary;
       nonOtherIdx++;
       return c;
     }
-    const c = CHART_THEME.piePalette[nonOtherIdx % CHART_THEME.piePalette.length];
+    const c = theme.categorical[nonOtherIdx % theme.categorical.length];
     nonOtherIdx++;
     return c;
   });
@@ -512,7 +526,8 @@ export const PieChartComponent = React.memo(({
         textAnchor="middle"
         dominantBaseline="central"
         fontSize={11}
-        fontWeight={CHART_THEME.valueFontWeight}
+        fontWeight={theme.valueFontWeight}
+        fontFamily={theme.fontFamily}
       >
         {`${Math.round(pct)}%`}
       </text>
@@ -544,7 +559,7 @@ export const PieChartComponent = React.memo(({
                 />
               ))}
             </Pie>
-            <Tooltip content={<CustomPieTooltip />} wrapperStyle={{ zIndex: 1000 }} />
+            <Tooltip content={<CustomPieTooltip />} wrapperStyle={{ zIndex: 1000, fontFamily: theme.fontFamily }} />
           </PieChart>
         </ResponsiveContainer>
       </div>
@@ -569,8 +584,8 @@ export const PieChartComponent = React.memo(({
                 </span>
               </div>
               <span
-                className="font-mono shrink-0 text-[11px] whitespace-nowrap"
-                style={{ color: CHART_THEME.valueColor, fontWeight: CHART_THEME.valueFontWeight }}
+                className="type-number shrink-0 text-[11px] whitespace-nowrap"
+                style={{ color: theme.valueColor, fontWeight: theme.valueFontWeight }}
               >
                 {item.count} {pctStr}
               </span>
@@ -584,46 +599,499 @@ export const PieChartComponent = React.memo(({
 
 export const BoxPlotChart = React.memo(({
   stats,
-  color = CHART_THEME.primary,
-  isAnimationActive = true,
-  debounce,
+  data,
+  color,
+  isExport = false,
+  isEnlarged = false,
 }) => {
-  const { t } = useTranslation();
-  if (!stats || stats.min === undefined || stats.p25 === undefined || stats.median === undefined || stats.p75 === undefined || stats.max === undefined) {
+  const { t, i18n } = useTranslation();
+  const theme = useChartTheme();
+  const activeColor = color || theme.primary;
+  const negativeColor = theme.negative || "#DC2626";
+
+  const effectiveStats = stats || data;
+  const box = effectiveStats?.box;
+
+  const containerRef = useRef(null);
+  const [containerWidth, setContainerWidth] = useState(isExport ? 960 : 500);
+  const [tooltip, setTooltip] = useState(null);
+  const [isInfoExpanded, setIsInfoExpanded] = useState(false);
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.contentRect?.width) {
+          setContainerWidth(entry.contentRect.width);
+        }
+      }
+    });
+    ro.observe(containerRef.current);
+    return () => ro.disconnect();
+  }, []);
+
+  if (
+    !box ||
+    box.q1 === undefined ||
+    box.median === undefined ||
+    box.q3 === undefined ||
+    box.whisker_low === undefined ||
+    box.whisker_high === undefined
+  ) {
     return null;
   }
-  const data = [
-    { name: t("visualize.boxplot_distribution"), box: [stats.p25 || 0, stats.p75 || 0], min: stats.min, max: stats.max, median: stats.median }
+
+  const locale = i18n?.language?.startsWith("en") ? "en-US" : "vi-VN";
+  const numFormatter = new Intl.NumberFormat(locale, { maximumFractionDigits: 2 });
+  const formatNum = (v) => (typeof v === "number" ? numFormatter.format(v) : (v ?? ""));
+
+  const whiskerLow = box.whisker_low;
+  const whiskerHigh = box.whisker_high;
+  const q1 = box.q1;
+  const median = box.median;
+  const q3 = box.q3;
+  const mean = box.mean ?? (q1 + q3) / 2;
+  const outliers = Array.isArray(box.outliers) ? box.outliers : [];
+  const outliersTotal = box.outliers_total ?? outliers.length;
+
+  const allValues = [whiskerLow, whiskerHigh, q1, median, q3, mean, ...outliers].filter(
+    (v) => typeof v === "number" && !isNaN(v)
+  );
+  const dataMin = allValues.length > 0 ? Math.min(...allValues) : 0;
+  const dataMax = allValues.length > 0 ? Math.max(...allValues) : 100;
+
+  // Nice tick calculation (5-6 ticks)
+  let ticks = [];
+  let domain = [dataMin, dataMax];
+  if (dataMin === dataMax) {
+    ticks = [dataMin];
+    domain = [dataMin - 1, dataMax + 1];
+  } else {
+    const range = dataMax - dataMin;
+    const rawStep = range / 4.5;
+    const mag = Math.pow(10, Math.floor(Math.log10(rawStep)));
+    const norm = rawStep / mag;
+    let step = mag;
+    if (norm < 1.5) step = 1 * mag;
+    else if (norm < 3) step = 2 * mag;
+    else if (norm < 7) step = 5 * mag;
+    else step = 10 * mag;
+
+    const start = Math.floor(dataMin / step) * step;
+    const end = Math.ceil(dataMax / step) * step;
+    const maxTicks = 12;
+    for (let cur = start; cur <= end + step * 0.001 && ticks.length < maxTicks; cur += step) {
+      ticks.push(Number(cur.toFixed(6)));
+    }
+    if (ticks.length > 0) {
+      domain = [ticks[0], ticks[ticks.length - 1]];
+    }
+  }
+
+  const marginLeft = isEnlarged ? 45 : 35;
+  const marginRight = isEnlarged ? 45 : 35;
+  const plotWidth = Math.max(20, containerWidth - marginLeft - marginRight);
+  const domainSpan = domain[1] - domain[0] || 1;
+  const xScale = (val) => marginLeft + ((val - domain[0]) / domainSpan) * plotWidth;
+
+  const svgHeight = isEnlarged ? 170 : 145;
+  const yCenter = isEnlarged ? 68 : 58;
+  const boxHeight = isEnlarged ? 48 : 36;
+  const capH = isEnlarged ? 20 : 16;
+  const axisY = svgHeight - 22;
+
+  // Number labels above the box; if closer than 36px, put below
+  const rawLabels = [
+    { key: "whisker_low", val: whiskerLow, x: xScale(whiskerLow), isMedian: false },
+    { key: "q1", val: q1, x: xScale(q1), isMedian: false },
+    { key: "median", val: median, x: xScale(median), isMedian: true },
+    { key: "q3", val: q3, x: xScale(q3), isMedian: false },
+    { key: "whisker_high", val: whiskerHigh, x: xScale(whiskerHigh), isMedian: false },
   ];
+
+  let prevAboveX = -Infinity;
+  const positionedLabels = rawLabels.map((lbl, idx) => {
+    if (idx > 0 && lbl.x - prevAboveX < 36) {
+      return { ...lbl, placement: "below" };
+    }
+    prevAboveX = lbl.x;
+    return { ...lbl, placement: "above" };
+  });
+
+  const boxX = xScale(q1);
+  const boxW = Math.max(2, xScale(q3) - xScale(q1));
+  const boxY = yCenter - boxHeight / 2;
+
+  const whiskerLowX = xScale(whiskerLow);
+  const whiskerHighX = xScale(whiskerHigh);
+  const medianX = xScale(median);
+  const meanX = xScale(mean);
+
   return (
-    <ResponsiveContainer width="100%" height="100%" debounce={debounce}>
-      <BarChart data={data} layout="vertical">
-        <CartesianGrid strokeDasharray="3 3" stroke={CHART_THEME.borderGrid} horizontal={false} />
-        <XAxis
-          type="number"
-          stroke={CHART_THEME.tickColor}
-          tick={{ fill: CHART_THEME.tickColor, fontWeight: CHART_THEME.tickFontWeight }}
-          fontSize={10}
-          domain={[stats.min || 0, stats.max || 0]}
+    <div className="w-full relative flex flex-col" ref={containerRef}>
+      {/* Floating Hover Tooltip */}
+      {tooltip && (
+        <div
+          className="absolute pointer-events-none z-30 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-white text-[#121A14] border border-[#E5E5E3] shadow-md transition-opacity duration-150 whitespace-nowrap"
+          style={{
+            left: Math.min(Math.max(10, tooltip.x - 40), Math.max(10, containerWidth - 260)),
+            top: Math.max(0, tooltip.y - 40),
+            fontFamily: theme.fontFamily,
+          }}
+        >
+          {tooltip.text}
+        </div>
+      )}
+
+      {/* Responsive Horizontal SVG */}
+      <svg
+        width="100%"
+        height={svgHeight}
+        viewBox={`0 0 ${containerWidth} ${svgHeight}`}
+        className="overflow-visible select-none"
+        onMouseLeave={() => setTooltip(null)}
+      >
+        {/* Vertical background grid at ticks */}
+        {ticks.map((tVal) => (
+          <line
+            key={`grid-${tVal}`}
+            x1={xScale(tVal)}
+            x2={xScale(tVal)}
+            y1={16}
+            y2={axisY}
+            stroke={theme.borderGrid || "#EAEAEA"}
+            strokeDasharray="2 2"
+            strokeWidth={1}
+          />
+        ))}
+
+        {/* Low whisker line + end cap */}
+        <line
+          x1={whiskerLowX}
+          x2={boxX}
+          y1={yCenter}
+          y2={yCenter}
+          stroke={activeColor}
+          strokeWidth={1.5}
         />
-        <YAxis
-          dataKey="name"
-          type="category"
-          width={80}
-          stroke={CHART_THEME.tickColor}
-          tick={{ fill: CHART_THEME.tickColor, fontWeight: CHART_THEME.tickFontWeight }}
-          fontSize={10}
+        <line
+          x1={whiskerLowX}
+          x2={whiskerLowX}
+          y1={yCenter - capH / 2}
+          y2={yCenter + capH / 2}
+          stroke={activeColor}
+          strokeWidth={2}
+          strokeLinecap="round"
         />
-        <Tooltip 
-          cursor={{ fill: CHART_THEME.tooltipCursor }} 
-          contentStyle={{ backgroundColor: "#ffffff", border: `1px solid ${CHART_THEME.borderGrid}`, borderRadius: 8, color: CHART_THEME.textDark }} 
-          formatter={(value, name, props) => {
-            if (name === "box") return `p25: ${props.payload.box[0].toFixed(2)}, p75: ${props.payload.box[1].toFixed(2)}`;
-            return value;
+        {/* Invisible hit area for low whisker */}
+        <line
+          x1={whiskerLowX}
+          x2={boxX}
+          y1={yCenter}
+          y2={yCenter}
+          stroke="transparent"
+          strokeWidth={16}
+          className="cursor-pointer"
+          onMouseEnter={() => {
+            setTooltip({
+              x: whiskerLowX + (boxX - whiskerLowX) / 2,
+              y: yCenter,
+              text: t("visualize.boxplot_tooltip_whiskers", {
+                low: formatNum(whiskerLow),
+                high: formatNum(whiskerHigh),
+              }),
+            });
           }}
         />
-        <Bar dataKey="box" fill={color} radius={[4, 4, 4, 4]} barSize={40} isAnimationActive={isAnimationActive} />
-      </BarChart>
-    </ResponsiveContainer>
+
+        {/* High whisker line + end cap */}
+        <line
+          x1={boxX + boxW}
+          x2={whiskerHighX}
+          y1={yCenter}
+          y2={yCenter}
+          stroke={activeColor}
+          strokeWidth={1.5}
+        />
+        <line
+          x1={whiskerHighX}
+          x2={whiskerHighX}
+          y1={yCenter - capH / 2}
+          y2={yCenter + capH / 2}
+          stroke={activeColor}
+          strokeWidth={2}
+          strokeLinecap="round"
+        />
+        {/* Invisible hit area for high whisker */}
+        <line
+          x1={boxX + boxW}
+          x2={whiskerHighX}
+          y1={yCenter}
+          y2={yCenter}
+          stroke="transparent"
+          strokeWidth={16}
+          className="cursor-pointer"
+          onMouseEnter={() => {
+            setTooltip({
+              x: boxX + boxW + (whiskerHighX - (boxX + boxW)) / 2,
+              y: yCenter,
+              text: t("visualize.boxplot_tooltip_whiskers", {
+                low: formatNum(whiskerLow),
+                high: formatNum(whiskerHigh),
+              }),
+            });
+          }}
+        />
+
+        {/* Box from Q1 to Q3 */}
+        <rect
+          x={boxX}
+          y={boxY}
+          width={boxW}
+          height={boxHeight}
+          fill={activeColor}
+          fillOpacity={0.25}
+          stroke={activeColor}
+          strokeWidth={1.5}
+          rx={3}
+          ry={3}
+          className="cursor-pointer"
+          onMouseEnter={() => {
+            setTooltip({
+              x: boxX + boxW / 2,
+              y: yCenter,
+              text: `Q1: ${formatNum(q1)} — Q3: ${formatNum(q3)} (IQR: ${formatNum(box.iqr ?? q3 - q1)})`,
+            });
+          }}
+        />
+
+        {/* Q1 invisible hit area */}
+        <line
+          x1={boxX}
+          x2={boxX}
+          y1={boxY}
+          y2={boxY + boxHeight}
+          stroke="transparent"
+          strokeWidth={14}
+          className="cursor-pointer"
+          onMouseEnter={() => {
+            setTooltip({
+              x: boxX,
+              y: yCenter,
+              text: t("visualize.boxplot_tooltip_q1", { v: formatNum(q1) }),
+            });
+          }}
+        />
+
+        {/* Q3 invisible hit area */}
+        <line
+          x1={boxX + boxW}
+          x2={boxX + boxW}
+          y1={boxY}
+          y2={boxY + boxHeight}
+          stroke="transparent"
+          strokeWidth={14}
+          className="cursor-pointer"
+          onMouseEnter={() => {
+            setTooltip({
+              x: boxX + boxW,
+              y: yCenter,
+              text: t("visualize.boxplot_tooltip_q3", { v: formatNum(q3) }),
+            });
+          }}
+        />
+
+        {/* Median thick line */}
+        <line
+          x1={medianX}
+          x2={medianX}
+          y1={boxY}
+          y2={boxY + boxHeight}
+          stroke={activeColor}
+          strokeWidth={3}
+          className="cursor-pointer"
+        />
+        {/* Median hit area */}
+        <line
+          x1={medianX}
+          x2={medianX}
+          y1={boxY}
+          y2={boxY + boxHeight}
+          stroke="transparent"
+          strokeWidth={14}
+          className="cursor-pointer"
+          onMouseEnter={() => {
+            setTooltip({
+              x: medianX,
+              y: yCenter,
+              text: t("visualize.boxplot_tooltip_median", { v: formatNum(median) }),
+            });
+          }}
+        />
+
+        {/* Mean diamond ◆ */}
+        <path
+          d={`M ${meanX} ${yCenter - 5} L ${meanX + 5} ${yCenter} L ${meanX} ${yCenter + 5} L ${meanX - 5} ${yCenter} Z`}
+          fill={activeColor}
+          stroke="#ffffff"
+          strokeWidth={1.5}
+          className="cursor-pointer"
+        />
+        <circle
+          cx={meanX}
+          cy={yCenter}
+          r={10}
+          fill="transparent"
+          className="cursor-pointer"
+          onMouseEnter={() => {
+            setTooltip({
+              x: meanX,
+              y: yCenter,
+              text: t("visualize.boxplot_tooltip_mean", { v: formatNum(mean) }),
+            });
+          }}
+        />
+
+        {/* Outlier dots in palette.negative */}
+        {outliers.map((oVal, idx) => {
+          const oX = xScale(oVal);
+          const oY = yCenter + (outliers.length > 1 ? ((idx % 3) - 1) * 4 : 0);
+          return (
+            <g key={`outlier-${idx}-${oVal}`}>
+              <circle
+                cx={oX}
+                cy={oY}
+                r={3.5}
+                fill={negativeColor}
+                fillOpacity={0.85}
+                stroke="#ffffff"
+                strokeWidth={1}
+                className="cursor-pointer"
+              />
+              <circle
+                cx={oX}
+                cy={oY}
+                r={9}
+                fill="transparent"
+                className="cursor-pointer"
+                onMouseEnter={() => {
+                  setTooltip({
+                    x: oX,
+                    y: oY,
+                    text: t("visualize.boxplot_tooltip_outlier", { v: formatNum(oVal) }),
+                  });
+                }}
+              />
+            </g>
+          );
+        })}
+
+        {/* Number labels above/below box */}
+        {positionedLabels.map((lbl) => {
+          const isAbove = lbl.placement === "above";
+          const labelY = isAbove ? boxY - 8 : boxY + boxHeight + 16;
+          return (
+            <text
+              key={`label-${lbl.key}`}
+              x={lbl.x}
+              y={labelY}
+              textAnchor="middle"
+              fill={theme.textDark || "#121A14"}
+              fontFamily={theme.fontFamily}
+              fontSize={isEnlarged ? 12 : 11}
+              fontWeight={lbl.isMedian ? 600 : 500}
+              style={{ fontVariantNumeric: "tabular-nums" }}
+            >
+              {formatNum(lbl.val)}
+            </text>
+          );
+        })}
+
+        {/* Horizontal Axis Line */}
+        <line
+          x1={marginLeft}
+          x2={marginLeft + plotWidth}
+          y1={axisY}
+          y2={axisY}
+          stroke={theme.tickColor || "#3F4742"}
+          strokeWidth={1}
+        />
+
+        {/* Axis Ticks & Labels */}
+        {ticks.map((tVal) => {
+          const tX = xScale(tVal);
+          return (
+            <g key={`tick-${tVal}`}>
+              <line
+                x1={tX}
+                x2={tX}
+                y1={axisY}
+                y2={axisY + 4}
+                stroke={theme.tickColor || "#3F4742"}
+                strokeWidth={1}
+              />
+              <text
+                x={tX}
+                y={axisY + 16}
+                textAnchor="middle"
+                fill={theme.tickColor || "#3F4742"}
+                fontFamily={theme.fontFamily}
+                fontSize={10}
+                fontWeight={theme.tickFontWeight || 500}
+                style={{ fontVariantNumeric: "tabular-nums" }}
+              >
+                {formatNum(tVal)}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+
+      {/* Legend Line */}
+      <div
+        className="mt-2 text-[11.5px] text-[#626C65] font-normal leading-relaxed select-none"
+        style={{ fontFamily: theme.fontFamily }}
+      >
+        <span>
+          {t("visualize.boxplot_legend", {
+            q1: formatNum(q1),
+            q3: formatNum(q3),
+            n: outliersTotal,
+          })}
+        </span>
+        {outliersTotal > outliers.length && (
+          <span>
+            {t("visualize.boxplot_legend_shown", {
+              shown: outliers.length,
+              n: outliersTotal,
+            })}
+          </span>
+        )}
+      </div>
+
+      {/* Collapsible How-To-Read Box (not in exports) */}
+      {!isExport && (
+        <div className="mt-3 select-none">
+          <button
+            type="button"
+            onClick={() => setIsInfoExpanded((prev) => !prev)}
+            className="type-label font-semibold text-[#1B4324] hover:underline flex items-center gap-1.5 transition-colors cursor-pointer"
+          >
+            <span>{t("visualize.boxplot_how_to_read_title")}</span>
+            {isInfoExpanded ? (
+              <ChevronUp className="w-3.5 h-3.5" />
+            ) : (
+              <ChevronDown className="w-3.5 h-3.5" />
+            )}
+          </button>
+
+          {isInfoExpanded && (
+            <div className="mt-2 bg-[#F9F9F8] border border-[#E5E5E3] rounded-lg p-3.5 type-caption text-[#2A342D] leading-relaxed shadow-2xs">
+              <p>{t("visualize.boxplot_how_to_read_content")}</p>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 });

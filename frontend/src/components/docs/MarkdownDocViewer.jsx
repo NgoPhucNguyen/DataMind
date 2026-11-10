@@ -1,7 +1,8 @@
 import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Check, Link as LinkIcon, Calendar } from "lucide-react";
+import { Check, Link as LinkIcon, Calendar, Link2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import DecisionFlowBlock from "./DecisionFlowBlock";
@@ -10,6 +11,8 @@ import TryClassifierBlock from "./TryClassifierBlock";
 import RulesTableBlock from "./RulesTableBlock";
 import CalloutBlock from "./CalloutBlock";
 import DiffTableBlock from "./DiffTableBlock";
+import ModuleFlowBlock from "./ModuleFlowBlock";
+import { getPrevNextPages, resolveRelatedDocs } from "./docsNavigation";
 import { UIChip } from "./uiRegistry";
 
 /**
@@ -37,6 +40,7 @@ function formatUpdatedDate(isoDate, lang = "vi") {
  */
 function createHeading(level, formattedUpdated = null) {
   return function HeadingComponent({ children, ...props }) {
+    const { t } = useTranslation();
     const [copied, setCopied] = useState(false);
 
     let rawText = "";
@@ -86,9 +90,11 @@ function createHeading(level, formattedUpdated = null) {
             <span>{displayText}</span>
             {id && (
               <button
+                type="button"
                 onClick={handleCopy}
                 className="opacity-0 group-hover:opacity-100 transition-opacity p-1 text-muted hover:text-forest focus:outline-none"
-                title="Sao chép liên kết mục này"
+                title={copied ? t("docs.copied", "Đã sao chép") : t("docs.copy_link", "Sao chép liên kết mục này")}
+                aria-label={copied ? t("docs.copied", "Đã sao chép") : t("docs.copy_link", "Sao chép liên kết mục này")}
               >
                 {copied ? (
                   <Check className="w-3.5 h-3.5 text-forest" />
@@ -110,18 +116,60 @@ function createHeading(level, formattedUpdated = null) {
   };
 }
 
-export default function MarkdownDocViewer({ content = "", rules = {} }) {
+export default function MarkdownDocViewer({
+  content = "",
+  rules = {},
+  activeModule = "",
+  activeTopic = "",
+}) {
   const { t, i18n } = useTranslation();
+  const navigate = useNavigate();
 
   // Normalize content to Unicode NFC
   let body = (content || "").normalize("NFC");
   const metadata = {};
+  const relatedList = [];
 
-  // Parse YAML-like front matter: --- \n title: ... \n updated: ... \n ---
+  // Parse YAML-like front matter: --- \n title: ... \n updated: ... \n related: ... \n ---
   const fmMatch = body.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
   if (fmMatch) {
     const fmLines = fmMatch[1].split(/\r?\n/);
+    let inRelatedSection = false;
+
     fmLines.forEach((line) => {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) return;
+
+      if (trimmed.startsWith("related:")) {
+        const rest = trimmed.slice("related:".length).trim();
+        if (rest.startsWith("[") && rest.endsWith("]")) {
+          // Inline array: [ "cleaner/find-errors", "visualize/correlation" ]
+          const items = rest
+            .slice(1, -1)
+            .split(",")
+            .map((s) => s.trim().replace(/^['"]|['"]$/g, ""))
+            .filter(Boolean);
+          relatedList.push(...items);
+          inRelatedSection = false;
+        } else if (!rest) {
+          inRelatedSection = true;
+        } else {
+          relatedList.push(rest.replace(/^['"]|['"]$/g, ""));
+          inRelatedSection = false;
+        }
+        return;
+      }
+
+      if (inRelatedSection) {
+        if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
+          const item = trimmed.slice(2).trim().replace(/^['"]|['"]$/g, "");
+          if (item) relatedList.push(item);
+          return;
+        } else if (trimmed.includes(":")) {
+          inRelatedSection = false;
+        }
+      }
+
       const colonIdx = line.indexOf(":");
       if (colonIdx !== -1) {
         const key = line.slice(0, colonIdx).trim();
@@ -129,11 +177,22 @@ export default function MarkdownDocViewer({ content = "", rules = {} }) {
         metadata[key] = val;
       }
     });
+
+    metadata.related = relatedList;
     // Strip front matter from rendered body
     body = body.slice(fmMatch[0].length);
   }
 
   const formattedUpdated = formatUpdatedDate(metadata.updated, i18n.language);
+  const relatedDocs = resolveRelatedDocs(metadata.related || []);
+  const { prev: prevPage, next: nextPage } = getPrevNextPages(activeModule, activeTopic);
+
+  const handleNavigate = (path) => {
+    if (path) {
+      navigate(path);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  };
 
   return (
     <div className="doc-content text-ink leading-relaxed font-sans max-w-full break-words">
@@ -204,6 +263,10 @@ export default function MarkdownDocViewer({ content = "", rules = {} }) {
             const rawCode = String(children).replace(/\n$/, "");
 
             // Custom documentation block components
+            if (lang === "flow") {
+              return <ModuleFlowBlock content={rawCode} activeModule={activeModule} />;
+            }
+
             if (lang === "dm-flow") {
               return <DecisionFlowBlock rules={rules} />;
             }
@@ -283,6 +346,76 @@ export default function MarkdownDocViewer({ content = "", rules = {} }) {
       >
         {body}
       </ReactMarkdown>
+
+      {/* 2) "Liên quan ở các bước khác" (Related Cross-links) */}
+      {relatedDocs.length > 0 && (
+        <section aria-label="Các trang liên quan" className="mt-12 pt-6 border-t border-border/70">
+          <div className="flex items-center gap-2 mb-3.5">
+            <Link2 className="w-4 h-4 text-forest" />
+            <h3 className="text-xs font-bold uppercase tracking-wider text-muted">
+              {t("docs.related_title", "Liên quan ở các bước khác")}
+            </h3>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+            {relatedDocs.map((item) => (
+              <button
+                key={item.path}
+                type="button"
+                onClick={() => handleNavigate(item.link)}
+                className="p-3.5 rounded-xl border border-border/80 bg-[#FAFAF8] hover:border-forest/50 hover:bg-white hover:shadow-xs transition-all text-left flex flex-col justify-between group shadow-2xs cursor-pointer"
+              >
+                <span className="text-[10.5px] font-bold text-forest uppercase tracking-wider block mb-1">
+                  {item.sectionFullName}
+                </span>
+                <span className="text-xs font-semibold text-ink group-hover:text-forest transition-colors line-clamp-2">
+                  {item.title}
+                </span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* 1) Prev / Next Navigation */}
+      {(prevPage || nextPage) && (
+        <nav aria-label="Chuyển trang" className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-6 border-t border-border/70 mt-8">
+          {prevPage ? (
+            <button
+              type="button"
+              onClick={() => handleNavigate(prevPage.link)}
+              className="p-3.5 rounded-xl border border-border/80 bg-white hover:border-forest/50 hover:bg-sage/10 transition-all text-left flex flex-col justify-between group shadow-2xs cursor-pointer"
+            >
+              <span className="text-[11px] font-semibold text-muted flex items-center gap-1 group-hover:text-forest transition-colors mb-1">
+                <span>←</span>
+                <span>{t("docs.prev_page", "Trang trước")}</span>
+              </span>
+              <span className="text-sm font-bold text-ink group-hover:text-forest transition-colors truncate">
+                {prevPage.sectionFullName} · {prevPage.title}
+              </span>
+            </button>
+          ) : (
+            <div className="hidden sm:block" />
+          )}
+
+          {nextPage ? (
+            <button
+              type="button"
+              onClick={() => handleNavigate(nextPage.link)}
+              className="p-3.5 rounded-xl border border-border/80 bg-white hover:border-forest/50 hover:bg-sage/10 transition-all text-right flex flex-col justify-between group shadow-2xs sm:col-start-2 cursor-pointer"
+            >
+              <span className="text-[11px] font-semibold text-muted flex items-center justify-end gap-1 group-hover:text-forest transition-colors mb-1">
+                <span>{t("docs.next_page", "Trang tiếp theo")}</span>
+                <span>→</span>
+              </span>
+              <span className="text-sm font-bold text-ink group-hover:text-forest transition-colors truncate">
+                {nextPage.sectionFullName} · {nextPage.title}
+              </span>
+            </button>
+          ) : (
+            <div className="hidden sm:block" />
+          )}
+        </nav>
+      )}
     </div>
   );
 }

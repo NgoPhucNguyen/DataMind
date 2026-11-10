@@ -1,10 +1,11 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useAuth } from "../contexts/AuthContext";
 import { Search, Bot, BarChart2, Check, Sparkles } from "lucide-react";
 import HowItWorks from "./HowItWorks";
 import Demo from "./Demo";
-import { PLANS, formatVND } from "../lib/plans";
+import { getLocalizedPlans } from "../lib/plans";
 
 // ── Scroll-fade hook ──────────────────────────────────────────────────────────
 function useFadeIn() {
@@ -27,34 +28,20 @@ function useFadeIn() {
   return ref;
 }
 
-// ── Feature data ──────────────────────────────────────────────────────────────
-const FEATURES = [
-  {
-    icon: <Search className="w-5 h-5 text-forest" strokeWidth={1.5} />,
-    title: "Data Profiler",
-    desc: "Tự động phát hiện kiểu dữ liệu, thống kê null%, unique count cho từng cột.",
-  },
-  {
-    icon: <Bot className="w-5 h-5 text-forest" strokeWidth={1.5} />,
-    title: "AI Insights",
-    desc: "Gemini phân tích ngữ cảnh dataset, xác định lĩnh vực và đề xuất bước xử lý.",
-  },
-  {
-    icon: <BarChart2 className="w-5 h-5 text-forest" strokeWidth={1.5} />,
-    title: "Auto Chart Suggest",
-    desc: "Gợi ý biểu đồ phù hợp theo kiểu dữ liệu — không cần expertise thống kê.",
-  },
-];
-
 // ── Landing Page ──────────────────────────────────────────────────────────────
 export default function LandingPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { t, i18n } = useTranslation();
+
+  useEffect(() => {
+    document.title = t("seo.title_landing", "DataMind — Xử lý dữ liệu của bạn trong vài giây");
+  }, [t, i18n.language]);
 
   return (
     <div className="min-h-screen bg-canvas text-ink flex flex-col overflow-x-hidden font-sans">
       {/* ── Hero ── */}
-      <HeroSection navigate={navigate} user={user} />
+      <HeroSection navigate={navigate} user={user} t={t} />
 
       {/* ── Embedded Sections ── */}
       <div id="how-it-works">
@@ -64,19 +51,37 @@ export default function LandingPage() {
         <Demo />
       </div>
       <div id="pricing">
-        <PricingSection navigate={navigate} user={user} />
+        <PricingSection navigate={navigate} user={user} t={t} lang={i18n.language} />
       </div>
 
       <footer className="border-t border-border px-6 py-8 text-center text-muted text-xs bg-white">
-        © 2025 DataMind — Công cụ phân tích dữ liệu dành cho sinh viên Kinh tế
+        {t("footer.copyright", "© 2025 DataMind — Công cụ phân tích dữ liệu dành cho sinh viên Kinh tế")}
       </footer>
     </div>
   );
 }
 
 // ── Hero Section ──────────────────────────────────────────────────────────────
-function HeroSection({ navigate, user }) {
+function HeroSection({ navigate, user, t }) {
   const heroRef = useFadeIn();
+
+  const features = [
+    {
+      icon: <Search className="w-5 h-5 text-forest" strokeWidth={1.5} />,
+      title: t("landing.feat_profiler_title", "Data Profiler"),
+      desc: t("landing.feat_profiler_desc", "Tự động phát hiện kiểu dữ liệu, thống kê null%, unique count cho từng cột."),
+    },
+    {
+      icon: <Bot className="w-5 h-5 text-forest" strokeWidth={1.5} />,
+      title: t("landing.feat_ai_title", "AI Insights"),
+      desc: t("landing.feat_ai_desc", "Gemini phân tích ngữ cảnh dataset, xác định lĩnh vực và đề xuất bước xử lý."),
+    },
+    {
+      icon: <BarChart2 className="w-5 h-5 text-forest" strokeWidth={1.5} />,
+      title: t("landing.feat_viz_title", "Auto Chart Suggest"),
+      desc: t("landing.feat_viz_desc", "Gợi ý biểu đồ phù hợp theo kiểu dữ liệu — không cần expertise thống kê."),
+    },
+  ];
 
   return (
     <main
@@ -86,12 +91,11 @@ function HeroSection({ navigate, user }) {
       {/* Headline */}
       <div className="max-w-2xl">
         <h1 className="text-5xl md:text-6xl font-serif tracking-tight leading-[1.1] mb-5 text-ink">
-          Xử lý dữ liệu của bạn{" "}
-          <span className="text-forest italic">trong vài giây</span>
+          {t("landing.hero_title_1", "Xử lý dữ liệu của bạn")}{" "}
+          <span className="text-forest italic">{t("landing.hero_title_2", "trong vài giây")}</span>
         </h1>
         <p className="text-muted text-base md:text-lg leading-relaxed max-w-xl mx-auto">
-          Upload file CSV / XLSX — DataMind tự động phân tích, làm sạch và gợi
-          ý biểu đồ. Không cần viết một dòng code nào.
+          {t("landing.hero_subtitle", "Upload file CSV / XLSX — DataMind tự động phân tích, làm sạch và gợi ý biểu đồ. Không cần viết một dòng code nào.")}
         </p>
       </div>
 
@@ -103,7 +107,7 @@ function HeroSection({ navigate, user }) {
             onClick={() => navigate("/dashboard/profiler")}
             className="hero-btn-primary"
           >
-            Vào Dashboard →
+            {t("landing.hero_btn_dashboard", "Vào Dashboard →")}
           </button>
         ) : (
           <>
@@ -112,14 +116,14 @@ function HeroSection({ navigate, user }) {
               onClick={() => navigate("/register")}
               className="hero-btn-primary"
             >
-              Bắt đầu miễn phí →
+              {t("landing.hero_btn_start_free", "Bắt đầu miễn phí →")}
             </button>
             <button
               id="hero-pricing-btn"
               onClick={() => navigate("/pricing")}
               className="hero-btn-secondary"
             >
-              Xem gói dịch vụ
+              {t("landing.hero_btn_pricing", "Xem gói dịch vụ")}
             </button>
           </>
         )}
@@ -127,7 +131,7 @@ function HeroSection({ navigate, user }) {
 
       {/* Feature cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-8 max-w-3xl w-full text-left">
-        {FEATURES.map((f, i) => (
+        {features.map((f, i) => (
           <div
             key={f.title}
             className="feature-card"
@@ -146,33 +150,35 @@ function HeroSection({ navigate, user }) {
 
       {/* Social proof */}
       <p className="text-muted/60 text-xs">
-        Hỗ trợ CSV · XLSX · XLS · Tối đa 10 MB · 50.000 dòng
+        {t("landing.file_support_hint", "Hỗ trợ CSV · XLSX · XLS · Tối đa 10 MB · 50.000 dòng")}
       </p>
     </main>
   );
 }
 
 // ── Pricing Section ───────────────────────────────────────────────────────────
-function PricingSection({ navigate, user }) {
+function PricingSection({ navigate, user, t, lang }) {
   const ref = useFadeIn();
-  const free = PLANS.free;
-  const pro = PLANS.pro;
+  const plans = useMemo(() => getLocalizedPlans(t, lang), [t, lang]);
+  const free = plans.free;
+  const pro = plans.pro;
 
   return (
     <section ref={ref} className="fade-section py-20 md:py-24 px-6 w-full">
       {/* Section header */}
       <div className="text-center mb-14 max-w-xl mx-auto">
         <p className="text-xs uppercase tracking-[0.2em] text-forest mb-3 font-semibold">
-          Gói dịch vụ
+          {t("landing.pricing_badge", "Gói dịch vụ")}
         </p>
         <h2 className="text-4xl font-serif tracking-tight text-ink mb-4">
-          Đơn giản, minh bạch
+          {t("landing.pricing_title", "Đơn giản, minh bạch")}
         </h2>
         <p className="text-muted text-base leading-relaxed">
-          Bắt đầu miễn phí với {free.aiRuns} lượt AI mỗi ngày.
-          <br />
-          Nâng cấp Pro để
-          nhận {pro.aiRuns} lượt/ngày (hạn {pro.durationDays} ngày).
+          {t("landing.pricing_desc", "Bắt đầu miễn phí với {{freeRuns}} lượt AI mỗi ngày. Nâng cấp Pro để nhận {{proRuns}} lượt/ngày (hạn {{days}} ngày).", {
+            freeRuns: free.aiRuns,
+            proRuns: pro.aiRuns,
+            days: pro.durationDays,
+          })}
         </p>
       </div>
 
@@ -182,19 +188,21 @@ function PricingSection({ navigate, user }) {
         <PlanCard
           plan={free}
           isFeatured={false}
-          ctaLabel={user ? "Gói hiện tại" : "Bắt đầu miễn phí"}
+          ctaLabel={user ? t("landing.plan_current", "Gói hiện tại") : t("landing.plan_start_free", "Bắt đầu miễn phí")}
           ctaDisabled={false}
           onCtaClick={() => navigate(user ? "/pricing" : "/register")}
+          t={t}
         />
 
         {/* Pro card */}
         <PlanCard
           plan={pro}
           isFeatured={true}
-          ctaLabel={user ? "Nâng cấp ngay" : "Bắt đầu ngay"}
+          ctaLabel={user ? t("landing.plan_upgrade_now", "Nâng cấp ngay") : t("landing.plan_start_now", "Bắt đầu ngay")}
           ctaDisabled={false}
           onCtaClick={() => navigate(user ? "/pricing" : "/register")}
-          badge="Đề xuất"
+          badge={t("landing.badge_recommended", "Đề xuất")}
+          t={t}
         />
       </div>
     </section>
@@ -202,7 +210,7 @@ function PricingSection({ navigate, user }) {
 }
 
 // ── Plan Card ─────────────────────────────────────────────────────────────────
-function PlanCard({ plan, isFeatured, ctaLabel, ctaDisabled, onCtaClick, badge }) {
+function PlanCard({ plan, isFeatured, ctaLabel, ctaDisabled, onCtaClick, badge, t }) {
   return (
     <div
       className={`plan-card flex flex-col relative ${isFeatured ? "plan-card--featured" : "plan-card--free"
@@ -232,17 +240,19 @@ function PlanCard({ plan, isFeatured, ctaLabel, ctaDisabled, onCtaClick, badge }
       {/* Price */}
       <div className="mb-2 flex items-baseline gap-2">
         <span className="text-4xl font-bold font-mono text-ink tracking-tight">
-          {plan.price === 0 ? "0đ" : formatVND(plan.price)}
+          {plan.priceLabel}
         </span>
         {plan.price > 0 && (
           <span className="text-muted text-sm">/ {plan.periodLabel}</span>
         )}
         {plan.price === 0 && (
-          <span className="text-muted text-sm">/ ngày</span>
+          <span className="text-muted text-sm">{t ? t("landing.per_day", "/ ngày") : "/ ngày"}</span>
         )}
       </div>
       <p className="text-[11px] text-muted mb-6">
-        {plan.aiRuns} lượt AI/ngày · Reset 00:00 (giờ VN)
+        {t
+          ? t("landing.ai_reset_hint", "{{runs}} lượt AI/ngày · Reset 00:00 (giờ VN)", { runs: plan.aiRuns })
+          : `${plan.aiRuns} lượt AI/ngày · Reset 00:00 (giờ VN)`}
       </p>
 
       {/* Features */}

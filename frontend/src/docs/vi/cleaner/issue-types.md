@@ -1,6 +1,10 @@
 ---
 title: 5 loại vấn đề dữ liệu thường gặp
 updated: 2026-11-04
+related:
+  - profiler/attention
+  - visualize/skipped-columns
+  - report/appendix
 ---
 
 # 5 loại vấn đề dữ liệu thường gặp {#issue-types}

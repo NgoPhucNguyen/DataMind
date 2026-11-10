@@ -1,11 +1,37 @@
 ---
 title: Có gì mới (Nhật ký cập nhật)
-updated: 2026-11-04
+updated: 2026-11-10
 ---
 
 # Có gì mới (Nhật ký cập nhật) {#changelog}
 
 Chào mừng bạn đến với trang nhật ký cập nhật của DataMind! Tại đây, chúng tôi liên tục ghi nhận các tính năng mới, những cải tiến giao diện và tối ưu hóa hệ thống nhằm mang đến trải nghiệm xử lý dữ liệu mượt mà, tiện lợi nhất cho bạn.
+
+---
+
+## 10/11/2026 {#v-2026-11-10}
+
+- **Report — Phát hành bộ tài liệu Báo cáo Phân tích Dữ liệu:** Xuất bản 7 chuyên đề hướng dẫn chi tiết về phân hệ Report, bao gồm Tổng quan, AI Tổng quan, Điểm chính, Phương pháp, Phân tích chi tiết, Phụ lục và Xuất báo cáo ([xem tổng quan](/docs/report/overview)).
+- **Report — Trích xuất Điểm chính tự động:** Tự động tổng hợp tối đa 5 phát hiện thống kê trọng tâm kèm số Hình tham chiếu, không tiêu tốn lượt AI, hỗ trợ chỉnh sửa và khôi phục ([xem hướng dẫn](/docs/report/key-findings)).
+- **Report — Phụ lục từ điển dữ liệu:** Bảng tra cứu cấu trúc toàn bộ các cột, tỷ lệ khuyết, số giá trị duy nhất và nguyên nhân ẩn biểu đồ ([xem hướng dẫn](/docs/report/appendix)).
+- **Report — Tùy chọn nội dung đưa vào file:** Cho phép bật/tắt từng phân hệ báo cáo, cấu hình Trang bìa (Tên, Người thực hiện, Đơn vị/Lớp, Ngày) và Mục lục tự động ([xem hướng dẫn](/docs/report/export#select-sections)).
+- **Report — Xuất Microsoft Word dạng văn bản và bảng thật:** Xuất file DOCX với Trang bìa và Mục lục tối ưu trên Trang 1, font chữ Arial chuẩn hóa, ghép 2 biểu đồ/hàng và bảng dữ liệu cho phép copy số liệu sang Excel ([xem hướng dẫn](/docs/report/export#export-word)).
+- **Report — Lưu Phương pháp làm sạch trên máy chủ:** Tự động đồng bộ các chỉnh sửa phương pháp lên máy chủ, hiển thị thời gian lưu và cảnh báo khi dữ liệu bị làm sạch lại ([xem hướng dẫn](/docs/report/methodology)).
+- **Report — Đánh số thứ tự Hình/Bảng khoa học:** Tự động gắn số thứ tự Hình và Bảng chuẩn xác xuyên suốt tài liệu ([xem hướng dẫn](/docs/report/charts#numbering)).
+- **Report — Hộp thoại xác nhận chuẩn DataMind:** Đồng bộ hóa các hộp thoại xác nhận khi xóa biểu đồ hoặc khôi phục bản tự động ([xem hướng dẫn](/docs/report/charts#manage-charts)).
+- **Report — Xuất PDF qua hộp thoại in có hướng dẫn:** Tích hợp popover hướng dẫn 4 bước cài đặt chuẩn (Lưu dưới dạng PDF, Màu, tắt Đầu trang/chân trang, bật Đồ họa nền) để in tài liệu vector sắc nét ([xem hướng dẫn](/docs/report/export#export-pdf)).
+- **Visualize — Biểu đồ hộp toàn diện:** Biểu đồ hộp hiển thị đủ râu, trung vị, trung bình, ngoại lai và số liệu ở từng mốc ([xem hướng dẫn](/docs/visualize/chart-types#box-plot)).
+
+---
+
+## 08/11/2026 {#v-2026-11-08}
+
+- **Visualize — Phát hành bộ tài liệu Trực quan hóa dữ liệu:** Xuất bản 8 chuyên đề hướng dẫn chi tiết về phân hệ Visualize, bao gồm các loại biểu đồ, nhận xét tự động, ma trận tương quan, giải thích bằng AI và chọn biểu đồ cho báo cáo ([xem tổng quan](/docs/visualize/overview)).
+- **Visualize — Nhận diện biểu đồ thông minh:** Tự động đề xuất biểu đồ phân phối theo từng kiểu dữ liệu, đệm mức 0 cho thang đo Likert và gom nhóm tự động cho hơn 15 danh mục ([xem hướng dẫn](/docs/visualize/chart-types)).
+- **Visualize — 13 mẫu nhận xét thống kê tự động:** Tính toán các chỉ số nổi bật như giá trị phổ biến nhất, tỷ lệ top-2 box và khoảng tứ phân vị với độ chính xác làm tròn chuẩn thống kê ([xem hướng dẫn](/docs/visualize/reading-insights)).
+- **Visualize — Phân tích tương quan chuyên sâu:** Hỗ trợ tính toán theo cả hai phương pháp Pearson và Spearman, tìm kiếm theo cột và hiển thị lưới đếm 5×5 trực quan ([xem hướng dẫn](/docs/visualize/correlation)).
+- **Visualize — AI giải thích linh hoạt:** Minh bạch số lượt sử dụng, hỗ trợ hủy yêu cầu an toàn, lưu đệm 30 ngày và cơ chế dự phòng đa nhà cung cấp ([xem hướng dẫn](/docs/visualize/ai-explain)).
+- **Visualize — 5 bảng màu chuẩn hóa:** Tích hợp các bộ màu chuyên nghiệp gồm DataMind, Đại dương, Ấm áp, Dễ phân biệt (chuẩn Okabe-Ito) và Đen trắng ([xem hướng dẫn](/docs/visualize/chart-settings#color-palettes)).
 
 ---
 

@@ -8,6 +8,15 @@ export function ToastProvider({ children }) {
   const [toasts, setToasts] = useState([]);
 
   const showToast = useCallback((message, type = "info") => {
+    // Suppress intrusive error/warning toasts if session is expired and being redirected
+    const isSessionExpired =
+      typeof window !== "undefined" &&
+      (sessionStorage.getItem("datamind_session_expired") === "true" ||
+        window.location.search.includes("reason=expired"));
+    if (isSessionExpired && (type === "error" || type === "warning")) {
+      return;
+    }
+
     const id = Date.now() + Math.random();
     setToasts((prev) => {
       if (prev.some((t) => t.message === message)) return prev;

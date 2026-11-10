@@ -28,6 +28,15 @@ import {
   Check,
   Ban,
   EyeOff,
+  Settings,
+  Palette,
+  Info,
+  FileDown,
+  FileType2,
+  ArrowUp,
+  ArrowDown,
+  Trash2,
+  RotateCcw,
 } from "lucide-react";
 import { TypeBadge } from "../Profiler/Badges";
 
@@ -285,6 +294,173 @@ export const UI_REGISTRY = {
     kind: "badge",
     variant: "forest",
     fallback: "Ô đã đổi giá trị",
+  },
+
+  // Visualize Buttons, Tabs, Chips & Badges
+  "visualize.settings": {
+    kind: "icon-button",
+    icon: Settings,
+    labelKey: "visualize.settings_title",
+    fallback: "Tùy chỉnh biểu đồ",
+  },
+  "visualize.add_to_report": {
+    kind: "button",
+    variant: "secondary",
+    labelKey: "visualize.btn_add_to_report",
+    fallback: "Thêm vào báo cáo",
+  },
+  "visualize.added_to_report": {
+    kind: "button",
+    variant: "forest",
+    icon: Check,
+    labelKey: "visualize.btn_added_to_report",
+    fallback: "Đã thêm vào báo cáo",
+  },
+  "visualize.badge_suggested": {
+    kind: "badge",
+    variant: "forest",
+    icon: Sparkles,
+    labelKey: "visualize.badge_suggested",
+    fallback: "Gợi ý",
+  },
+  "visualize.palette": {
+    kind: "button",
+    variant: "secondary",
+    icon: Palette,
+    labelKey: "visualize.palette_label",
+    fallback: "Bảng màu",
+  },
+  "visualize.ai_explain": {
+    kind: "button",
+    variant: "forest",
+    icon: Sparkles,
+    labelKey: "visualize.ai_btn_explain",
+    fallback: "AI giải thích · 1 lượt",
+  },
+  "visualize.what_is_r": {
+    kind: "chip",
+    icon: Info,
+    labelKey: "visualize.corr_what_is_r_title",
+    fallback: "ⓘ r là gì?",
+  },
+  "visualize.threshold_03": {
+    kind: "chip",
+    fallback: "0,3 (Yếu)",
+  },
+  "visualize.threshold_05": {
+    kind: "chip",
+    fallback: "0,5 (Vừa)",
+  },
+  "visualize.threshold_07": {
+    kind: "chip",
+    fallback: "0,7 (Mạnh)",
+  },
+  "visualize.confirm_proceed": {
+    kind: "button",
+    variant: "forest",
+    iconRight: ArrowRight,
+    labelKey: "visualize.btn_confirm_proceed",
+    fallback: "Tiếp tục: Tạo báo cáo →",
+  },
+  "visualize.tab_distribution": {
+    kind: "button",
+    variant: "secondary",
+    fallback: "Phân phối",
+  },
+  "visualize.tab_correlation": {
+    kind: "button",
+    variant: "secondary",
+    fallback: "Tương quan",
+  },
+  "visualize.tab_time": {
+    kind: "button",
+    variant: "secondary",
+    fallback: "Theo thời gian",
+  },
+  "visualize.skipped_panel": {
+    kind: "button",
+    variant: "secondary",
+    fallback: "Các cột không có biểu đồ",
+  },
+  // Report UI elements
+  "report.export_pdf": {
+    kind: "button",
+    variant: "secondary",
+    icon: FileDown,
+    labelKey: "report.export_pdf",
+    fallback: "Xuất PDF",
+  },
+  "report.export_docx": {
+    kind: "button",
+    variant: "secondary",
+    icon: FileType2,
+    labelKey: "report.export_docx",
+    fallback: "Xuất Word (.docx)",
+  },
+  "report.ai_write": {
+    kind: "button",
+    variant: "forest",
+    icon: Sparkles,
+    labelKey: "report.overview_btn_generate",
+    fallback: "Viết tổng quan bằng AI · 1 lượt",
+  },
+  "report.ai_regenerate": {
+    kind: "button",
+    variant: "forest",
+    icon: RotateCw,
+    labelKey: "report.overview_btn_regenerate",
+    fallback: "Tạo lại · 1 lượt",
+  },
+  "report.edit_btn": {
+    kind: "button",
+    variant: "secondary",
+    icon: Edit3,
+    labelKey: "report.overview_edit_btn",
+    fallback: "Chỉnh sửa",
+  },
+  "report.restore_auto": {
+    kind: "button",
+    variant: "secondary",
+    icon: RotateCcw,
+    labelKey: "report.methodology_restore_auto",
+    fallback: "Khôi phục bản tự động",
+  },
+  "report.move_up": {
+    kind: "icon-button",
+    icon: ArrowUp,
+    fallback: "Di chuyển lên",
+  },
+  "report.move_down": {
+    kind: "icon-button",
+    icon: ArrowDown,
+    fallback: "Di chuyển xuống",
+  },
+  "report.remove_chart": {
+    kind: "icon-button",
+    icon: Trash2,
+    fallback: "Xóa biểu đồ",
+  },
+  "report.badge_ai": {
+    kind: "badge",
+    fallback: "AI",
+  },
+  "report.badge_edited": {
+    kind: "badge",
+    fallback: "Đã chỉnh sửa",
+  },
+  "report.badge_charts_changed": {
+    kind: "chip",
+    icon: AlertTriangle,
+    fallback: "Biểu đồ đã thay đổi",
+  },
+  "report.badge_cleaning_stale": {
+    kind: "chip",
+    icon: AlertTriangle,
+    fallback: "Dữ liệu đã làm sạch lại",
+  },
+  "report.badge_saved": {
+    kind: "badge",
+    fallback: "Đã lưu",
   },
 };
 

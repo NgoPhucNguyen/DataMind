@@ -1,4 +1,5 @@
 import axios from "axios";
+import { handleSessionExpired } from "../utils/sessionManager";
 
 // 1. Khởi tạo cây cầu
 const api = axios.create({
@@ -25,12 +26,19 @@ api.interceptors.request.use(
 api.interceptors.response.use(
     (response) => response,
     (error) => {
-        if (error.response?.status === 401) {
-            localStorage.removeItem("token");
-            // Chuyển hướng về login, tránh loop nếu đang ở trang login
-            if (!window.location.pathname.startsWith("/login")) {
-                window.location.href = "/login";
-            }
+        const status = error.response?.status;
+        const url = error.config?.url || "";
+
+        // Do NOT intercept 401 from login / register / auth credential endpoints
+        // (those are user-input credential errors and must be handled by the form)
+        const isAuthCredentialEndpoint =
+            url.includes("/auth/login") ||
+            url.includes("/auth/register") ||
+            url.includes("/auth/google");
+
+        if (status === 401 && !isAuthCredentialEndpoint) {
+            // Any authenticated call that fails with 401 triggers central session expiry
+            handleSessionExpired();
         }
         return Promise.reject(error);
     }

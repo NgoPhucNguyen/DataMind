@@ -1,6 +1,10 @@
 ---
 title: 4 lý do cột cần xem xét
 updated: 2026-11-02
+related:
+  - cleaner/find-errors
+  - cleaner/auto-clean
+  - visualize/skipped-columns
 ---
 
 # 4 lý do cột cần xem xét {#attention}

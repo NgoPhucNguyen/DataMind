@@ -1,6 +1,9 @@
 ---
 title: Tìm & định vị lỗi nhanh chóng
 updated: 2026-11-04
+related:
+  - profiler/column-stats
+  - visualize/reading-insights
 ---
 
 # Tìm & định vị lỗi nhanh chóng {#find-errors}

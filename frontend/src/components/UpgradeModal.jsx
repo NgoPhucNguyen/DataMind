@@ -1,10 +1,15 @@
 import React, { useState, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { CheckCircle2, Copy, Loader2, Sparkles, X } from "lucide-react";
 import { createOrder, getOrderStatus } from "../services/paymentService";
 import { trackOnce } from "../lib/analytics";
 import { useAuth } from "../contexts/AuthContext";
 
 export default function UpgradeModal({ isOpen, onClose, onSuccess }) {
+    const { t, i18n } = useTranslation();
+    const isEn = i18n.language?.startsWith("en");
+    const dateLocale = isEn ? "en-US" : "vi-VN";
+
     const [order, setOrder] = useState(null);
     const [loading, setLoading] = useState(false);
     const [status, setStatus] = useState("idle"); // idle, pending, completed, error
@@ -39,9 +44,8 @@ export default function UpgradeModal({ isOpen, onClose, onSuccess }) {
                 const currentExpiry = new Date(proExpiresAt);
                 if (!isNaN(currentExpiry.getTime())) {
                     const newExpiry = new Date(currentExpiry.getTime() + 30 * 24 * 60 * 60 * 1000);
-                    const formatD = (d) => `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
-                    setInitialCurrentExpiryStr(formatD(currentExpiry));
-                    setInitialNewExpiryStr(formatD(newExpiry));
+                    setInitialCurrentExpiryStr(currentExpiry.toLocaleDateString(dateLocale));
+                    setInitialNewExpiryStr(newExpiry.toLocaleDateString(dateLocale));
                 }
             } else {
                 setInitialCurrentExpiryStr("");
@@ -71,7 +75,7 @@ export default function UpgradeModal({ isOpen, onClose, onSuccess }) {
                 }
             } catch (err) {
                 if (isMounted) {
-                    setError("Không thể khởi tạo đơn hàng. Vui lòng thử lại sau.");
+                    setError(t("upgrade.order_failed", "Không thể khởi tạo đơn hàng. Vui lòng thử lại sau."));
                     setStatus("error");
                 }
             } finally {
@@ -160,7 +164,7 @@ export default function UpgradeModal({ isOpen, onClose, onSuccess }) {
                     <div className="flex items-center gap-2 text-forest">
                         <Sparkles className="w-5 h-5" />
                         <h2 className="text-lg font-bold">
-                            {initialIsPro ? "Gia hạn Pro Plan" : "Nâng cấp Pro Plan"}
+                            {initialIsPro ? t("upgrade.title_renew", "Gia hạn Pro Plan") : t("upgrade.title_upgrade", "Nâng cấp Pro Plan")}
                         </h2>
                     </div>
                     <button
@@ -181,19 +185,19 @@ export default function UpgradeModal({ isOpen, onClose, onSuccess }) {
                             </div>
                             <div>
                                 <h3 className="text-xl font-bold text-ink mb-1">
-                                    {initialIsPro ? "Gia hạn thành công!" : "Thanh toán thành công!"}
+                                    {initialIsPro ? t("upgrade.success_title_renew", "Gia hạn thành công!") : t("upgrade.success_title_upgrade", "Thanh toán thành công!")}
                                 </h3>
                                 <p className="text-muted">
                                     {initialIsPro
-                                        ? `Cảm ơn bạn. Gói Pro của bạn đã được gia hạn thêm 30 ngày${initialNewExpiryStr ? ` (hạn mới: ${initialNewExpiryStr})` : ""}.`
-                                        : "Cảm ơn bạn. Tài khoản của bạn đã được nâng cấp lên Pro (20 lượt AI/ngày trong 30 ngày)."}
+                                        ? t("upgrade.success_desc_renew", "Cảm ơn bạn. Gói Pro của bạn đã được gia hạn thêm 30 ngày (hạn mới: {{date}}).", { date: initialNewExpiryStr || "" })
+                                        : t("upgrade.success_desc_upgrade", "Cảm ơn bạn. Tài khoản của bạn đã được nâng cấp lên Pro (20 lượt AI/ngày trong 30 ngày).")}
                                 </p>
                             </div>
                             <button
                                 onClick={handleClose}
                                 className="mt-2 w-full py-2.5 bg-forest hover:bg-forest/90 text-white rounded-lg font-semibold transition-colors"
                             >
-                                Bắt đầu sử dụng
+                                {t("upgrade.btn_start_using", "Bắt đầu sử dụng")}
                             </button>
                         </div>
                     )}
@@ -202,7 +206,7 @@ export default function UpgradeModal({ isOpen, onClose, onSuccess }) {
                     {status !== "completed" && loading && (
                         <div className="flex flex-col items-center justify-center py-12 gap-3 text-muted">
                             <Loader2 className="w-8 h-8 animate-spin text-forest" />
-                            <p>Đang khởi tạo đơn hàng...</p>
+                            <p>{t("upgrade.loading_order", "Đang khởi tạo đơn hàng...")}</p>
                         </div>
                     )}
 
@@ -214,7 +218,7 @@ export default function UpgradeModal({ isOpen, onClose, onSuccess }) {
                                 onClick={onClose}
                                 className="mt-4 px-4 py-2 bg-red-50 hover:bg-red-100 rounded-lg font-medium transition-colors"
                             >
-                                Đóng
+                                {t("upgrade.btn_close", "Đóng")}
                             </button>
                         </div>
                     )}
@@ -223,16 +227,19 @@ export default function UpgradeModal({ isOpen, onClose, onSuccess }) {
                     {status !== "completed" && status === "pending" && order && !pollingTimeout && (
                         <div className="space-y-5 flex flex-col items-center">
                             <p className="text-sm text-center text-muted px-4">
-                                Vui lòng quét mã QR hoặc chuyển khoản theo thông tin bên dưới. Hệ thống sẽ tự động cập nhật ngay sau khi nhận được.
+                                {t("upgrade.transfer_guide", "Vui lòng quét mã QR hoặc chuyển khoản theo thông tin bên dưới. Hệ thống sẽ tự động cập nhật ngay sau khi nhận được.")}
                             </p>
 
                             {initialIsPro && (
                                 <div className="w-full bg-forest/5 border border-forest/20 rounded-xl p-3 text-xs text-forest text-center">
                                     <p className="font-semibold flex items-center justify-center gap-1.5">
-                                        <Sparkles className="w-3.5 h-3.5" /> Gia hạn thêm 30 ngày
+                                        <Sparkles className="w-3.5 h-3.5" /> {t("upgrade.extend_badge", "Gia hạn thêm 30 ngày")}
                                     </p>
                                     <p className="text-muted mt-0.5">
-                                        Hạn hiện tại: <span className="text-ink font-medium">{initialCurrentExpiryStr}</span> → Hạn mới: <span className="font-bold text-forest">{initialNewExpiryStr}</span>
+                                        {t("upgrade.expiry_current_to_new", "Hạn hiện tại: {{current}} → Hạn mới: {{new}}", {
+                                            current: initialCurrentExpiryStr,
+                                            new: initialNewExpiryStr,
+                                        })}
                                     </p>
                                 </div>
                             )}
@@ -249,23 +256,25 @@ export default function UpgradeModal({ isOpen, onClose, onSuccess }) {
                             {/* Transfer Info */}
                             <div className="w-full bg-sage/20 rounded-xl p-4 space-y-3 text-sm">
                                 <div className="flex justify-between items-center border-b border-border/50 pb-2">
-                                    <span className="text-muted">Ngân hàng:</span>
+                                    <span className="text-muted">{t("upgrade.bank_label", "Ngân hàng:")}</span>
                                     <span className="font-semibold text-ink">{order.transfer_info?.bank_name}</span>
                                 </div>
                                 <div className="flex justify-between items-center border-b border-border/50 pb-2">
-                                    <span className="text-muted">Chủ tài khoản:</span>
+                                    <span className="text-muted">{t("upgrade.account_holder_label", "Chủ tài khoản:")}</span>
                                     <span className="font-semibold text-ink">{order.transfer_info?.account_name}</span>
                                 </div>
                                 <div className="flex justify-between items-center border-b border-border/50 pb-2">
-                                    <span className="text-muted">Số tài khoản:</span>
+                                    <span className="text-muted">{t("upgrade.account_number_label", "Số tài khoản:")}</span>
                                     <span className="font-semibold text-ink font-mono">{order.transfer_info?.account_number}</span>
                                 </div>
                                 <div className="flex justify-between items-center border-b border-border/50 pb-2">
-                                    <span className="text-muted">Số tiền:</span>
-                                    <span className="font-bold text-forest text-base">{new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(order.amount || 0)}</span>
+                                    <span className="text-muted">{t("upgrade.amount_label", "Số tiền:")}</span>
+                                    <span className="font-bold text-forest text-base">
+                                        {new Intl.NumberFormat(dateLocale, { style: 'currency', currency: 'VND' }).format(order.amount || 0)}
+                                    </span>
                                 </div>
                                 <div className="flex justify-between items-center pt-1">
-                                    <span className="text-muted">Nội dung (Bắt buộc):</span>
+                                    <span className="text-muted">{t("upgrade.content_label", "Nội dung (Bắt buộc):")}</span>
                                     <div className="flex items-center gap-2">
                                         <span className="font-bold text-ink bg-white px-2 py-1 rounded border border-border font-mono text-base">
                                             {order.order_ref}
@@ -273,12 +282,12 @@ export default function UpgradeModal({ isOpen, onClose, onSuccess }) {
                                         <button
                                             onClick={() => handleCopy(order.order_ref)}
                                             className="p-1.5 bg-white border border-border rounded hover:bg-gray-50 transition-colors text-ink relative"
-                                            title="Copy nội dung"
+                                            title={t("upgrade.copy_tooltip", "Copy nội dung")}
                                         >
                                             <Copy className="w-4 h-4" />
                                             {copySuccess && (
                                                 <span className="absolute -top-8 left-1/2 -translate-x-1/2 bg-ink text-white text-xs py-1 px-2 rounded">
-                                                    Đã copy
+                                                    {t("upgrade.copied_tooltip", "Đã copy")}
                                                 </span>
                                             )}
                                         </button>
@@ -288,7 +297,7 @@ export default function UpgradeModal({ isOpen, onClose, onSuccess }) {
 
                             <div className="flex items-center gap-2 text-sm text-forest bg-green-50 px-4 py-2 rounded-lg w-full justify-center">
                                 <Loader2 className="w-4 h-4 animate-spin" />
-                                <span>Đang chờ thanh toán...</span>
+                                <span>{t("upgrade.waiting_payment", "Đang chờ thanh toán...")}</span>
                             </div>
                         </div>
                     )}
@@ -299,15 +308,15 @@ export default function UpgradeModal({ isOpen, onClose, onSuccess }) {
                             <div className="text-amber-500 mb-3 flex justify-center">
                                 <Loader2 className="w-8 h-8" />
                             </div>
-                            <p className="text-ink font-medium mb-2">Chưa nhận được thanh toán</p>
+                            <p className="text-ink font-medium mb-2">{t("upgrade.timeout_title", "Chưa nhận được thanh toán")}</p>
                             <p className="text-sm text-muted mb-4">
-                                Vui lòng kiểm tra lại nếu bạn đã chuyển khoản. Bạn có thể đóng cửa sổ này và quay lại sau, trạng thái đơn hàng vẫn được lưu.
+                                {t("upgrade.timeout_desc", "Vui lòng kiểm tra lại nếu bạn đã chuyển khoản. Bạn có thể đóng cửa sổ này và quay lại sau, trạng thái đơn hàng vẫn được lưu.")}
                             </p>
                             <button
                                 onClick={onClose}
                                 className="px-4 py-2 border border-border hover:bg-sage/40 rounded-lg font-medium transition-colors"
                             >
-                                Đóng
+                                {t("upgrade.btn_close", "Đóng")}
                             </button>
                         </div>
                     )}

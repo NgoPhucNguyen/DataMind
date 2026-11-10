@@ -1,6 +1,10 @@
 ---
 title: Nhận diện 5 kiểu dữ liệu
 updated: 2026-11-02
+related:
+  - cleaner/issue-types
+  - visualize/chart-types
+  - report/appendix
 ---
 
 # Nhận diện 5 kiểu dữ liệu {#data-types}

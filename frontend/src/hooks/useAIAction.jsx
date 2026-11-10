@@ -3,8 +3,10 @@ import { useTranslation } from "react-i18next";
 import { Sparkles, Loader2, X } from "lucide-react";
 import axios from "axios";
 import { useToast } from "../contexts/ToastContext";
+import { useConfirm } from "../components/ui/ConfirmDialog";
 import { getAIUsage } from "../services/profilerService";
 import { translateError } from "../i18n";
+import { getStoredSettings } from "./useSettings";
 
 function getSkipConfirmDateKey() {
   const today = new Date().toISOString().slice(0, 10);
@@ -143,6 +145,7 @@ export function useAIAction({
 }) {
   const { t } = useTranslation();
   const { showToast } = useToast();
+  const confirmDialog = useConfirm();
 
   const [loading, setLoading] = useState(false);
   const [seconds, setSeconds] = useState(0);
@@ -235,7 +238,7 @@ export function useAIAction({
   );
 
   const execute = useCallback(
-    (params = {}) => {
+    async (params = {}) => {
       if (loading) return;
 
       // If action is free (e.g. reopening cached result without API spend)
@@ -253,17 +256,50 @@ export function useAIAction({
         return;
       }
 
+      // Check if user disabled AI confirm in settings
+      const settings = getStoredSettings();
+      if (settings.aiConfirm === false) {
+        runAction(params);
+        return;
+      }
+
       // Check if user chose "Don't ask again today"
       if (getSkipConfirmToday()) {
         runAction(params);
         return;
       }
 
-      // Show confirm dialog
-      pendingParamsRef.current = params;
-      setIsConfirmOpen(true);
+      // Show confirm dialog via themed ConfirmDialog
+      try {
+        const res = await confirmDialog({
+          icon: <Sparkles className="w-4 h-4 text-forest" />,
+          title: t("usage.confirm_dialog_title", { defaultValue: "Xác nhận sử dụng AI" }),
+          message: t("usage.confirm_dialog_desc", {
+            remaining: usage?.remaining ?? 0,
+            limit: usage?.limit ?? 0,
+            defaultValue: `Thao tác này dùng 1 lượt AI. Hôm nay còn ${usage?.remaining ?? 0}/${usage?.limit ?? 0} lượt.`,
+          }),
+          confirmText: t("common.continue", { defaultValue: "Tiếp tục" }),
+          cancelText: t("common.cancel", { defaultValue: "Hủy" }),
+          tone: "default",
+          checkbox: {
+            label: t("usage.dont_ask_today", { defaultValue: "Không hỏi lại trong hôm nay" }),
+            defaultChecked: false,
+          },
+        });
+
+        if (res?.ok) {
+          if (res.checked) {
+            setSkipConfirmToday(true);
+            setDontAskToday(true);
+          }
+          runAction(params);
+        }
+      } catch (err) {
+        console.error("AI confirm dialog error:", err);
+      }
     },
-    [loading, usage, onUpgradeClick, runAction, showToast]
+    [loading, usage, onUpgradeClick, runAction, showToast, confirmDialog, t]
   );
 
   const confirm = useCallback(() => {
@@ -287,17 +323,8 @@ export function useAIAction({
     }
   }, []);
 
-  const AIConfirmModal = (
-    <AIConfirmDialog
-      isOpen={isConfirmOpen}
-      onConfirm={confirm}
-      onCancel={cancelConfirm}
-      remaining={usage?.remaining}
-      limit={usage?.limit}
-      dontAskToday={dontAskToday}
-      setDontAskToday={setDontAskToday}
-    />
-  );
+  // Return null because ConfirmProvider now handles rendering dialog at root
+  const AIConfirmModal = null;
 
   const AIRunningBar = (
     <AIRunningIndicator

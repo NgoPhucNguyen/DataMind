@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import {
   X, BookOpen, CheckCircle2, PlayCircle, BarChart2, ShieldAlert,
-  Sparkles, Info, HelpCircle
+  Sparkles, Info, HelpCircle, FileText
 } from "lucide-react";
 
 export default function PageHelpDocs({ pageId }) {
@@ -43,6 +43,18 @@ export default function PageHelpDocs({ pageId }) {
         { icon: Sparkles, title: t("visualize.help_docs_step5_title"), text: t("visualize.help_docs_step5_text") },
         { icon: CheckCircle2, title: t("visualize.help_docs_step6_title"), text: t("visualize.help_docs_step6_text") },
         { icon: ShieldAlert, title: t("visualize.help_docs_step7_title"), text: t("visualize.help_docs_step7_text") }
+      ]
+    },
+    report: {
+      title: t("report.help_docs_title", "Hướng dẫn: Report (Báo cáo Phân tích Dữ liệu)"),
+      description: t("report.help_docs_desc", "Biên tập, chỉnh sửa và đóng gói báo cáo điều hành toàn diện từ kết quả của các bước trước."),
+      steps: [
+        { icon: PlayCircle, title: t("report.help_docs_step1_title", "1. Báo cáo gồm những gì?"), text: t("report.help_docs_step1_text", "Báo cáo tập hợp 5 phần: Tổng quan, Điểm chính, Phương pháp & Làm sạch, Phân tích chi tiết và Phụ lục từ điển dữ liệu.") },
+        { icon: Sparkles, title: t("report.help_docs_step2_title", "2. Viết tổng quan bằng AI"), text: t("report.help_docs_step2_text", "Dùng 1 lượt AI để tạo đoạn tóm tắt mở đầu 4–5 câu. Bạn có thể tự do chỉnh sửa và lưu văn bản của riêng mình.") },
+        { icon: Info, title: t("report.help_docs_step3_title", "3. Điểm chính tự động"), text: t("report.help_docs_step3_text", "Trích xuất tự động tối đa 5 điểm nổi bật kèm số Hình tham chiếu, không tốn lượt AI, cho phép sửa hoặc khôi phục.") },
+        { icon: CheckCircle2, title: t("report.help_docs_step4_title", "4. Phương pháp & Làm sạch"), text: t("report.help_docs_step4_text", "Tự động thống kê các thao tác làm sạch đã thực hiện, tự động lưu trên máy chủ và cảnh báo khi dữ liệu bị làm sạch lại.") },
+        { icon: BarChart2, title: t("report.help_docs_step5_title", "5. Sắp xếp và quản lý biểu đồ"), text: t("report.help_docs_step5_text", "Di chuyển lên/xuống, xóa biểu đồ khỏi báo cáo (biểu đồ vẫn còn ở Visualize) kèm nhận xét tự động và giải thích AI.") },
+        { icon: FileText, title: t("report.help_docs_step6_title", "6. Xuất PDF & Word"), text: t("report.help_docs_step6_text", "Tùy chọn mục đưa vào file, cấu hình trang bìa, mục lục và xuất file Word dạng bảng/văn bản thật hoặc PDF qua hộp thoại in.") }
       ]
     }
   };
@@ -125,6 +137,22 @@ export default function PageHelpDocs({ pageId }) {
                   className="text-xs font-semibold text-forest hover:underline"
                 >
                   {t("cleaner.help_docs_full_link", "Xem tài liệu đầy đủ →")}
+                </a>
+              ) : pageId === "visualize" ? (
+                <a
+                  href="/docs/visualize/overview"
+                  onClick={() => setIsOpen(false)}
+                  className="text-xs font-semibold text-forest hover:underline"
+                >
+                  {t("visualize.help_docs_full_link", "Xem tài liệu đầy đủ →")}
+                </a>
+              ) : pageId === "report" ? (
+                <a
+                  href="/docs/report/overview"
+                  onClick={() => setIsOpen(false)}
+                  className="text-xs font-semibold text-forest hover:underline"
+                >
+                  {t("report.help_docs_full_link", "Xem tài liệu đầy đủ →")}
                 </a>
               ) : <div />}
               <button 

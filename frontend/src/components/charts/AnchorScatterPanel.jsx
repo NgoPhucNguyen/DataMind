@@ -5,9 +5,12 @@ import {
 } from "recharts";
 import { X, AlertTriangle } from "lucide-react";
 import { CARD, TEXT, BTN, BADGE } from "../../constants/ui";
+import { CHART_THEME } from "./ChartComponents";
+import { useChartTheme } from "../../contexts/ChartThemeContext";
 
 const AnchorScatterPanel = React.memo(({ colA, colB, rValue, scatterData, loading, error, onClear, isSelected, onToggle }) => {
   const { t } = useTranslation();
+  const theme = useChartTheme();
   const rBadgeClass = rValue > 0
     ? `${BADGE.success}`
     : `${BADGE.error}`;
@@ -79,16 +82,18 @@ const AnchorScatterPanel = React.memo(({ colA, colB, rValue, scatterData, loadin
                   type="number"
                   name={colA}
                   stroke="#626C65"
+                  tick={{ fill: "#626C65", fontFamily: CHART_THEME.fontFamily }}
                   fontSize={10}
-                  label={{ value: colA, position: "insideBottomRight", offset: -5, fill: "#626C65", fontSize: 11 }}
+                  label={{ value: colA, position: "insideBottomRight", offset: -5, fill: "#626C65", fontSize: 11, fontFamily: CHART_THEME.fontFamily }}
                 />
                 <YAxis
                   dataKey="y"
                   type="number"
                   name={colB}
                   stroke="#626C65"
+                  tick={{ fill: "#626C65", fontFamily: CHART_THEME.fontFamily }}
                   fontSize={10}
-                  label={{ value: colB, position: "insideTopLeft", offset: -5, fill: "#626C65", fontSize: 11, angle: -90 }}
+                  label={{ value: colB, position: "insideTopLeft", offset: -5, fill: "#626C65", fontSize: 11, angle: -90, fontFamily: CHART_THEME.fontFamily }}
                 />
                 <Tooltip
                   cursor={{ strokeDasharray: "3 3", stroke: "#626C65" }}
@@ -98,8 +103,9 @@ const AnchorScatterPanel = React.memo(({ colA, colB, rValue, scatterData, loadin
                     borderRadius: 8,
                     color: "#121A14",
                     fontSize: 12,
+                    fontFamily: CHART_THEME.fontFamily,
                   }}
-                  wrapperStyle={{ zIndex: 1000 }}
+                  wrapperStyle={{ zIndex: 1000, fontFamily: CHART_THEME.fontFamily }}
                   formatter={(value, name) => [
                     typeof value === "number" ? value.toFixed(2) : value,
                     name === "x" ? colA : colB
@@ -107,7 +113,7 @@ const AnchorScatterPanel = React.memo(({ colA, colB, rValue, scatterData, loadin
                 />
                 <Scatter
                   data={scatterData.points}
-                  fill="#1B4324"
+                  fill={theme.primary}
                   fillOpacity={0.6}
                   r={3}
                 />

@@ -12,11 +12,13 @@ import {
   DistributionChart, CategoricalChart, TrendChart,
   CorrelationHeatmap, PieChartComponent, BoxPlotChart
 } from "../components/charts/ChartComponents";
+import CorrelationView from "../components/charts/CorrelationView";
 import {
   parseSortKey,
   sortCategories,
   computeEffectiveChart,
 } from "../utils/chartView";
+import { PALETTE_LIST, getPalette } from "../utils/chartPalettes";
 import PageHelpDocs from "../components/PageHelpDocs";
 import AnchorScatterPanel from "../components/charts/AnchorScatterPanel";
 import AIInsightsCard from "../components/charts/AIInsightsCard";
@@ -27,7 +29,7 @@ import { detectIssues, autoClean, confirmClean } from "../services/cleanerServic
 import PageHeader from "../components/PageHeader";
 import { BTN } from "../constants/ui";
 
-const CURRENT_SUMMARY_VERSION = 3;
+const CURRENT_SUMMARY_VERSION = 6;
 const ENABLE_CHART_EDIT = false; // bật lại khi xử lý xong cache-invalidation cho edit chart
 const EMPTY_SETTINGS = Object.freeze({});
 
@@ -150,8 +152,10 @@ export function getInsightTooltip(insight, t, lang) {
 
 function getSubtitle(chart, stats, summary, t) {
   if (chart.type === "heatmap") {
-    const numCols = Object.keys(chart.matrix || {}).length;
-    return t("visualize.subtitle_heatmap", { count: numCols });
+    const numCols = chart.correlation_v2?.columns?.length || Object.keys(chart.matrix || {}).length;
+    const defMethod = chart.correlation_v2?.default_method || "spearman";
+    const methodName = defMethod === "spearman" ? "Spearman" : "Pearson";
+    return t("visualize.subtitle_heatmap", { count: numCols, method: methodName });
   }
   if (stats?.dtype === "multiple_choice") {
     const resp = stats.respondents ?? summary?.shape?.[0] ?? "";
@@ -204,15 +208,24 @@ export function getSuggestedReason(chart, stats, summary, t, currentLang = "vi")
   const isEn = currentLang.startsWith("en");
 
   if (chart.type === "heatmap") {
-    const strongCorrPairs = (summary?.top_correlations || []).filter(
-      tc => Math.abs(typeof tc.r === "number" ? tc.r : parseFloat(tc.r)) >= 0.5
-    );
-    const n = strongCorrPairs.length;
+    const v2 = chart.correlation_v2 || summary?.correlation_v2;
+    let strongCorrCount = 0;
+    if (v2?.pairs) {
+      const defMethod = v2.default_method || "spearman";
+      strongCorrCount = v2.pairs.filter(
+        (p) => Math.abs(p[defMethod] ?? 0) >= 0.5
+      ).length;
+    } else {
+      strongCorrCount = (summary?.top_correlations || []).filter(
+        tc => Math.abs(typeof tc.r === "number" ? tc.r : parseFloat(tc.r)) >= 0.5
+      ).length;
+    }
+    const n = strongCorrCount;
     return t("visualize.badge_suggested_reason_heatmap", {
       n,
       defaultValue: isEn
         ? `Pre-selected: ${n} pairs with fairly strong correlation (|r| ≥ 0.5). Click 'Added to report' to deselect.`
-        : `Chọn sẵn vì có ${n} cặp cột liên quan khá mạnh (r ≥ 0,5). Bấm 'Đã thêm vào báo cáo' để bỏ chọn.`
+        : `Chọn sẵn vì có ${n} cặp cột liên quan khá mạnh (|r| ≥ 0,5). Bấm 'Đã thêm vào báo cáo' để bỏ chọn.`
     });
   }
 
@@ -275,12 +288,7 @@ export function ChartSettingsPopover({ chart, stats, settings = {}, onUpdateSett
   const isScale = stats?.is_discrete && stats?.is_scale;
   const isContinuous = stats?.dtype === "numeric" && !stats?.is_discrete;
 
-  const canBox = isContinuous &&
-    stats?.min !== undefined &&
-    stats?.p25 !== undefined &&
-    stats?.median !== undefined &&
-    stats?.p75 !== undefined &&
-    stats?.max !== undefined;
+  const canBox = isContinuous && Boolean(stats?.box);
 
   const showDisplayType = (isCategorical || isDiscrete) || (isContinuous && canBox);
   const showTopN = isCategorical || isMultipleChoice;
@@ -319,15 +327,15 @@ export function ChartSettingsPopover({ chart, stats, settings = {}, onUpdateSett
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 top-full mt-1.5 w-64 bg-white border border-[#E5E5E3] rounded-xl shadow-xl p-3.5 z-[100] text-xs space-y-3.5">
+        <div className="absolute right-0 top-full mt-1.5 w-64 bg-white border border-[#E5E5E3] rounded-xl shadow-xl p-3.5 z-[100] type-label space-y-3.5">
           <div className="flex items-center justify-between pb-2 border-b border-[#EAEAEA]">
-            <span className="font-semibold text-[#121A14]">
+            <span className="type-label font-semibold text-[#121A14]">
               {t("visualize.settings_title")}
             </span>
             <button
               type="button"
               onClick={() => setIsOpen(false)}
-              className="text-[#626C65] hover:text-[#121A14] p-0.5 rounded"
+              className="text-[#626C65] hover:text-[#121A14] p-0.5 rounded cursor-pointer"
             >
               <X className="w-3.5 h-3.5" />
             </button>
@@ -336,7 +344,7 @@ export function ChartSettingsPopover({ chart, stats, settings = {}, onUpdateSett
           {/* display_type */}
           {showDisplayType && (
             <div>
-              <label className="block text-[11px] font-medium text-[#626C65] mb-1.5">
+              <label className="block type-caption font-medium mb-1.5">
                 {t("visualize.settings_display_type")}
               </label>
               <div className="grid grid-cols-2 gap-1.5">
@@ -345,7 +353,7 @@ export function ChartSettingsPopover({ chart, stats, settings = {}, onUpdateSett
                     <button
                       type="button"
                       onClick={() => onUpdateSettings({ display_type: "bar" })}
-                      className={`py-1 px-2 rounded-md text-xs font-medium border text-center transition-colors ${
+                      className={`py-1 px-2 rounded-md type-label font-medium border text-center transition-colors cursor-pointer ${
                         displayType === "bar"
                           ? "bg-[#EAF2EB] text-[#1B4324] border-[#1B4324]/30 font-semibold"
                           : "bg-[#F9F9F8] text-[#626C65] border-[#E5E5E3] hover:text-[#121A14]"
@@ -356,7 +364,7 @@ export function ChartSettingsPopover({ chart, stats, settings = {}, onUpdateSett
                     <button
                       type="button"
                       onClick={() => onUpdateSettings({ display_type: "pie" })}
-                      className={`py-1 px-2 rounded-md text-xs font-medium border text-center transition-colors ${
+                      className={`py-1 px-2 rounded-md type-label font-medium border text-center transition-colors cursor-pointer ${
                         displayType === "pie"
                           ? "bg-[#EAF2EB] text-[#1B4324] border-[#1B4324]/30 font-semibold"
                           : "bg-[#F9F9F8] text-[#626C65] border-[#E5E5E3] hover:text-[#121A14]"
@@ -371,7 +379,7 @@ export function ChartSettingsPopover({ chart, stats, settings = {}, onUpdateSett
                     <button
                       type="button"
                       onClick={() => onUpdateSettings({ display_type: "histogram" })}
-                      className={`py-1 px-2 rounded-md text-xs font-medium border text-center transition-colors ${
+                      className={`py-1 px-2 rounded-md type-label font-medium border text-center transition-colors cursor-pointer ${
                         displayType === "histogram"
                           ? "bg-[#EAF2EB] text-[#1B4324] border-[#1B4324]/30 font-semibold"
                           : "bg-[#F9F9F8] text-[#626C65] border-[#E5E5E3] hover:text-[#121A14]"
@@ -382,7 +390,7 @@ export function ChartSettingsPopover({ chart, stats, settings = {}, onUpdateSett
                     <button
                       type="button"
                       onClick={() => onUpdateSettings({ display_type: "box" })}
-                      className={`py-1 px-2 rounded-md text-xs font-medium border text-center transition-colors ${
+                      className={`py-1 px-2 rounded-md type-label font-medium border text-center transition-colors cursor-pointer ${
                         displayType === "box"
                           ? "bg-[#EAF2EB] text-[#1B4324] border-[#1B4324]/30 font-semibold"
                           : "bg-[#F9F9F8] text-[#626C65] border-[#E5E5E3] hover:text-[#121A14]"
@@ -399,7 +407,7 @@ export function ChartSettingsPopover({ chart, stats, settings = {}, onUpdateSett
           {/* top_n */}
           {showTopN && displayType !== "pie" && (
             <div>
-              <label className="block text-[11px] font-medium text-[#626C65] mb-1.5">
+              <label className="block type-caption font-medium mb-1.5">
                 {t("visualize.settings_top_n")}
               </label>
               <div className="grid grid-cols-4 gap-1">
@@ -413,7 +421,7 @@ export function ChartSettingsPopover({ chart, stats, settings = {}, onUpdateSett
                     key={opt.id}
                     type="button"
                     onClick={() => onUpdateSettings({ top_n: opt.id })}
-                    className={`py-1 px-1 rounded-md text-[11px] font-medium border text-center transition-colors ${
+                    className={`py-1 px-1 rounded-md type-label font-medium border text-center transition-colors cursor-pointer ${
                       String(topN) === String(opt.id)
                         ? "bg-[#EAF2EB] text-[#1B4324] border-[#1B4324]/30 font-semibold"
                         : "bg-[#F9F9F8] text-[#626C65] border-[#E5E5E3] hover:text-[#121A14]"
@@ -429,14 +437,14 @@ export function ChartSettingsPopover({ chart, stats, settings = {}, onUpdateSett
           {/* sort */}
           {showSort && displayType !== "pie" && (
             <div>
-              <label className="block text-[11px] font-medium text-[#626C65] mb-1.5">
+              <label className="block type-caption font-medium mb-1.5">
                 {t("visualize.settings_sort")}
               </label>
               <div className="grid grid-cols-2 gap-1.5">
                 <button
                   type="button"
                   onClick={() => onUpdateSettings({ sort: "by_count" })}
-                  className={`py-1 px-1.5 rounded-md text-[11px] font-medium border text-center transition-colors ${
+                  className={`py-1 px-1.5 rounded-md type-label font-medium border text-center transition-colors cursor-pointer ${
                     sort === "by_count"
                       ? "bg-[#EAF2EB] text-[#1B4324] border-[#1B4324]/30 font-semibold"
                       : "bg-[#F9F9F8] text-[#626C65] border-[#E5E5E3] hover:text-[#121A14]"
@@ -447,7 +455,7 @@ export function ChartSettingsPopover({ chart, stats, settings = {}, onUpdateSett
                 <button
                   type="button"
                   onClick={() => onUpdateSettings({ sort: "by_value" })}
-                  className={`py-1 px-1.5 rounded-md text-[11px] font-medium border text-center transition-colors ${
+                  className={`py-1 px-1.5 rounded-md type-label font-medium border text-center transition-colors cursor-pointer ${
                     sort === "by_value"
                       ? "bg-[#EAF2EB] text-[#1B4324] border-[#1B4324]/30 font-semibold"
                       : "bg-[#F9F9F8] text-[#626C65] border-[#E5E5E3] hover:text-[#121A14]"
@@ -462,7 +470,7 @@ export function ChartSettingsPopover({ chart, stats, settings = {}, onUpdateSett
           {/* hide_zero */}
           {showHideZero && displayType !== "pie" && (
             <div className="pt-1">
-              <label className="flex items-center gap-2 cursor-pointer select-none text-xs text-[#2A342D]">
+              <label className="flex items-center gap-2 cursor-pointer select-none type-label text-[#2A342D]">
                 <input
                   type="checkbox"
                   checked={hideZero}
@@ -481,11 +489,110 @@ export function ChartSettingsPopover({ chart, stats, settings = {}, onUpdateSett
               onClick={() => {
                 onResetSettings();
               }}
-              className="text-[11px] text-[#626C65] hover:text-[#1B4324] hover:underline"
+              className="type-caption hover:text-[#1B4324] hover:underline cursor-pointer"
             >
               {t("visualize.settings_reset")}
             </button>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function PaletteSelector() {
+  const { t, i18n } = useTranslation();
+  const { fileSession, updateFileSession } = useFileSession();
+  const [isOpen, setIsOpen] = useState(false);
+  const popoverRef = useRef(null);
+
+  const currentLang = i18n?.language?.startsWith("en") ? "en" : "vi";
+  const activePaletteId = fileSession?.chartPalette || "datamind";
+  const activePalette = getPalette(activePaletteId);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleClickOutside = (e) => {
+      if (popoverRef.current && !popoverRef.current.contains(e.target)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [isOpen]);
+
+  const previewSwatches = (palette) => [
+    palette.primary,
+    palette.categorical[1] || palette.categorical[0],
+    palette.categorical[2] || palette.primary,
+    palette.categorical[3] || palette.primary,
+    palette.categorical[4] || palette.primary,
+  ];
+
+  return (
+    <div className="relative inline-block text-left" ref={popoverRef}>
+      <button
+        type="button"
+        onClick={() => setIsOpen((prev) => !prev)}
+        className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[#E5E5E3] bg-white hover:bg-[#F9F9F8] text-[#2A342D] text-xs font-medium transition-colors shadow-2xs cursor-pointer"
+        title={t("visualize.palette_title", "Chọn bảng màu biểu đồ")}
+      >
+        <span className="text-[#626C65] font-normal">{t("visualize.palette_label", "Bảng màu")}:</span>
+        <span className="font-semibold text-[#121A14]">
+          {activePalette.name[currentLang] || activePalette.name.vi}
+        </span>
+        <div className="flex items-center -space-x-1 ml-1">
+          {previewSwatches(activePalette).map((color, idx) => (
+            <span
+              key={idx}
+              className="w-2.5 h-2.5 rounded-full ring-1 ring-white shrink-0"
+              style={{ backgroundColor: color }}
+            />
+          ))}
+        </div>
+        <ChevronDown className="w-3.5 h-3.5 text-[#8C948D] ml-0.5" />
+      </button>
+
+      {isOpen && (
+        <div className="absolute right-0 top-full mt-1.5 w-64 bg-white border border-[#E5E5E3] rounded-xl shadow-lg z-50 p-2 space-y-1">
+          <div className="px-2 py-1 text-[11px] font-semibold text-[#626C65] uppercase tracking-wider">
+            {t("visualize.palette_title", "Bảng màu biểu đồ")}
+          </div>
+          {PALETTE_LIST.map((palette) => {
+            const isSelected = palette.id === activePaletteId;
+            const swatches = previewSwatches(palette);
+            return (
+              <button
+                key={palette.id}
+                type="button"
+                onClick={() => {
+                  updateFileSession({ chartPalette: palette.id });
+                  setIsOpen(false);
+                }}
+                className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-xs transition-colors cursor-pointer ${
+                  isSelected
+                    ? "bg-[#EAF2EB] text-[#1B4324] font-semibold"
+                    : "text-[#2A342D] hover:bg-[#F9F9F8]"
+                }`}
+              >
+                <div className="flex items-center gap-2 truncate">
+                  <span className={`w-3.5 h-3.5 flex items-center justify-center shrink-0 ${isSelected ? "text-[#1B4324]" : "text-transparent"}`}>
+                    <Check className="w-3.5 h-3.5" strokeWidth={2.5} />
+                  </span>
+                  <span className="truncate">{palette.name[currentLang] || palette.name.vi}</span>
+                </div>
+                <div className="flex items-center -space-x-1 shrink-0 ml-2">
+                  {swatches.map((color, idx) => (
+                    <span
+                      key={idx}
+                      className="w-3 h-3 rounded-full ring-1 ring-white shrink-0"
+                      style={{ backgroundColor: color }}
+                    />
+                  ))}
+                </div>
+              </button>
+            );
+          })}
         </div>
       )}
     </div>
@@ -509,6 +616,7 @@ const ChartCard = memo(({
   onResetSettings,
   aiUsage,
   onUsageUpdated,
+  selectedChartIds,
 }) => {
   const { t } = useTranslation();
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -562,7 +670,7 @@ const ChartCard = memo(({
               {isEditingTitle ? (
                 <input
                   autoFocus
-                  className="px-2 py-1 border border-[#1B4324] rounded text-sm font-semibold outline-none w-full max-w-sm"
+                  className="px-2 py-1 border border-[#1B4324] rounded type-card-title outline-none w-full max-w-sm"
                   value={localTitle}
                   onChange={e => setLocalTitle(e.target.value)}
                   onBlur={handleTitleBlur}
@@ -570,27 +678,27 @@ const ChartCard = memo(({
                 />
               ) : (
                 <div className="group/title flex items-start gap-1.5">
-                  <h3 className={`text-sm font-semibold text-[#121A14] leading-snug break-words ${isTitleExpanded ? "" : "line-clamp-2"}`}>
+                  <h3 className={`type-card-title text-[#121A14] leading-snug break-words ${isTitleExpanded ? "" : "line-clamp-2"}`}>
                     {displayTitle}
                   </h3>
                   {isLongTitle && (
                     <button
                       onClick={() => setIsTitleExpanded(!isTitleExpanded)}
-                      className="text-[11px] text-[#1B4324] hover:underline font-medium shrink-0 ml-1"
+                      className="type-caption text-[#1B4324] hover:underline font-medium shrink-0 ml-1 cursor-pointer"
                     >
                       {isTitleExpanded ? t("visualize.title_collapse") : t("visualize.title_expand")}
                     </button>
                   )}
                   <button
                     onClick={() => setIsEditingTitle(true)}
-                    className="opacity-0 group-hover/title:opacity-100 p-0.5 text-[#626C65] hover:text-[#121A14] transition-opacity shrink-0"
+                    className="opacity-0 group-hover/title:opacity-100 p-0.5 text-[#626C65] hover:text-[#121A14] transition-opacity shrink-0 cursor-pointer"
                     title={t("visualize.title_edit_tooltip")}
                   >
                     <Edit2 className="w-3.5 h-3.5" />
                   </button>
                 </div>
               )}
-              <p className="text-xs text-[#626C65] mt-1 truncate">{subtitle}</p>
+              <p className="type-caption mt-1 truncate">{subtitle}</p>
             </div>
           </div>
 
@@ -598,7 +706,7 @@ const ChartCard = memo(({
           <div className="flex items-center gap-1.5 shrink-0">
             {isSuggested && (
               <span
-                className="text-[10px] font-semibold bg-[#EAF2EB] text-[#1B4324] px-2 py-0.5 rounded-full border border-[#c8e0cb]/50 cursor-help"
+                className="text-[10px] type-number font-semibold bg-[#EAF2EB] text-[#1B4324] px-2 py-0.5 rounded-full border border-[#c8e0cb]/50 cursor-help"
                 title={suggestedReason}
               >
                 {t("visualize.badge_suggested")}
@@ -625,10 +733,10 @@ const ChartCard = memo(({
 
         {/* Chart Canvas with Lazy Render */}
         <div className="w-full my-2">
-          <LazyChart height={chart.type === "heatmap" || displayType === "pie" ? "auto" : (displayType === "bar" ? `${Math.min(600, barHeight)}px` : "260px")}>
+          <LazyChart height={chart.type === "heatmap" || displayType === "pie" || displayType === "box" ? "auto" : (displayType === "bar" ? `${Math.min(600, barHeight)}px` : "260px")}>
             <div
               className={
-                chart.type === "heatmap"
+                chart.type === "heatmap" || displayType === "box"
                   ? "w-full"
                   : displayType === "bar" && barHeight > 600
                   ? "w-full max-h-[600px] overflow-y-auto pr-1"
@@ -654,16 +762,26 @@ const ChartCard = memo(({
                 </div>
               )}
               {displayType === "box" && (
-                <div className="h-[260px]">
+                <div className="w-full">
                   <BoxPlotChart stats={stats} color={chart.color} />
                 </div>
               )}
               {chart.type === "line" && <TrendChart data={effectiveData} color={chart.color} />}
-              {chart.type === "heatmap" && <CorrelationHeatmap matrix={chart.matrix} topCorr={chart.topCorr} onCellClick={onCellClick} anchorPair={anchorPair} />}
+              {chart.type === "heatmap" && (
+                <CorrelationView
+                  chart={chart}
+                  summary={summary}
+                  sessionId={sessionId}
+                  settings={settings}
+                  onUpdateSettings={onUpdateSettings}
+                  selectedChartIds={selectedChartIds}
+                  toggleChart={toggleChart}
+                />
+              )}
             </div>
           </LazyChart>
           {isCapped200 && (
-            <p className="text-[11px] text-[#8C948D] mt-1.5 italic text-center">
+            <p className="type-caption mt-1.5 italic text-center">
               {t("visualize.capped_200_note")}
             </p>
           )}
@@ -671,7 +789,7 @@ const ChartCard = memo(({
 
         {/* Discrete scale / rating subtitle */}
         {stats?.is_discrete && (
-          <p className="text-[11px] text-[#626C65] mt-1">
+          <p className="type-caption mt-1">
             {stats.is_scale
               ? t("visualize.scale_subtitle", { min: stats.scale_min, max: stats.scale_max, n: stats.respondents })
               : t("visualize.discrete_subtitle", { n: stats.respondents })
@@ -681,7 +799,7 @@ const ChartCard = memo(({
 
         {/* Multiple choice note */}
         {stats?.dtype === "multiple_choice" && (
-          <p className="text-[11px] text-[#626C65] mt-1 italic">
+          <p className="type-caption mt-1 italic">
             {t("visualize.mc_disclaimer")}
           </p>
         )}
@@ -689,7 +807,7 @@ const ChartCard = memo(({
         {/* Auto Insights */}
         {chart.type !== "heatmap" && insights.length > 0 && (
           <div className="mt-3 pt-3 border-t border-[#E5E5E3]">
-            <p className="text-xs font-semibold text-[#1B4324] mb-1.5 flex items-center gap-1.5">
+            <p className="type-label font-semibold text-[#1B4324] mb-1.5 flex items-center gap-1.5">
               <Lightbulb className="w-3.5 h-3.5 text-[#1B4324]" /> {t("visualize.auto_insights_title")}
             </p>
             <ul className="space-y-1">
@@ -700,7 +818,7 @@ const ChartCard = memo(({
                 return (
                   <li
                     key={idx}
-                    className={`text-xs text-[#2A342D] leading-snug line-clamp-2 ${tooltip ? "cursor-help" : ""}`}
+                    className={`type-caption text-[#2A342D] leading-snug line-clamp-2 ${tooltip ? "cursor-help" : ""}`}
                     title={tooltip}
                   >
                     • {text}
@@ -741,6 +859,7 @@ const EnlargedChartModal = ({
   onResetSettings,
   aiUsage,
   onUsageUpdated,
+  selectedChartIds,
 }) => {
   const { t } = useTranslation();
   const [isReady, setIsReady] = useState(false);
@@ -796,8 +915,8 @@ const EnlargedChartModal = ({
               title={isSelected ? t("visualize.btn_added_to_report") : t("visualize.btn_add_to_report")}
             />
             <div>
-              <h2 className="text-base sm:lg font-bold text-[#121A14]">{chart.user_title || chart.title}</h2>
-              <p className="text-xs text-[#626C65] mt-0.5">{subtitle}</p>
+              <h2 className="type-section-title text-[#121A14]">{chart.user_title || chart.title}</h2>
+              <p className="type-caption mt-0.5">{subtitle}</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -857,8 +976,8 @@ const EnlargedChartModal = ({
                   </div>
                 )}
                 {displayType === "box" && (
-                  <div className="h-[360px]">
-                    <BoxPlotChart stats={stats} color={chart.color} isAnimationActive={false} debounce={100} />
+                  <div className="w-full">
+                    <BoxPlotChart stats={stats} color={chart.color} isAnimationActive={false} debounce={100} isEnlarged={true} />
                   </div>
                 )}
                 {chart.type === "line" && (
@@ -867,21 +986,29 @@ const EnlargedChartModal = ({
                   </div>
                 )}
                 {chart.type === "heatmap" && (
-                  <CorrelationHeatmap matrix={chart.matrix} topCorr={chart.topCorr} onCellClick={onCellClick} anchorPair={anchorPair} />
+                  <CorrelationView
+                    chart={chart}
+                    summary={summary}
+                    sessionId={sessionId}
+                    settings={settings}
+                    onUpdateSettings={onUpdateSettings}
+                    selectedChartIds={selectedChartIds}
+                    toggleChart={toggleChart}
+                  />
                 )}
               </>
             )}
           </div>
 
           {isCapped200 && (
-            <p className="text-xs text-[#8C948D] italic text-center">
+            <p className="type-caption italic text-center text-[#8C948D]">
               {t("visualize.capped_200_note")}
             </p>
           )}
 
           {/* Discrete scale / rating subtitle */}
           {stats?.is_discrete && (
-            <p className="text-xs text-[#626C65]">
+            <p className="type-caption">
               {stats.is_scale
                 ? t("visualize.scale_subtitle", { min: stats.scale_min, max: stats.scale_max, n: stats.respondents })
                 : t("visualize.discrete_subtitle", { n: stats.respondents })
@@ -890,14 +1017,14 @@ const EnlargedChartModal = ({
           )}
 
           {stats?.dtype === "multiple_choice" && (
-            <p className="text-xs text-[#626C65] italic">
+            <p className="type-caption italic">
               {t("visualize.mc_disclaimer")}
             </p>
           )}
 
           {chart.type !== "heatmap" && insights.length > 0 && (
             <div className="p-4 bg-[#F9F9F8] rounded-xl border border-[#E5E5E3]">
-              <p className="text-xs font-semibold text-[#1B4324] mb-2 flex items-center gap-1.5">
+              <p className="type-label font-semibold text-[#1B4324] mb-2 flex items-center gap-1.5">
                 <Lightbulb className="w-4 h-4 text-[#1B4324]" /> {t("visualize.auto_insights_title")}
               </p>
               <ul className="space-y-1.5">
@@ -908,7 +1035,7 @@ const EnlargedChartModal = ({
                   return (
                     <li
                       key={idx}
-                      className={`text-xs text-[#2A342D] ${tooltip ? "cursor-help" : ""}`}
+                      className={`type-body text-[#2A342D] ${tooltip ? "cursor-help" : ""}`}
                       title={tooltip}
                     >
                       • {text}
@@ -987,13 +1114,17 @@ const generateCharts = (summary, t) => {
     }
   });
 
-  if (summary.correlation_matrix && Object.keys(summary.correlation_matrix).length > 0) {
+  if (
+    (summary.correlation_v2 && summary.correlation_v2.columns?.length >= 2) ||
+    (summary.correlation_matrix && Object.keys(summary.correlation_matrix).length > 0)
+  ) {
     charts.correlation.push({
       id: `corr_heatmap`,
       type: "heatmap",
       title: t ? t("visualize.heatmap_title") : "Ma trận tương quan",
       matrix: summary.correlation_matrix,
       topCorr: summary.top_correlations,
+      correlation_v2: summary.correlation_v2,
       score: 1.0
     });
   }
@@ -1016,15 +1147,15 @@ function SkippedColumnsPanel({ skippedColumns = [], pipelineMode, navigate }) {
       <button
         type="button"
         onClick={() => setIsExpanded(prev => !prev)}
-        className="w-full px-5 py-3.5 flex items-center justify-between text-left hover:bg-[#F9F9F8] transition-colors"
+        className="w-full px-5 py-3.5 flex items-center justify-between text-left hover:bg-[#F9F9F8] transition-colors cursor-pointer"
       >
-        <span className="text-sm font-semibold text-[#121A14] flex items-center gap-1.5">
+        <span className="type-card-title text-[#121A14] flex items-center gap-1.5">
           {t("visualize.skipped_panel_title", { n: skippedColumns.length })}
-          <span className="text-[#626C65] text-sm font-normal">
+          <span className="type-caption font-normal">
             {isExpanded ? "▴" : "▾"}
           </span>
         </span>
-        <span className="text-xs text-[#626C65]">
+        <span className="type-caption">
           {isExpanded ? t("visualize.title_collapse") : t("visualize.title_expand")}
         </span>
       </button>
@@ -1044,7 +1175,7 @@ function SkippedColumnsPanel({ skippedColumns = [], pipelineMode, navigate }) {
                   <button
                     type="button"
                     onClick={() => navigate(pipelineMode ? "/dashboard/pipeline/profiler" : "/dashboard/profiler")}
-                    className="text-[#1B4324] hover:underline font-medium inline"
+                    className="text-[#1B4324] hover:underline font-medium inline cursor-pointer"
                   >
                     {t("visualize.skipped_free_text_link")}
                   </button>
@@ -1055,18 +1186,18 @@ function SkippedColumnsPanel({ skippedColumns = [], pipelineMode, navigate }) {
             }
 
             return (
-              <div key={idx} className="py-2.5 flex items-center justify-between gap-4 text-sm">
+              <div key={idx} className="py-2.5 flex items-center justify-between gap-4 type-body">
                 <div className="flex items-center gap-2 min-w-0">
                   {item.letter && (
-                    <span className="font-mono text-xs font-semibold px-1.5 py-0.5 bg-[#F3F4F2] text-[#2A342D] border border-[#E5E5E3] rounded">
+                    <span className="type-label type-number font-semibold px-1.5 py-0.5 bg-[#F3F4F2] text-[#2A342D] border border-[#E5E5E3] rounded">
                       {item.letter}
                     </span>
                   )}
-                  <span className="font-semibold text-[#121A14] truncate">
+                  <span className="type-body-strong text-[#121A14] truncate">
                     {item.column}
                   </span>
                 </div>
-                <div className="text-[#626C65] text-xs shrink-0 text-right">
+                <div className="type-caption shrink-0 text-right">
                   {reasonText}
                 </div>
               </div>
@@ -1089,7 +1220,11 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
   const [charts, setCharts] = useState({ distribution: [], correlation: [], time: [], other: [] });
   const [selectedChartIds, setSelectedChartIds] = useState(new Set());
   const [suggestedChartIds, setSuggestedChartIds] = useState(new Set());
-  const [customCharts, setCustomCharts] = useState([]);
+  const [customCharts, setCustomCharts] = useState(() => {
+    return (fileSession.confirmedCharts || [])
+      .filter(c => c.type === "corr_pair" || c.chart_id?.startsWith("corr_pair_"))
+      .map(c => ({ ...c, id: c.chart_id }));
+  });
   const [selectionExpanded, setSelectionExpanded] = useState(false);
   const [enlargedChart, setEnlargedChart] = useState(null);
   const [showEmptyConfirmModal, setShowEmptyConfirmModal] = useState(false);
@@ -1143,9 +1278,18 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
       ...(generated.time || [])
     ];
 
-    const strongCorrPairs = (summary?.top_correlations || []).filter(
-      tc => Math.abs(typeof tc.r === "number" ? tc.r : parseFloat(tc.r)) >= 0.5
-    );
+    const v2 = summary?.correlation_v2;
+    let strongCorrCount = 0;
+    if (v2?.pairs) {
+      const defMethod = v2.default_method || "spearman";
+      strongCorrCount = v2.pairs.filter(
+        (p) => Math.abs(p[defMethod] ?? 0) >= 0.5
+      ).length;
+    } else {
+      strongCorrCount = (summary?.top_correlations || []).filter(
+        tc => Math.abs(typeof tc.r === "number" ? tc.r : parseFloat(tc.r)) >= 0.5
+      ).length;
+    }
 
     // 1. At least one per non-empty category
     if (generated.distribution?.length > 0) {
@@ -1156,7 +1300,7 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
       if (bestDist) selected.add(bestDist.id);
     }
 
-    if (generated.correlation?.length > 0 && generated.correlation[0] && strongCorrPairs.length > 0) {
+    if (generated.correlation?.length > 0 && generated.correlation[0] && strongCorrCount > 0) {
       selected.add(generated.correlation[0].id);
     }
 
@@ -1172,7 +1316,7 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
     for (const c of all) {
       if (selected.size >= 5) break;
       if (selected.has(c.id)) continue;
-      if (c.type === "heatmap" && strongCorrPairs.length === 0) continue;
+      if (c.type === "heatmap" && strongCorrCount === 0) continue;
       const ins = summary?.columns?.[c.col]?.auto_insights;
       if (ins && ins.length > 0) {
         selected.add(c.id);
@@ -1183,7 +1327,7 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
     for (const c of all) {
       if (selected.size >= 3) break;
       if (selected.has(c.id)) continue;
-      if (c.type === "heatmap" && strongCorrPairs.length === 0) continue;
+      if (c.type === "heatmap" && strongCorrCount === 0) continue;
       selected.add(c.id);
     }
 
@@ -1234,6 +1378,12 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
 
           if (fileSession.confirmedCharts && fileSession.confirmedCharts.length > 0) {
             setSelectedChartIds(new Set(fileSession.confirmedCharts.map(c => c.chart_id)));
+            const savedPairs = fileSession.confirmedCharts
+              .filter(c => c.type === "corr_pair" || c.chart_id?.startsWith("corr_pair_"))
+              .map(c => ({ ...c, id: c.chart_id }));
+            if (savedPairs.length > 0) {
+              setCustomCharts(savedPairs);
+            }
           } else {
             const preSelected = computePreSelection(generated, summary);
             setSuggestedChartIds(preSelected);
@@ -1264,6 +1414,12 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
       setCharts(generated);
       if (fileSession.confirmedCharts && fileSession.confirmedCharts.length > 0) {
         setSelectedChartIds(new Set(fileSession.confirmedCharts.map(c => c.chart_id)));
+        const savedPairs = fileSession.confirmedCharts
+          .filter(c => c.type === "corr_pair" || c.chart_id?.startsWith("corr_pair_"))
+          .map(c => ({ ...c, id: c.chart_id }));
+        if (savedPairs.length > 0) {
+          setCustomCharts(savedPairs);
+        }
       } else {
         const preSelected = computePreSelection(generated, fileSession.statisticalSummary);
         setSuggestedChartIds(preSelected);
@@ -1428,19 +1584,37 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
 
     const allCharts = [...charts.distribution, ...charts.correlation, ...charts.time, ...charts.other, ...customCharts];
     const confirmed = allCharts
-      .filter(c => selectedChartIds.has(c.id))
+      .filter(c => selectedChartIds.has(c.id || c.chart_id))
       .map(c => {
-        const s = fileSession.chartSettings?.[c.id] || {};
+        const cid = c.id || c.chart_id;
+        const s = fileSession.chartSettings?.[cid] || c.settings || {};
+        if (c.type === "corr_pair") {
+          return {
+            chart_id: cid,
+            type: "corr_pair",
+            col_x: c.col_x,
+            col_y: c.col_y,
+            letter_x: c.letter_x,
+            letter_y: c.letter_y,
+            method: c.method,
+            r: c.r,
+            n: c.n,
+            payload: c.payload,
+            user_title: c.user_title || c.title || `[${c.letter_x}] ${c.col_x} × [${c.letter_y}] ${c.col_y}`,
+            auto_title: c.auto_title || c.title || `[${c.letter_x}] ${c.col_x} × [${c.letter_y}] ${c.col_y}`,
+            settings: s,
+          };
+        }
         const displayType = s.display_type || c.type;
         return {
-          chart_id: c.id,
+          chart_id: cid,
           user_title: c.user_title || c.title,
           auto_title: c.auto_title || c.title,
           type: c.type, // keep existing type field = base type, unchanged
           display_type: displayType,
           settings: s,
           column: c.col,
-          ai_explanation: fileSession.chartExplanations?.[c.id]?.content || null,
+          ai_explanation: fileSession.chartExplanations?.[cid]?.content || null,
         };
       });
 
@@ -1458,7 +1632,7 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
       ...(charts.time || []),
       ...customCharts
     ];
-    return all.filter(c => selectedChartIds.has(c.id));
+    return all.filter(c => selectedChartIds.has(c.id || c.chart_id));
   }, [charts, customCharts, selectedChartIds]);
 
   if (loading) {
@@ -1583,7 +1757,7 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
             subtitle={t("visualize.page_subtitle")}
             actions={
               <div className="flex items-center gap-3">
-                <span className="text-xs font-semibold px-2.5 py-1 bg-white border border-[#E5E5E3] text-[#2A342D] rounded-full shadow-sm">
+                <span className="type-label type-number font-semibold px-2.5 py-1 bg-white border border-[#E5E5E3] text-[#2A342D] rounded-full shadow-sm">
                   {t("visualize.counter_selected", { selected: selectedChartIds.size, total: totalCharts })}
                 </span>
                 <PageHelpDocs pageId="visualize" />
@@ -1647,38 +1821,44 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
             </div>
           )}
 
-          {/* Navigation Tabs */}
-          <div className="flex gap-2 border-b border-[#E5E5E3] mb-6 pb-1 overflow-x-auto">
-            {[
-              { id: "distribution", label: t("visualize.tab_distribution", { count: charts.distribution.length }) },
-              { id: "correlation", label: t("visualize.tab_correlation", { count: charts.correlation.length }) },
-              { id: "time", label: t("visualize.tab_time", { count: charts.time.length }) },
-            ].map(tab => {
-              const isSupported = !fileSession.capabilities || (
-                (tab.id === "distribution" && fileSession.capabilities.histogram) ||
-                (tab.id === "correlation" && fileSession.capabilities.correlation) ||
-                (tab.id === "time" && fileSession.capabilities.line_chart)
-              );
+          {/* Navigation Tabs & Palette Selector */}
+          <div className="flex items-center justify-between border-b border-[#E5E5E3] mb-6 pb-1 gap-3 flex-wrap">
+            <div className="flex gap-2 overflow-x-auto">
+              {[
+                { id: "distribution", label: t("visualize.tab_distribution", { count: charts.distribution.length }) },
+                { id: "correlation", label: t("visualize.tab_correlation", { count: charts.correlation.length }) },
+                { id: "time", label: t("visualize.tab_time", { count: charts.time.length }) },
+              ].map(tab => {
+                const isSupported = !fileSession.capabilities || (
+                  (tab.id === "distribution" && fileSession.capabilities.histogram) ||
+                  (tab.id === "correlation" && fileSession.capabilities.correlation) ||
+                  (tab.id === "time" && fileSession.capabilities.line_chart)
+                );
 
-              return (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`px-4 py-2 text-xs font-medium whitespace-nowrap transition-colors border-b-2 ${activeTab === tab.id
-                      ? "border-[#1B4324] text-[#1B4324] font-semibold"
-                      : "border-transparent text-[#626C65] hover:text-[#121A14]"
-                    } ${!isSupported && activeTab !== tab.id ? 'opacity-50' : ''}`}
-                >
-                  {tab.label} {!isSupported && <AlertTriangle className="w-3 h-3 inline-block ml-1" />}
-                </button>
-              );
-            })}
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`px-4 py-2 type-label whitespace-nowrap transition-colors border-b-2 cursor-pointer ${activeTab === tab.id
+                        ? "border-[#1B4324] text-[#1B4324] font-semibold"
+                        : "border-transparent text-[#626C65] hover:text-[#121A14] font-medium"
+                      } ${!isSupported && activeTab !== tab.id ? 'opacity-50' : ''}`}
+                  >
+                    {tab.label} {!isSupported && <AlertTriangle className="w-3 h-3 inline-block ml-1" />}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="pb-1">
+              <PaletteSelector />
+            </div>
           </div>
 
           {/* Chart Grid: 2 columns from lg (1024px), 1 column below; Heatmap spans full width */}
           {activeCharts.length === 0 ? (
             <div className="text-center py-16 bg-white border border-[#E5E5E3] rounded-xl">
-              <p className="text-xs text-[#626C65]">{t("visualize.tab_empty")}</p>
+              <p className="type-caption">{t("visualize.tab_empty")}</p>
             </div>
           ) : (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -1719,6 +1899,7 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
                         onResetSettings={handleResetChartSettings}
                         aiUsage={aiUsage}
                         onUsageUpdated={setAiUsage}
+                        selectedChartIds={selectedChartIds}
                       />
                     </div>
 
@@ -1745,31 +1926,6 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
               navigate={navigate}
             />
           )}
-
-          {/* Anchor Scatter Panel */}
-          {activeTab === "correlation" && anchorPair && (
-            <AnchorScatterPanel
-              colA={anchorPair.colA}
-              colB={anchorPair.colB}
-              rValue={anchorPair.r}
-              scatterData={scatterData}
-              loading={scatterLoading}
-              error={scatterError}
-              onClear={handleAnchorClear}
-              isSelected={selectedChartIds.has(`scatter_${anchorPair.colA}_${anchorPair.colB}`)}
-              onToggle={() => {
-                toggleChart(`scatter_${anchorPair.colA}_${anchorPair.colB}`, {
-                  id: `scatter_${anchorPair.colA}_${anchorPair.colB}`,
-                  type: "scatter",
-                  colA: anchorPair.colA,
-                  colB: anchorPair.colB,
-                  title: `${anchorPair.colA} × ${anchorPair.colB}`,
-                  data: scatterData,
-                  r: anchorPair.r
-                });
-              }}
-            />
-          )}
         </div>
       </div>
 
@@ -1789,6 +1945,7 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
         onResetSettings={handleResetChartSettings}
         aiUsage={aiUsage}
         onUsageUpdated={setAiUsage}
+        selectedChartIds={selectedChartIds}
       />
 
       {/* Confirmation warning modal for 0 charts selected */}
@@ -1841,14 +1998,17 @@ export default function Visualize({ pipelineMode, onComplete, onError }) {
               <p className="text-xs text-[#626C65]/70 py-2">{t("visualize.selected_panel_empty")}</p>
             ) : (
               <div className="flex flex-wrap gap-2 max-h-36 overflow-y-auto">
-                {selectedCharts.map(c => (
-                  <div key={`sel_${c.id}`} className="bg-[#F3F4F2] border border-[#E5E5E3] rounded-lg px-2.5 py-1.5 flex items-center gap-2 text-xs text-[#121A14]">
-                    <span className="truncate max-w-[180px] font-medium">{c.user_title || c.title}</span>
-                    <button onClick={() => toggleChart(c.id)} className="text-[#626C65] hover:text-[#9F2F2D] shrink-0 transition-colors">
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                ))}
+                {selectedCharts.map(c => {
+                  const cid = c.id || c.chart_id;
+                  return (
+                    <div key={`sel_${cid}`} className="bg-[#F3F4F2] border border-[#E5E5E3] rounded-lg px-2.5 py-1.5 flex items-center gap-2 text-xs text-[#121A14]">
+                      <span className="truncate max-w-[180px] font-medium">{c.user_title || c.title}</span>
+                      <button onClick={() => toggleChart(cid)} className="text-[#626C65] hover:text-[#9F2F2D] shrink-0 transition-colors">
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>

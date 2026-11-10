@@ -1,4 +1,5 @@
 import { useEffect, useRef, useId } from "react";
+import { useTranslation } from "react-i18next";
 
 /**
  * Nút đăng nhập bằng Google, dùng Google Identity Services (script đã
@@ -7,6 +8,7 @@ import { useEffect, useRef, useId } from "react";
  * với token đó để cha component gửi lên backend (`/auth/google`).
  */
 export default function GoogleSignInButton({ onCredential, onError, text = "continue_with" }) {
+  const { t } = useTranslation();
   const buttonRef = useRef(null);
   const reactId = useId();
 
@@ -29,7 +31,7 @@ export default function GoogleSignInButton({ onCredential, onError, text = "cont
           if (response?.credential) {
             onCredential?.(response.credential);
           } else {
-            onError?.(new Error("Không nhận được thông tin xác thực từ Google."));
+            onError?.(new Error(t("auth.google_auth_failed", "Không nhận được thông tin xác thực từ Google.")));
           }
         },
       });
