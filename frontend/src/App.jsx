@@ -25,6 +25,7 @@ import Report from "./pages/Report";
 import Docs from "./pages/Docs";
 import Pipeline from "./pages/Pipeline";
 import Settings from "./pages/Settings";
+import LiveStats from "./pages/LiveStats";
 
 import Navbar from "./components/Navbar";
 import Sidebar from "./components/Sidebar";
@@ -129,6 +130,7 @@ function AppRoutes() {
         <Route path="/login" element={<GuestOnly><Login /></GuestOnly>} />
         <Route path="/register" element={<GuestOnly><Register /></GuestOnly>} />
         <Route path="/pricing" element={<Pricing />} />
+        <Route path="/live-stats" element={<LiveStats />} />
         <Route path="/docs" element={<Docs />} />
         <Route path="/docs/:module" element={<Docs />} />
         <Route path="/docs/:module/:topic" element={<Docs />} />

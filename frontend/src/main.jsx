@@ -7,10 +7,12 @@ import "./index.css";
 import { ToastProvider } from "./contexts/ToastContext";
 import { initAnalytics } from "./lib/analytics";
 import { checkSessionOnStartup } from "./utils/sessionManager";
+import { captureUtmFromUrl } from "./utils/utm";
 
-// Proactively check JWT expiry before app mounting
+// Proactively check JWT expiry and capture UTM before app mounting
 checkSessionOnStartup();
 initAnalytics();
+captureUtmFromUrl();
 ReactDOM.createRoot(
     document.getElementById("root")
 ).render(

@@ -1,9 +1,11 @@
 // src/services/authService.js
 import axiosClient from "./axiosClient"; // Tên mới giúp không bị nhầm lẫn
+import { getStoredUtm } from "../utils/utm";
 
 export const register = async (data) => {
     // Tự động nối vào VITE_API_URL thành: /api/v1/auth/register
-    const response = await axiosClient.post("/auth/register", data);
+    const utm = getStoredUtm();
+    const response = await axiosClient.post("/auth/register", { ...utm, ...data });
     return response.data;
 };
 
@@ -13,7 +15,8 @@ export const login = async (data) => {
 };
 
 export const loginWithGoogle = async (credential) => {
-    const response = await axiosClient.post("/auth/google", { credential });
+    const utm = getStoredUtm();
+    const response = await axiosClient.post("/auth/google", { credential, ...utm });
     return response.data;
 };
 

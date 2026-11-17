@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../contexts/AuthContext";
-import { User, Settings, LogOut, LayoutDashboard, Sparkles, ChevronDown, Menu, X, Crown } from "lucide-react";
+import { User, Settings, LogOut, LayoutDashboard, Sparkles, ChevronDown, Menu, X, Crown, BarChart2 } from "lucide-react";
 import UpgradeModal from "./UpgradeModal";
 import LanguageSelect from "./LanguageSelect";
 
@@ -19,6 +19,7 @@ export default function Navbar() {
     const navLinks = [
         { label: t("navbar.home", "Trang chủ"), path: "/" },
         { label: t("navbar.pricing", "Giá cả"), path: "/pricing" },
+        { label: t("navbar.live_stats", "Số liệu"), path: "/live-stats" },
         { label: t("navbar.docs", "Tài liệu"), path: "/docs" },
     ];
 
@@ -143,6 +144,12 @@ export default function Navbar() {
                                             className="w-full text-left px-3 py-2 text-sm text-ink hover:bg-sage/40 transition-colors flex items-center gap-2 font-medium rounded-md cursor-pointer"
                                         >
                                             <Settings className="w-4 h-4 text-muted" /> {t("navbar.menu_settings", "Cài đặt")}
+                                        </button>
+                                        <button
+                                            onClick={() => { setShowMenu(false); navigate("/live-stats"); }}
+                                            className="w-full text-left px-3 py-2 text-sm text-ink hover:bg-sage/40 transition-colors flex items-center gap-2 font-medium rounded-md cursor-pointer"
+                                        >
+                                            <BarChart2 className="w-4 h-4 text-muted" /> {t("navbar.live_stats", "Số liệu")}
                                         </button>
                                         <button
                                             onClick={() => {
