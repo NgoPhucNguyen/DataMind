@@ -495,3 +495,38 @@ def get_report_intro(user_id: int, file_hash: str, lang: str) -> dict[str, Any] 
         logger.warning("Redis GET report_intro lỗi: %s", e)
         return None
 
+
+# --- Generic JSON Cache with TTL ---
+
+def get_cached_json(key: str) -> Any | None:
+    """
+    Lấy dữ liệu JSON từ cache theo key tùy ý.
+    Trả về dict/list hoặc None nếu cache miss/lỗi Redis.
+    """
+    client = _get_client()
+    if client is None:
+        return None
+    try:
+        raw = client.get(key)
+        if raw is None:
+            return None
+        return json.loads(raw) if isinstance(raw, str) else json.loads(raw.decode())
+    except Exception as e:
+        logger.warning("Redis GET %s lỗi: %s", key, e)
+        return None
+
+
+def set_cached_json(key: str, data: Any, ttl: int = 30) -> None:
+    """
+    Lưu dữ liệu JSON vào cache theo key tùy ý với TTL (giây).
+    Nếu Redis lỗi -> bỏ qua, không crash.
+    """
+    client = _get_client()
+    if client is None:
+        return
+    try:
+        client.set(key, json.dumps(data), ex=ttl)
+    except Exception as e:
+        logger.warning("Redis SET %s lỗi: %s", key, e)
+
+

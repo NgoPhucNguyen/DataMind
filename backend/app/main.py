@@ -17,6 +17,7 @@ from app.routers import visualize as visualize_router
 from app.routers import report as report_router
 from app.routers import payments as payments_router
 from app.routers import meta as meta_router
+from app.routers import public_stats as public_stats_router
 
 
 @asynccontextmanager
@@ -78,6 +79,7 @@ app.include_router(visualize_router.router, prefix="/api/v1")
 app.include_router(report_router.router, prefix="/api/v1")
 app.include_router(payments_router.router, prefix="/api/v1")
 app.include_router(meta_router.router, prefix="/api/v1")
+app.include_router(public_stats_router.router, prefix="/api/v1")
 
 from app.core.dependencies import get_current_user
 from app.core.database import get_db

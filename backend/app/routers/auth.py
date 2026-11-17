@@ -55,6 +55,9 @@ def register(request: Request, body: RegisterRequest, db: Session = Depends(get_
         full_name=body.full_name,
         email=body.email,
         password=hash_password(body.password),
+        utm_source=body.utm_source,
+        utm_medium=body.utm_medium,
+        utm_campaign=body.utm_campaign,
     )
 
     db.add(new_user)
@@ -120,8 +123,16 @@ def login_with_google(request: Request, body: GoogleLoginRequest, db: Session = 
         else:
             # Tạo user mới
             is_new_user = True
-            user = User(full_name=full_name, email=email, password=None,
-                        google_id=google_id, avatar_url=avatar_url)
+            user = User(
+                full_name=full_name,
+                email=email,
+                password=None,
+                google_id=google_id,
+                avatar_url=avatar_url,
+                utm_source=body.utm_source,
+                utm_medium=body.utm_medium,
+                utm_campaign=body.utm_campaign,
+            )
             db.add(user)
             db.commit()
             db.refresh(user)

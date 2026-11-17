@@ -1,4 +1,5 @@
 import re
+from typing import Optional
 from pydantic import BaseModel, EmailStr, field_validator
 
 
@@ -9,6 +10,17 @@ class RegisterRequest(BaseModel):
     full_name: str
     email: EmailStr
     password: str
+    utm_source: Optional[str] = None
+    utm_medium: Optional[str] = None
+    utm_campaign: Optional[str] = None
+
+    @field_validator("utm_source", "utm_medium", "utm_campaign", mode="before")
+    @classmethod
+    def clean_utm(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        v = str(v).strip()
+        return v[:100] if v else None
 
     @field_validator("email")
     @classmethod
@@ -33,7 +45,19 @@ class RegisterRequest(BaseModel):
        return v
 
 class GoogleLoginRequest(BaseModel):
-    credential: str 
+    credential: str
+    utm_source: Optional[str] = None
+    utm_medium: Optional[str] = None
+    utm_campaign: Optional[str] = None
+
+    @field_validator("utm_source", "utm_medium", "utm_campaign", mode="before")
+    @classmethod
+    def clean_utm(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        v = str(v).strip()
+        return v[:100] if v else None
+
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str

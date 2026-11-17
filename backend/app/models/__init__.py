@@ -37,6 +37,10 @@ class User(Base):
     ai_insights_enabled = Column(Boolean, default=False, nullable=False)
     tier = Column(String, default="free", server_default="free", nullable=False)
 
+    utm_source = Column(String(100), nullable=True)
+    utm_medium = Column(String(100), nullable=True)
+    utm_campaign = Column(String(100), nullable=True)
+
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
